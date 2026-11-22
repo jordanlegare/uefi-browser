@@ -6,9 +6,9 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use core::ffi::{CStr, c_char};
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 use core::cell::UnsafeCell;
+use core::ffi::{CStr, c_char};
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 use core::hint::spin_loop;
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
@@ -141,8 +141,8 @@ fn tls_debug_report() -> String {
 
     let mut report = format!("TLS diagnostic tail: {} recent Mbed TLS messages", count);
     for entry in snapshot.iter().take(count) {
-        let source = core::str::from_utf8(&entry.source[..entry.source_len as usize])
-            .unwrap_or("?");
+        let source =
+            core::str::from_utf8(&entry.source[..entry.source_len as usize]).unwrap_or("?");
         let message = core::str::from_utf8(&entry.message[..entry.message_len as usize])
             .unwrap_or("<non-UTF-8>");
         report.push_str(&format!(
