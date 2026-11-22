@@ -24,6 +24,8 @@
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_NO_STD_FUNCTIONS
 #define MBEDTLS_PLATFORM_MEMORY
+#define MBEDTLS_PLATFORM_SNPRINTF_MACRO uefi_mbedtls_snprintf
+#define MBEDTLS_PLATFORM_VSNPRINTF_MACRO uefi_mbedtls_vsnprintf
 
 /* X.509 validity checks use the clock configured by TF-PSA-Crypto. */
 #define MBEDTLS_HAVE_TIME
