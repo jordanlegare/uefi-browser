@@ -195,4 +195,3 @@ unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
         _ => -1,
     }
 }
-
