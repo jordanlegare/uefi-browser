@@ -105,7 +105,14 @@ mod tests {
     fn rejects_daylight_adjusted_local_time() {
         assert_eq!(
             time_to_unix_utc(&firmware_time(
-                2026, 7, 1, 12, 0, 0, Some(-300), Daylight::IN_DAYLIGHT
+                2026,
+                7,
+                1,
+                12,
+                0,
+                0,
+                Some(-300),
+                Daylight::IN_DAYLIGHT
             )),
             None
         );
@@ -118,7 +125,16 @@ mod tests {
             None
         );
         assert_eq!(
-            time_to_unix_utc(&firmware_time(2001, 1, 1, 0, 0, 0, Some(0), Daylight::empty())),
+            time_to_unix_utc(&firmware_time(
+                2001,
+                1,
+                1,
+                0,
+                0,
+                0,
+                Some(0),
+                Daylight::empty()
+            )),
             None
         );
     }
