@@ -51,7 +51,12 @@ unsafe extern "C" {
         output: *mut *mut RawTlsSession,
     ) -> c_int;
     fn uefi_mbedtls_client_free(session: *mut RawTlsSession);
-    fn uefi_mbedtls_handshake(session: *mut RawTlsSession) -> c_int;
+    fn uefi_mbedtls_handshake_state(session: *mut RawTlsSession) -> c_int;
+    fn uefi_mbedtls_handshake_step(
+        session: *mut RawTlsSession,
+        complete: *mut c_int,
+        state: *mut c_int,
+    ) -> c_int;
     fn uefi_mbedtls_read(session: *mut RawTlsSession, output: *mut u8, capacity: usize) -> c_int;
     fn uefi_mbedtls_write(session: *mut RawTlsSession, input: *const u8, length: usize) -> c_int;
     fn uefi_mbedtls_verify_result(session: *mut RawTlsSession) -> u32;
@@ -117,11 +122,47 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
     }
 
     pub fn handshake(&mut self) -> Result<(), TlsError> {
-        let result = unsafe { uefi_mbedtls_handshake(self.raw) };
-        if result != 0 {
-            return Err(TlsError::Handshake(result));
+        const MAX_HANDSHAKE_STEPS: usize = 64;
+
+        // Start the RAM-only trace before entering the first Mbed TLS step.
+        tls_log(11, 0);
+        let mut state = unsafe { uefi_mbedtls_handshake_state(self.raw) };
+        let mut completed = false;
+
+        for step in 0..MAX_HANDSHAKE_STEPS {
+            tls_log(54, state);
+            tls_log(50, step as i32);
+
+            let mut complete = 0;
+            let mut next_state = state;
+            let result = unsafe {
+                uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut next_state)
+            };
+
+            state = next_state;
+            tls_log(51, state);
+
+            if result != 0 {
+                tls_log(52, result);
+                tls_log(12, result);
+                return Err(TlsError::Handshake(result));
+            }
+
+            if complete != 0 {
+                completed = true;
+                break;
+            }
         }
 
+        if !completed {
+            // Defensive guard against an unexpected state machine that makes
+            // no terminal progress. Do not spin indefinitely in firmware.
+            tls_log(52, -1);
+            tls_log(12, -1);
+            return Err(TlsError::Handshake(-1));
+        }
+
+        tls_log(12, 0);
         let verification = unsafe { uefi_mbedtls_verify_result(self.raw) };
         if verification != 0 {
             return Err(TlsError::CertificateVerification(verification));

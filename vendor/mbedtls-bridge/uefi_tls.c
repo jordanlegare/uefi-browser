@@ -155,21 +155,26 @@ fail:
     return ret;
 }
 
-int uefi_mbedtls_handshake(uefi_tls_session *session) {
+int uefi_mbedtls_handshake_state(uefi_tls_session *session) {
     if (!session) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
-    /*
-     * The UEFI BIO callbacks are deliberately blocking: the SNP/smoltcp
-     * stream polls packets and returns only after data, EOF, or its bounded
-     * I/O timeout. Retrying WANT_READ/WANT_WRITE here would therefore spin
-     * forever if a callback ever returned a non-progress status. Let the
-     * Rust caller receive the exact Mbed TLS status instead of hanging in C.
-     */
-    uefi_browser_tls_log(11, 0);
-    int ret = mbedtls_ssl_handshake(&session->ssl);
-    uefi_browser_tls_log(12, ret);
-    if (ret != 0) return ret;
-    return mbedtls_ssl_get_verify_result(&session->ssl) == 0
-        ? 0 : MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;
+    return (int) session->ssl.MBEDTLS_PRIVATE(state);
+}
+
+/*
+ * Execute exactly one Mbed TLS handshake state-machine step. Returning to
+ * Rust between steps lets the firmware print the RAM-buffered debug tail
+ * without invoking UEFI console services from inside Mbed TLS callbacks.
+ */
+int uefi_mbedtls_handshake_step(uefi_tls_session *session,
+                                int *complete, int *state) {
+    if (!session || !complete || !state) {
+        return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+    }
+
+    int ret = mbedtls_ssl_handshake_step(&session->ssl);
+    *complete = mbedtls_ssl_is_handshake_over(&session->ssl);
+    *state = (int) session->ssl.MBEDTLS_PRIVATE(state);
+    return ret;
 }
 
 int uefi_mbedtls_read(uefi_tls_session *session, unsigned char *output, size_t capacity) {
