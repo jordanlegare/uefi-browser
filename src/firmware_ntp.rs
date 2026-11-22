@@ -12,7 +12,6 @@ use crate::dns::UdpDnsTransport;
 use crate::dns::resolve_a;
 use crate::firmware_rng::UefiRandom;
 use crate::uefi_udp4::UefiUdp4Transport;
-use crate::dns::UdpDnsTransport;
 
 const NTP_HOST: &str = "time.cloudflare.com";
 const NTP_PORT: u16 = 123;
