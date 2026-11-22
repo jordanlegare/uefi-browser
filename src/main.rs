@@ -206,6 +206,8 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         37 => "TLS Rust: stream receive returned",
         40 => "TLS X.509: peer certificate chain depth",
         41 => "TLS X.509: verification flags (unchanged)",
+        42 => "TLS C: Mbed TLS debug callback entered",
+        43 => "TLS C: Mbed TLS debug callback returned",
         _ => "TLS diagnostic",
     };
     if let Some(elapsed) = tls_handshake_elapsed_seconds() {
