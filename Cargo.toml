@@ -14,9 +14,11 @@ name = "uefi-browser"
 path = "src/main.rs"
 
 [dependencies]
+hickory-proto = { version = "0.26.3", default-features = false }
+
+[target.'cfg(target_os = "uefi")'.dependencies]
 uefi = { version = "0.41.0", default-features = false, features = ["alloc", "global_allocator", "panic_handler"] }
 uefi-raw = "0.17.0"
-hickory-proto = { version = "0.26.3", default-features = false }
 
 [profile.release]
 codegen-units = 1
