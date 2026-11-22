@@ -5,6 +5,7 @@ extern crate alloc;
 pub mod dns;
 pub mod document;
 pub mod entropy;
+pub mod http;
 pub mod network;
 pub mod tls;
 pub mod url;
