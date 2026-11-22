@@ -66,7 +66,9 @@ pub enum HttpError {
     InvalidChunkTerminator,
     IncompleteBody,
     BodyTooLarge,
-    TransportError,
+    SendError,
+    ReceiveError,
+    NoFinalResponse,
 }
 
 /// Construct a minimal HTTP/1.1 GET request.
@@ -98,9 +100,9 @@ pub fn exchange_get<S: TlsStreamIo>(
     while sent < request.len() {
         let count = stream
             .send(&request[sent..])
-            .map_err(|_| HttpError::TransportError)?;
+            .map_err(|_| HttpError::SendError)?;
         if count == 0 || count > request.len() - sent {
-            return Err(HttpError::TransportError);
+            return Err(HttpError::SendError);
         }
         sent += count;
     }
@@ -115,7 +117,7 @@ pub fn exchange_get<S: TlsStreamIo>(
     loop {
         let count = stream
             .receive(&mut buffer)
-            .map_err(|_| HttpError::TransportError)?;
+            .map_err(|_| HttpError::ReceiveError)?;
         if count == 0 {
             break;
         }
@@ -151,6 +153,21 @@ fn response_is_complete(input: &[u8], max_body: usize) -> Result<bool, HttpError
 
     let headers =
         core::str::from_utf8(&input[..header_end]).map_err(|_| HttpError::InvalidHeader)?;
+    let status_line = headers
+        .split("\r\n")
+        .next()
+        .ok_or(HttpError::InvalidStatusLine)?;
+    let (_, status, _) = parse_status_line(status_line)?;
+    if (100..200).contains(&status) && status != 101 {
+        let next = header_end
+            .checked_add(4)
+            .ok_or(HttpError::NoFinalResponse)?;
+        if next >= input.len() {
+            return Ok(false);
+        }
+        return response_is_complete(&input[next..], max_body);
+    }
+
     let mut content_length = None;
     let mut chunked = false;
     for line in headers.split("\r\n").skip(1) {
@@ -203,6 +220,7 @@ fn host_header(url: &Url) -> String {
 /// max_body bounds the decoded body. For close-delimited responses, input must
 /// represent all bytes read up to EOF. Bytes after Content-Length are ignored.
 pub fn parse_response(input: &[u8], max_body: usize) -> Result<HttpResponse, HttpError> {
+    let input = skip_informational_responses(input)?;
     let header_end = find_bytes(input, b"\r\n\r\n").ok_or_else(|| {
         if input.len() > HEADER_LIMIT {
             HttpError::HeaderTooLarge
@@ -265,6 +283,35 @@ pub fn parse_response(input: &[u8], max_body: usize) -> Result<HttpResponse, Htt
         headers,
         body,
     })
+}
+
+/// Skip informational responses (for example 100 Continue and 103 Early Hints)
+/// so the parser returns the final response to the original request.
+fn skip_informational_responses(mut input: &[u8]) -> Result<&[u8], HttpError> {
+    loop {
+        let header_end =
+            find_bytes(input, b"\r\n\r\n").ok_or(HttpError::MissingHeaderTerminator)?;
+        if header_end > HEADER_LIMIT {
+            return Err(HttpError::HeaderTooLarge);
+        }
+        let headers =
+            core::str::from_utf8(&input[..header_end]).map_err(|_| HttpError::InvalidHeader)?;
+        let status_line = headers
+            .split("\r\n")
+            .next()
+            .ok_or(HttpError::InvalidStatusLine)?;
+        let (_, status, _) = parse_status_line(status_line)?;
+        if !(100..200).contains(&status) || status == 101 {
+            return Ok(input);
+        }
+        let next = header_end
+            .checked_add(4)
+            .ok_or(HttpError::NoFinalResponse)?;
+        if next >= input.len() {
+            return Err(HttpError::NoFinalResponse);
+        }
+        input = &input[next..];
+    }
 }
 
 fn parse_status_line(line: &str) -> Result<(String, u16, String), HttpError> {
@@ -422,6 +469,21 @@ mod tests {
         let response =
             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
         assert!(response_is_complete(response, 1024).unwrap());
+    }
+
+    #[test]
+    fn skips_early_hints_and_returns_the_final_http_response() {
+        let response = b"HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Type: text/plain\r\n\r\nhello";
+        assert!(response_is_complete(response, 1024).unwrap());
+        let parsed = parse_response(response, 1024).unwrap();
+        assert_eq!(parsed.status, 200);
+        assert_eq!(parsed.body, b"hello");
+    }
+
+    #[test]
+    fn an_interim_response_alone_is_not_a_complete_page() {
+        let response = b"HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n";
+        assert!(!response_is_complete(response, 1024).unwrap());
     }
 
     #[test]

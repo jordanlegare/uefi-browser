@@ -109,32 +109,46 @@ fn main() -> Status {
     uefi::println!("Type 'help' for commands, or Ctrl+C to return to firmware.");
     uefi::println!("");
 
-    let Some(address) = read_line("Open address: ", network) else {
-        return Status::SUCCESS;
-    };
-
-    let first_url = match Url::parse(&address) {
-        Ok(url) => url,
-        Err(error) => {
-            uefi::println!("Invalid address: {error}");
+    let mut first_url = loop {
+        let Some(address) = read_line("Open address: ", network) else {
             return Status::SUCCESS;
+        };
+        match Url::parse(&address) {
+            Ok(url) => break url,
+            Err(error) => uefi::println!("Invalid address: {error}. Enter another URL."),
         }
     };
 
     let mut history = Vec::new();
-    history.push(first_url);
-    let mut history_index = 0usize;
-
-    let mut page = match fetch_document(&history[history_index], network) {
-        Ok(page) => page,
-        Err(error) => {
-            uefi::println!("Navigation failed: {error}");
-            return Status::SUCCESS;
+    let (mut page, mut history_index) = loop {
+        match fetch_document(&first_url, network) {
+            Ok(page) => {
+                history.push(first_url.clone());
+                break (page, 0usize);
+            }
+            Err(error) => {
+                uefi::println!("");
+                uefi::println!("NAVIGATION FAILED: {error}");
+                uefi::println!("The browser is staying open. Press ENTER to retry,");
+                uefi::println!("enter another URL, or type 'quit' to return to firmware.");
+                let Some(retry) = read_line("Retry URL: ", network) else {
+                    return Status::SUCCESS;
+                };
+                match retry.trim() {
+                    "" | "retry" => {}
+                    "q" | "quit" | "exit" => return Status::SUCCESS,
+                    value => match Url::parse(value) {
+                        Ok(url) => first_url = url,
+                        Err(error) => uefi::println!("Invalid address: {error}"),
+                    },
+                }
+            }
         }
     };
+    let mut navigation_error: Option<String> = None;
 
     loop {
-        render_page(&page);
+        render_page(&page, navigation_error.as_deref());
         let prompt = format!("\n{} > ", page.url.as_string());
         let Some(command) = read_line(&prompt, network) else {
             break;
@@ -156,7 +170,6 @@ fn main() -> Status {
             continue;
         }
         if command == "clear" {
-            render_page(&page);
             continue;
         }
         if let Some(query) = command.strip_prefix("search ") {
@@ -229,9 +242,10 @@ fn main() -> Status {
                     history_index = history.len() - 1;
                 }
                 page = next_page;
+                navigation_error = None;
             }
             Err(error) => {
-                uefi::println!("Navigation failed: {error}");
+                navigation_error = Some(error);
             }
         }
     }
@@ -365,7 +379,7 @@ fn fetch_response(
     }
 }
 
-fn render_page(page: &BrowserPage) {
+fn render_page(page: &BrowserPage, navigation_error: Option<&str>) {
     clear_screen();
     uefi::println!("+--------------------------------------------------------------------------+");
     uefi::println!("| UEFI BROWSER                                                             |");
@@ -374,6 +388,13 @@ fn render_page(page: &BrowserPage) {
     uefi::println!("URL:    {}", page.url.as_string());
     uefi::println!("HTTP:   {}", page.status);
     uefi::println!("--------------------------------------------------------------------------");
+    if let Some(error) = navigation_error {
+        uefi::println!("NAVIGATION ERROR: {error}");
+        uefi::println!("Previous page remains available. Enter a new URL or 'reload'.");
+        uefi::println!(
+            "--------------------------------------------------------------------------"
+        );
+    }
     uefi::println!("{}", page.text);
     if !page.links.is_empty() {
         uefi::println!("");
