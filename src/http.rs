@@ -102,7 +102,7 @@ pub fn exchange_get<S: TlsStreamIo>(
             .send(&request[sent..])
             .map_err(|_| HttpError::SendError)?;
         if count == 0 || count > request.len() - sent {
-            return Err(HttpError::TransportError);
+            return Err(HttpError::SendError);
         }
         sent += count;
     }
