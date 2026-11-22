@@ -127,23 +127,30 @@ fn tls_debug_record(level: i32, source: &[u8], line: i32, message: &[u8]) {
 }
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-fn tls_debug_dump() {
+fn tls_debug_report() -> String {
+    let mut snapshot = [TlsDebugEntry::EMPTY; TLS_DEBUG_CAPACITY];
     tls_debug_lock();
     let next = TLS_DEBUG_RING.next.load(Ordering::Relaxed);
     let count = next.min(TLS_DEBUG_CAPACITY);
-    uefi::println!("TLS diagnostic tail: {} recent Mbed TLS messages", count);
-
     let entries = unsafe { &*TLS_DEBUG_RING.entries.get() };
     let first = next.saturating_sub(count);
-    for sequence in first..next {
-        let entry = entries[sequence % TLS_DEBUG_CAPACITY];
+    for (offset, sequence) in (first..next).enumerate() {
+        snapshot[offset] = entries[sequence % TLS_DEBUG_CAPACITY];
+    }
+    tls_debug_unlock();
+
+    let mut report = format!("TLS diagnostic tail: {} recent Mbed TLS messages", count);
+    for entry in snapshot.iter().take(count) {
         let source = core::str::from_utf8(&entry.source[..entry.source_len as usize])
             .unwrap_or("?");
         let message = core::str::from_utf8(&entry.message[..entry.message_len as usize])
             .unwrap_or("<non-UTF-8>");
-        uefi::println!("  L{} {}:{} {}", entry.level, source, entry.line, message);
+        report.push_str(&format!(
+            "\\n  L{} {}:{} {}",
+            entry.level, source, entry.line, message
+        ));
     }
-    tls_debug_unlock();
+    report
 }
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
@@ -233,15 +240,14 @@ struct BrowserPage {
 fn main() -> Status {
     helpers::init().unwrap();
 
-    // UEFI arms a five-minute watchdog before launching a boot option.
-    // This is an interactive browser that intentionally remains in Boot
-    // Services, so disable that boot-manager watchdog rather than letting
-    // firmware reset the machine while the user is browsing.
-    if let Err(error) = uefi::boot::set_watchdog_timer(0, 0x1_0000, None) {
-        uefi::println!("Warning: unable to disable UEFI boot watchdog: {:?}", error);
-    }
-
     clear_screen();
+
+    // UEFI arms a five-minute watchdog before launching a boot option.
+    // This interactive browser intentionally remains in Boot Services.
+    match uefi::boot::set_watchdog_timer(0, 0x1_0000, None) {
+        Ok(()) => uefi::println!("UEFI boot watchdog disabled for interactive session."),
+        Err(error) => uefi::println!("Warning: unable to disable UEFI boot watchdog: {:?}", error),
+    }
 
     uefi::println!("+--------------------------------------------------------------+");
     uefi::println!("|                         UEFI BROWSER                         |");
@@ -593,12 +599,12 @@ fn fetch_response(
                 uefi::println!("TLS session initialized; beginning handshake.");
                 tls_debug_reset();
                 if let Err(error) = tls.handshake() {
-                    // Keep diagnostics in RAM during the handshake and print
-                    // the tail only on failure, so useful lines remain
-                    // visible on firmware consoles without scrollback.
-                    tls_debug_dump();
+                    // Attach the RAM-buffered tail to the navigation error.
+                    // The browser redraws its page after navigation attempts,
+                    // so embedding it here preserves the report on screen.
+                    let diagnostics = tls_debug_report();
                     return Err(format!(
-                        "TLS handshake / certificate verification failed: {error:?}"
+                        "TLS handshake / certificate verification failed: {error:?}\\n{diagnostics}"
                     ));
                 }
                 uefi::println!("TLS verified. Sending HTTPS request...");
