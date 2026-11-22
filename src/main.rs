@@ -54,6 +54,15 @@ fn main() -> Status {
                 Err(error) => uefi::println!("NTP synchronization failed: {}", error),
             }
         }
+        Err(uefi_browser::firmware_network::NetworkInitError::NoSimpleNetwork) => {
+            uefi::println!("Network unavailable: no EFI Simple Network adapter/driver was found.");
+            uefi::println!("Check firmware NIC support and enable the UEFI network driver.");
+        }
+        Err(uefi_browser::firmware_network::NetworkInitError::NoIp4Config2) => {
+            uefi::println!("Network unavailable: no EFI IPv4 Config2 stack was exposed.");
+            uefi::println!("UEFI NIC drivers were asked to connect, but no IPv4 stack appeared.");
+            uefi::println!("Enable/load the firmware IPv4 network stack; SNP alone is not enough.");
+        }
         Err(error) => uefi::println!("Network initialization failed: {:?}", error),
     }
     uefi::println!("");
