@@ -254,7 +254,7 @@ dist/EFI/BOOT/BOOTX64.EFI
 
 build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UEFI_MBEDTLS_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
 
-**Verification record (22 November 2026):** GitHub Actions run [#44998678202](https://github.com/jordanlegare/uefi-browser/actions/runs/44998678202) passed both jobs on commit `5fe2cbc39c55d83032c358993dca74b8eb49008c`. The full-build job compiled Mbed TLS 4.3.0 and the UEFI bridge, linked the standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998678202/artifacts/14744857088); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `c02ec159295384d395f20966a2d1023c753d83ceefbb592554bbaaec8c3605d1` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
+**Verification record (22 November 2026):** GitHub Actions run [#44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870) passed both jobs on commit `b5c4107b6cb75e47202d7515d0613413b8fbec9e`. The full-build job compiled Mbed TLS 4.3.0 and the UEFI bridge, linked the standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `553d4c7c5757a921adf53fcddf55bf9f6cb45a15e6618dfc63352ce0fe45d0cb` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
 
 ## Firmware adapter details
 
@@ -290,12 +290,12 @@ The custom Mbed TLS platform configuration also routes time/gmtime operations th
 
 The current CI artifact is the removable-media EFI application. The GitHub artifact expires on 20 February 2027.
 
-- Workflow: [run #44998678202](https://github.com/jordanlegare/uefi-browser/actions/runs/44998678202)
-- Artifact: [uefi-browser-x86_64.zip](https://github.com/jordanlegare/uefi-browser/actions/runs/44998678202/artifacts/14744857088)
+- Workflow: [run #44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870)
+- Artifact: [uefi-browser-x86_64.zip](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086)
 - Image path inside the ZIP: `dist/EFI/BOOT/BOOTX64.EFI`
 - Image format: PE32+, x86-64, EFI application subsystem
 - Image size: 1,382,400 bytes
-- SHA-256: `c02ec159295384d395f20966a2d1023c753d83ceefbb592554bbaaec8c3605d1`
+- SHA-256: `553d4c7c5757a921adf53fcddf55bf9f6cb45a15e6618dfc63352ce0fe45d0cb`
 
 The artifact is not Secure Boot signed. A Secure Boot deployment must sign it with a key trusted by the target firmware. The image has not been boot-tested under OVMF or on physical hardware.
 
