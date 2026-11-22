@@ -254,6 +254,19 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             | 115
             | 116
             | 117
+            | 120
+            | 121
+            | 122
+            | 123
+            | 124
+            | 125
+            | 126
+            | 127
+            | 128
+            | 129
+            | 130
+            | 131
+            | 132
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
@@ -399,6 +412,19 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             115 => format!("ECDSA: u2 multiplication returned (result={})", detail),
             116 => "ECDSA: entering u2 modulo curve-order reduction".to_string(),
             117 => format!("ECDSA: u2 modular reduction returned (result={})", detail),
+            120 => format!("MPI division: entered (dividend_limbs={})", detail),
+            121 => format!("MPI division: operands copied (limbs={})", detail),
+            122 => format!("MPI division: divisor aligned (limb_shift={})", detail),
+            123 => "MPI division: entering initial subtract loop".to_string(),
+            124 => format!("MPI division: initial subtract loop returned (limbs={})", detail),
+            125 => format!("MPI division: entering quotient limb (index={})", detail),
+            126 => format!("MPI division: entering quotient correction (index={})", detail),
+            127 => format!("MPI division: quotient correction returned (index={})", detail),
+            128 => format!("MPI division: partial remainder subtraction returned (index={})", detail),
+            129 => format!("MPI division: quotient limb completed (index={})", detail),
+            130 => format!("MPI division: quotient loop returned (divisor_limbs={})", detail),
+            131 => format!("MPI division: remainder copied (limbs={})", detail),
+            132 => format!("MPI division returned (result={})", detail),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
                 detail
