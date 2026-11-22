@@ -9,6 +9,7 @@ use core::ffi::c_void;
 use core::net::Ipv4Addr;
 use core::ptr;
 use core::ptr::NonNull;
+use core::time::Duration;
 
 use uefi::boot::{self, EventType, ScopedProtocol, Tpl};
 use uefi::proto::unsafe_protocol;
@@ -400,7 +401,7 @@ impl Tcp4Stream {
                     {
                         // SAFETY: protocol remains open while the close token drains.
                         let _ = unsafe { (tcp.0.poll)(&mut tcp.0) };
-                        let _ = boot::stall(1000);
+                        let _ = boot::stall(Duration::from_micros(1_000));
                     }
                 }
             } else {
@@ -540,7 +541,7 @@ fn wait_for_token(
             return Err(Tcp4Error::Timeout);
         }
         let step = core::cmp::min(1000, timeout_us - elapsed_us);
-        boot::stall(step as usize).map_err(|_| Tcp4Error::Network)?;
+        boot::stall(Duration::from_micros(step));
         elapsed_us += step;
     }
 }
@@ -572,7 +573,7 @@ fn drain_event(tcp: &mut ScopedProtocol<Tcp4>, event: &uefi::Event) {
         }
         // SAFETY: TCP protocol remains open until the token drains.
         let _ = unsafe { (tcp.0.poll)(&mut tcp.0) };
-        let _ = boot::stall(1000);
+        let _ = boot::stall(Duration::from_micros(1_000));
     }
 }
 

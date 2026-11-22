@@ -10,6 +10,7 @@ use core::ffi::c_void;
 use core::net::Ipv4Addr;
 use core::ptr;
 use core::ptr::NonNull;
+use core::time::Duration;
 
 use uefi::boot::{self, EventType, ScopedProtocol, Tpl};
 use uefi::proto::network::ip4config2::Ip4Config2;
@@ -374,7 +375,7 @@ impl UefiUdp4Transport {
             }
 
             let step = core::cmp::min(1000, timeout_us - elapsed_us);
-            let _ = boot::stall(step as usize);
+            let _ = boot::stall(Duration::from_micros(step));
             elapsed_us += step;
         }
 
@@ -557,7 +558,7 @@ fn wait_for_event(
             return Err(DnsIoError::Timeout);
         }
         let step = core::cmp::min(1000, timeout_us - elapsed);
-        let _ = boot::stall(step as usize);
+        let _ = boot::stall(Duration::from_micros(step));
         elapsed += step;
     }
 }
@@ -589,7 +590,7 @@ fn drain_token(udp: &mut ScopedProtocol<Udp4>, event: &Event) {
         }
         // SAFETY: protocol remains open until token completion.
         let _ = unsafe { (udp.0.poll)(&mut udp.0) };
-        let _ = boot::stall(1000);
+        let _ = boot::stall(Duration::from_micros(1_000));
     }
 }
 
