@@ -10,11 +10,13 @@
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/error.h"
 #include "mbedtls/platform.h"
+#include "mbedtls/debug.h"
 #include <psa/crypto.h>
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
 typedef int (*uefi_recv_cb)(void *, unsigned char *, size_t);
 extern void uefi_browser_tls_log(int stage, int detail);
+extern void uefi_browser_tls_debug_log(int level, const char *file, int line, const char *message);
 
 typedef struct {
     mbedtls_ssl_context ssl;
@@ -39,6 +41,30 @@ static int bio_recv(void *ctx, unsigned char *data, size_t length) {
     int ret = session->recv_cb(session->io_context, data, length);
     uefi_browser_tls_log(33, ret);
     return ret;
+}
+
+/* Mbed TLS diagnostics are routed to the firmware console, never libc/stdout. */
+static void uefi_mbedtls_debug(void *ctx, int level, const char *file,
+                               int line, const char *message) {
+    (void)ctx;
+    if (level <= 3) {
+        uefi_browser_tls_debug_log(level, file, line, message);
+    }
+}
+
+/*
+ * Observe the verifier's per-certificate result without changing its flags.
+ * Returning zero means this observer itself did not reject the certificate;
+ * MBEDTLS_SSL_VERIFY_REQUIRED and the original verification flags remain in
+ * force and are still checked by Mbed TLS.
+ */
+static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
+                                        int depth, uint32_t *flags) {
+    (void)ctx;
+    (void)crt;
+    uefi_browser_tls_log(40, depth);
+    uefi_browser_tls_log(41, flags != NULL ? (int)*flags : -1);
+    return 0;
 }
 
 int uefi_mbedtls_client_new(
@@ -92,8 +118,14 @@ int uefi_mbedtls_client_new(
     if (ret != 0) { uefi_browser_tls_log(6, ret); goto fail; }
     uefi_browser_tls_log(6, ret);
 
+#if defined(MBEDTLS_DEBUG_C)
+    /* Level 3 includes handshake and record-layer progress without full dumps. */
+    mbedtls_debug_set_threshold(3);
+    mbedtls_ssl_conf_dbg(&session->config, uefi_mbedtls_debug, NULL);
+#endif
     mbedtls_ssl_conf_authmode(&session->config, MBEDTLS_SSL_VERIFY_REQUIRED);
     mbedtls_ssl_conf_ca_chain(&session->config, &session->roots, NULL);
+    mbedtls_ssl_conf_verify(&session->config, uefi_mbedtls_verify_observer, NULL);
 
     uefi_browser_tls_log(7, 0);
     ret = mbedtls_ssl_setup(&session->ssl, &session->config);

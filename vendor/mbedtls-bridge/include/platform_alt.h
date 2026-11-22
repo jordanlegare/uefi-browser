@@ -6,11 +6,14 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <time.h>
 
 void *uefi_mbedtls_calloc(size_t count, size_t size);
 void uefi_mbedtls_free(void *pointer);
 int64_t uefi_mbedtls_time(int64_t *timer);
+int uefi_mbedtls_snprintf(char *buffer, size_t size, const char *format, ...);
+int uefi_mbedtls_vsnprintf(char *buffer, size_t size, const char *format, va_list args);
 
 /* TF-PSA-Crypto platform alternatives. */
 int64_t mbedtls_ms_time(void);

@@ -22,6 +22,8 @@
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_NO_STD_FUNCTIONS
 #define MBEDTLS_PLATFORM_MEMORY
+#define MBEDTLS_PLATFORM_SNPRINTF_MACRO uefi_mbedtls_snprintf
+#define MBEDTLS_PLATFORM_VSNPRINTF_MACRO uefi_mbedtls_vsnprintf
 #define MBEDTLS_PLATFORM_CALLOC_MACRO uefi_mbedtls_calloc
 #define MBEDTLS_PLATFORM_FREE_MACRO uefi_mbedtls_free
 #define MBEDTLS_PLATFORM_PRINTF_MACRO uefi_mbedtls_printf

@@ -25,6 +25,15 @@ BRIDGE_PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE="uefi_tf_psa_con
 
 bash "$ROOT/scripts/fetch-mbedtls.sh"
 
+# Remove the upstream MinGW formatter override: it bypasses the platform hooks
+# and adds __mingw_snprintf/__mingw_vsnprintf dependencies to the EFI image.
+DEBUG_SOURCE="$SRC/library/debug.c"
+if [[ "$(grep -c '^#if defined(__MINGW32__)$' "$DEBUG_SOURCE")" -ne 1 ]]; then
+  echo "Unexpected Mbed TLS debug.c MinGW formatter block; refusing an unsafe patch." >&2
+  exit 1
+fi
+sed -i '/^#if defined(__MINGW32__)$/,/^#endif$/d' "$DEBUG_SOURCE"
+
 command -v cmake >/dev/null
 command -v ninja >/dev/null
 command -v clang >/dev/null
