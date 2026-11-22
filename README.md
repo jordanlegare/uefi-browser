@@ -2,7 +2,7 @@
 
 A standalone Rust application for x86-64 UEFI firmware, intended to grow into a full terminal web browser in the style of ELinks. It is packaged as a PE32+ EFI application and designed to run before an operating system.
 
-> **Status: interactive text-browser implementation in progress; not yet a verified, boot-tested ELinks replacement.** The source includes concrete UEFI UDP4/TCP4 adapters, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. Mbed TLS 4.3.0 static libraries and the UEFI C bridge now compile in CI; the final PE/COFF link and physical-firmware network run remain release gates. The browser is not yet feature-equivalent to ELinks, and must not be treated as production-secure until those checks pass.
+> **Status: CI-built standalone EFI image; runtime firmware/network tests still pending.** The source includes concrete UEFI UDP4/TCP4 adapters, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. GitHub Actions now builds and inspects the final Mbed TLS 4.3.0 PE32+ x86-64 EFI application. It has not yet been boot-tested under OVMF or on physical firmware, and it is not feature-equivalent to ELinks.
 
 ## Goals
 
@@ -104,9 +104,9 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | DNS-to-TCP-to-TLS orchestration | Implemented; hostname is retained for SNI and certificate checks |
 | TCP stream-to-Mbed-TLS callback bridge | Implemented in Rust/C |
 | Mbed TLS 4.3.0 source fetch and archive checksum verification | Implemented |
-| UEFI Boot Services allocator hooks for Mbed TLS | Implemented in Rust; C build/link still needs verification |
+| UEFI Boot Services allocator hooks for Mbed TLS | Implemented and exercised in the successful static link |
 | Mbed TLS platform clock and gmtime hooks | Implemented in C/Rust source and configured for the build |
-| Mbed TLS static libraries and PE/COFF link integration | Build/link pipeline implemented; full cross-build not yet confirmed |
+| Mbed TLS static libraries and PE/COFF link integration | Full cross-build and final EFI link passed in CI |
 | Mozilla-derived CA bundle update script | Implemented with checksum verification |
 | Build-time CA bundle embedding | Implemented; bundle asset is generated locally, not committed by default |
 | HTTP/1.1 GET and response parsing | Implemented |
@@ -117,10 +117,10 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | Terminal navigation loop | Implemented: open URL, links, back, forward, reload, search, help, quit |
 | Reflowing ELinks-style viewport, keyboard link focus and scrolling controls | Not yet implemented |
 | CSS, JavaScript, forms, cookies, bookmarks and downloads | Not implemented |
-| QEMU/OVMF network integration test | Not yet verified |
-| Physical-firmware network test and released EFI image | Not yet produced |
+| QEMU/OVMF network integration test | Not yet run |
+| EFI image | Produced and uploaded as a CI artifact; OVMF/physical-firmware validation remains pending |
 
-The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits. CI checks Rust formatting, portable-core tests, and the x86-64 UEFI target; a separate job now cross-compiles the pinned Mbed TLS libraries and UEFI C bridge. The final Rust+Mbed TLS PE/COFF link, motherboard protocol behavior, and real network browsing under OVMF/physical firmware remain release gates.
+The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits. The latest CI run passes Rust formatting, portable-core tests, the x86-64 UEFI target check, Mbed TLS 4.3.0 static compilation, UEFI C bridge compilation, final Rust+Mbed TLS link, PE/COFF inspection, and artifact upload. Firmware protocol behavior and real network browsing under OVMF/physical firmware remain release gates.
 
 ## Repository layout
 
@@ -179,7 +179,7 @@ The UEFI port routes allocation to src/uefi_memory.rs using UEFI Boot Services A
 
 Mbed TLS 4.x separates the TLS/X.509 configuration from the TF-PSA-Crypto configuration. The build supplies both `MBEDTLS_USER_CONFIG_FILE=uefi_mbedtls_config.h` and `TF_PSA_CRYPTO_USER_CONFIG_FILE=uefi_tf_psa_config.h`. The TF-PSA configuration exposes the shared UEFI platform declarations and defines the allocator, time, gmtime, and printf hooks there. Those platform macros must not be duplicated in the Mbed TLS user configuration: Mbed TLS 4.x explicitly checks for that split. The Mbed TLS user configuration remains responsible for TLS/X.509-facing options and the common platform feature toggles. The configured printf macro points to a C no-op: firmware has no stdio stream, and Mbed TLS self-test/diagnostic output must not introduce a host CRT dependency. The two configuration hooks are required because TF-PSA-Crypto consumes its own user-configuration file in Mbed TLS 4.x.
 
-scripts/build-uefi.sh fetches the pinned source, configures an x86-64 COFF static-library build, compiles the UEFI C bridge, and sets the link environment consumed by build.rs. The script is the full-image build entry point; its complete Mbed TLS build and final PE/COFF link must pass in CI before an EFI artifact can be considered produced.
+scripts/build-uefi.sh fetches the pinned source, configures an x86-64 COFF static-library build, compiles the UEFI C bridge, and sets the link environment consumed by build.rs. The script is the verified full-image build entry point; the full Mbed TLS build and final PE/COFF link passed in the latest GitHub Actions run.
 
 
 
@@ -254,7 +254,7 @@ dist/EFI/BOOT/BOOTX64.EFI
 
 build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UEFI_MBEDTLS_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
 
-**Verification boundary:** the preceding full-build attempt compiled and installed Mbed TLS 4.3.0, compiled the UEFI C bridge, and reached Cargo's build script. It then stopped because the build script expected the CA bundle to begin with a certificate marker, while the verified curl/Mozilla bundle has descriptive comments before its first certificate. The build script now accepts that standard preamble, rejects embedded NULs, enforces a 2 MiB upper bound, requires both PEM begin/end markers, and embeds only from the first certificate onward. The follow-up CI run must confirm the final PE/COFF EFI link and artifact inspection. No successful EFI image or firmware network test is claimed yet. Run the complete build and test the resulting binary under network-enabled OVMF and on target firmware before treating it as release-ready.
+**Verification record (22 November 2026):** GitHub Actions run [#44998678202](https://github.com/jordanlegare/uefi-browser/actions/runs/44998678202) passed both jobs on commit `5fe2cbc39c55d83032c358993dca74b8eb49008c`. The full-build job compiled Mbed TLS 4.3.0 and the UEFI bridge, linked the standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998678202/artifacts/14744857088); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `c02ec159295384d395f20966a2d1023c753d83ceefbb592554bbaaec8c3605d1` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
 
 ## Firmware adapter details
 
@@ -278,13 +278,26 @@ Each TCP4 completion token uses an EVT_NOTIFY_SIGNAL event at TPL_CALLBACK. The 
 
 src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the TF-PSA-Crypto C-ABI entropy callback. The TLS stack uses the `MBEDTLS_PSA_DRIVER_GET_ENTROPY` path, not the removed Mbed TLS 3.x `mbedtls_ssl_conf_rng` hook. Each PSA entropy request opens the firmware protocol for the duration of its read; failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
 
-src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The Mbed TLS user configuration and C platform bridge route certificate-time operations through these hooks. The C bridge now compiles in CI; final static linking and firmware verification remain outstanding.
+src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The Mbed TLS user configuration and C platform bridge route certificate-time operations through these hooks. The static C bridge and final EFI link pass in CI. Runtime operation against real firmware network drivers is still unverified.
 
 ### C runtime and Mbed TLS platform hooks
 
 The C bridge no longer uses POSIX allocation: TLS session allocations use Mbed TLS platform macros backed by uefi_mbedtls_calloc and uefi_mbedtls_free in src/uefi_memory.rs. Those functions use UEFI AllocatePool/FreePool and are valid only while Boot Services remain active.
 
 The custom Mbed TLS platform configuration also routes time/gmtime operations through the UEFI Runtime Services callback and a freestanding Gregorian conversion. There is no host socket, libc clock, or firmware TLS dependency in the intended runtime path. The Mbed TLS library and C bridge compilation passed in the most recent full-build attempt. Cargo then stopped in build.rs because it incorrectly required a PEM begin marker at byte zero; the official Mozilla bundle includes descriptive comments before the first certificate. The build script now validates bounded PEM marker presence and embeds from the first certificate, and the next CI run must confirm the final EFI link.
+
+### Latest CI image
+
+The current CI artifact is the removable-media EFI application. The GitHub artifact expires on 20 February 2027.
+
+- Workflow: [run #44998678202](https://github.com/jordanlegare/uefi-browser/actions/runs/44998678202)
+- Artifact: [uefi-browser-x86_64.zip](https://github.com/jordanlegare/uefi-browser/actions/runs/44998678202/artifacts/14744857088)
+- Image path inside the ZIP: `dist/EFI/BOOT/BOOTX64.EFI`
+- Image format: PE32+, x86-64, EFI application subsystem
+- Image size: 1,382,400 bytes
+- SHA-256: `c02ec159295384d395f20966a2d1023c753d83ceefbb592554bbaaec8c3605d1`
+
+The artifact is not Secure Boot signed. A Secure Boot deployment must sign it with a key trusted by the target firmware. The image has not been boot-tested under OVMF or on physical hardware.
 
 ## Installation target
 
@@ -314,8 +327,8 @@ Copying a binary to this path does not guarantee network access. Firmware must h
 - [x] Implement HTTP/1.1 GET, header/status parsing, Content-Length, chunked and close-delimited responses.
 - [x] Implement a keyboard-driven terminal navigation loop with links, history, back/forward, reload and search.
 - [x] Implement bounded redirects and reject HTTPS-to-HTTP redirect downgrade.
-- [ ] Run and verify the complete Mbed TLS 4.3.0 C cross-build and final PE/COFF link.
-- [ ] Build and inspect an EFI binary containing the CA roots and Mbed TLS libraries.
+- [x] Run and verify the complete Mbed TLS 4.3.0 C cross-build and final PE/COFF link in CI.
+- [x] Build and inspect an EFI binary containing the CA roots and Mbed TLS libraries.
 - [ ] Run the browser under OVMF with UDP4/TCP4 network drivers and test real HTTP/HTTPS sites.
 - [ ] Test on multiple physical UEFI implementations and NIC drivers.
 - [ ] Add DNS CNAME/AAAA, DNS-over-TCP fallback, and cache.

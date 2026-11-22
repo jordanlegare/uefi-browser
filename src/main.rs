@@ -131,7 +131,7 @@ fn main() -> Status {
         }
 
         let mut target_index = None;
-        let mut target_url = None;
+        let target_url;
         let mut add_history = false;
 
         match command {
