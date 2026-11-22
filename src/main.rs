@@ -187,9 +187,12 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
     } else if stage == 12 {
         // Stage 12 is called after the final handshake step has returned.
         TLS_HANDSHAKE_ACTIVE.store(false, Ordering::Release);
-    } else if matches!(stage, 50 | 51 | 52 | 54 | 55 | 56 | 57 | 58) {
-        // These checkpoints are emitted by Rust between individual
-        // mbedtls_ssl_handshake_step() calls, never from inside Mbed TLS.
+    } else if matches!(
+        stage,
+        50 | 51 | 52 | 54 | 55 | 56 | 57 | 58 | 59 | 60 | 61 | 62 | 63 | 64 | 65 | 66
+    ) {
+        // These explicit checkpoints are emitted at safe function boundaries,
+        // never from the BIO or Mbed TLS debug callbacks.
         let message = match stage {
             50 => format!("TLS handshake step {}: entering", detail),
             51 => format!("TLS handshake step returned; state={}", detail),
@@ -205,6 +208,29 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 "TLS 1.3: server-certificate processor returned (result={})",
                 detail
             ),
+            59 => "TLS 1.3: fetching Certificate handshake message".to_string(),
+            60 => format!(
+                "TLS 1.3: Certificate message fetch returned (result={})",
+                detail
+            ),
+            61 => format!(
+                "TLS 1.3: parsing certificate list (message_bytes={})",
+                detail
+            ),
+            62 => format!(
+                "TLS 1.3: certificate-list parsing returned (result={})",
+                detail
+            ),
+            63 => "TLS 1.3: validating certificate chain".to_string(),
+            64 => format!(
+                "TLS 1.3: certificate-chain validation returned (result={})",
+                detail
+            ),
+            65 => format!(
+                "TLS 1.3: adding Certificate message to transcript (bytes={})",
+                detail
+            ),
+            66 => format!("TLS 1.3: transcript update returned (result={})", detail),
             _ => unreachable!(),
         };
         uefi::println!("{}", message);
