@@ -129,8 +129,7 @@ impl SnpDevice {
     fn queue_transmit(&mut self, mut frame: Vec<u8>) {
         self.reclaim_transmit_buffers();
         if self.pending_tx.len() >= MAX_PENDING_TX_BUFFERS {
-            self.diagnostics.tx_queue_full =
-                self.diagnostics.tx_queue_full.saturating_add(1);
+            self.diagnostics.tx_queue_full = self.diagnostics.tx_queue_full.saturating_add(1);
             return;
         }
 
@@ -142,14 +141,12 @@ impl SnpDevice {
             match self.snp.transmit(0, &mut frame, None, None, None) {
                 Ok(()) => {
                     self.pending_tx.push(frame);
-                    self.diagnostics.tx_queued =
-                        self.diagnostics.tx_queued.saturating_add(1);
+                    self.diagnostics.tx_queued = self.diagnostics.tx_queued.saturating_add(1);
                     return;
                 }
                 Err(error) => {
                     let status = error.status();
-                    self.diagnostics.tx_failures =
-                        self.diagnostics.tx_failures.saturating_add(1);
+                    self.diagnostics.tx_failures = self.diagnostics.tx_failures.saturating_add(1);
                     self.diagnostics.tx_last_status = status.0;
                     if status != uefi::Status::NOT_READY || attempt + 1 == TX_SUBMIT_RETRIES {
                         return;
@@ -160,8 +157,7 @@ impl SnpDevice {
             }
         }
 
-        self.diagnostics.tx_queue_full =
-            self.diagnostics.tx_queue_full.saturating_add(1);
+        self.diagnostics.tx_queue_full = self.diagnostics.tx_queue_full.saturating_add(1);
     }
 }
 
@@ -308,8 +304,7 @@ impl Device for SnpDevice {
     fn transmit(&mut self, _: Instant) -> Option<Self::TxToken<'_>> {
         self.reclaim_transmit_buffers();
         if self.pending_tx.len() >= MAX_PENDING_TX_BUFFERS {
-            self.diagnostics.tx_queue_full =
-                self.diagnostics.tx_queue_full.saturating_add(1);
+            self.diagnostics.tx_queue_full = self.diagnostics.tx_queue_full.saturating_add(1);
             return None;
         }
         Some(SnpTxToken(self))
@@ -548,11 +543,8 @@ impl UdpDnsTransport for SnpNetwork {
             let _ = self.sockets.remove(handle);
             return Err(DnsIoError::Network);
         }
-        self.device.diagnostics.udp_datagrams_sent = self
-            .device
-            .diagnostics
-            .udp_datagrams_sent
-            .saturating_add(1);
+        self.device.diagnostics.udp_datagrams_sent =
+            self.device.diagnostics.udp_datagrams_sent.saturating_add(1);
         let timeout = if timeout_ms == 0 { 3_000 } else { timeout_ms };
         let mut answer = Err(DnsIoError::Timeout);
         for _ in 0..timeout {
