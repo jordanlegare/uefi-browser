@@ -2,7 +2,7 @@
 
 A standalone Rust application for x86-64 UEFI firmware, intended to grow into a full terminal web browser in the style of ELinks. It is packaged as a PE32+ EFI application and designed to run before an operating system.
 
-> **Status: interactive text-browser implementation in progress; not yet a verified, boot-tested ELinks replacement.** The source now includes concrete UEFI UDP4/TCP4 adapters, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. Mbed TLS 4.3.0 static-build/link support, UEFI allocator/time hooks, and an optional embedded CA-bundle pipeline are also present. The final Mbed TLS C build/link and physical-firmware network run still require verification; do not treat the repository as a production-secure browser until those checks pass.
+> **Status: interactive text-browser implementation in progress; not yet a verified, boot-tested ELinks replacement.** The source includes concrete UEFI UDP4/TCP4 adapters, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. Mbed TLS 4.3.0 static libraries and the UEFI C bridge now compile in CI; the final PE/COFF link and physical-firmware network run remain release gates. The browser is not yet feature-equivalent to ELinks, and must not be treated as production-secure until those checks pass.
 
 ## Goals
 
@@ -61,7 +61,7 @@ HTTP/1.1 request/response codec over TCP4 or Mbed TLS streams
 HTML text/link parser -> firmware-console renderer -> keyboard navigation
 ~~~
 
-The high-level firmware path is provided by connect_firmware_url() in src/network.rs. It reads DNS server addresses from EFI IPv4 Config2, opens EFI RNG, resolves the hostname using Hickory over the UDP4 adapter, then connects TCP4 to the resulting address. The returned FirmwareConnection retains the RNG and original hostname so start_tls() can create the Mbed TLS session with the correct SNI and certificate identity.
+The high-level firmware path is provided by connect_firmware_url() in src/network.rs. It reads DNS server addresses from EFI IPv4 Config2, opens EFI RNG for the DNS query, resolves the hostname using Hickory over the UDP4 adapter, then connects TCP4 to the resulting address. The returned FirmwareConnection retains the stream and original hostname for SNI and certificate identity. Mbed TLS 4.3 obtains its later PSA entropy requests independently through the TF-PSA firmware RNG hook.
 
 The low-level firmware adapters use UEFI Service Binding child handles. TCP4 and UDP4 completion tokens are asynchronous: the code uses EVT_NOTIFY_SIGNAL events at TPL_CALLBACK and paired plain wait events for application-side polling. Pending operation tokens are cancelled and drained before their memory, event, or protocol child is released. This is important because firmware may continue referencing token and fragment memory until the completion event is signalled.
 
@@ -120,7 +120,7 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | QEMU/OVMF network integration test | Not yet verified |
 | Physical-firmware network test and released EFI image | Not yet produced |
 
-The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits. Rust formatting, portable-core tests, and the x86-64 UEFI target check are exercised by CI. These checks do not validate a motherboard's protocol implementation, run the Mbed TLS C cross-build, or prove that a final PE/COFF image can browse a real website. Those remain release gates.
+The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits. CI checks Rust formatting, portable-core tests, and the x86-64 UEFI target; a separate job now cross-compiles the pinned Mbed TLS libraries and UEFI C bridge. The final Rust+Mbed TLS PE/COFF link, motherboard protocol behavior, and real network browsing under OVMF/physical firmware remain release gates.
 
 ## Repository layout
 
@@ -253,7 +253,7 @@ dist/EFI/BOOT/BOOTX64.EFI
 
 build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UEFI_MBEDTLS_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
 
-**Verification boundary:** GitHub Actions runs a portable Rust job and a separate Mbed TLS/static-EFI build job. The portable job passed on the preceding branch head. The latest full-build attempt failed during Mbed TLS/TF-PSA-Crypto compilation because the TF-PSA configuration did not receive the UEFI platform settings. This branch now supplies its own TF-PSA user configuration; the following run got through the static-library build/install and compiled past the TF-PSA public-header dependency, but the bridge needed a generated private header from the CMake install tree. The build script now includes both TF-PSA's public headers and the installed generated headers in the bridge compile. A successful rerun, final PE/COFF EFI link, and firmware network test are still required; no final EFI artifact is claimed yet. Run the complete build and test the resulting binary under network-enabled OVMF and on target firmware before treating it as release-ready.
+**Verification boundary:** the preceding full-build attempt compiled and installed Mbed TLS 4.3.0, compiled the UEFI C bridge, and reached Cargo's build script. It then stopped because the build script expected the CA bundle to begin with a certificate marker, while the verified curl/Mozilla bundle has descriptive comments before its first certificate. The build script now accepts that standard preamble, rejects embedded NULs, enforces a 2 MiB upper bound, requires both PEM begin/end markers, and embeds only from the first certificate onward. The follow-up CI run must confirm the final PE/COFF EFI link and artifact inspection. No successful EFI image or firmware network test is claimed yet. Run the complete build and test the resulting binary under network-enabled OVMF and on target firmware before treating it as release-ready.
 
 ## Firmware adapter details
 
@@ -275,15 +275,15 @@ Each TCP4 completion token uses an EVT_NOTIFY_SIGNAL event at TPL_CALLBACK. The 
 
 ### Firmware randomness and time
 
-src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the TF-PSA-Crypto C-ABI entropy callback. The TLS stack uses the `MBEDTLS_PSA_DRIVER_GET_ENTROPY` path, not the removed Mbed TLS 3.x `mbedtls_ssl_conf_rng` hook. Failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
+src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the TF-PSA-Crypto C-ABI entropy callback. The TLS stack uses the `MBEDTLS_PSA_DRIVER_GET_ENTROPY` path, not the removed Mbed TLS 3.x `mbedtls_ssl_conf_rng` hook. Each PSA entropy request opens the firmware protocol for the duration of its read; failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
 
-src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The Mbed TLS user configuration and C platform bridge route certificate-time operations through these hooks. The C build/link still needs independent verification.
+src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The Mbed TLS user configuration and C platform bridge route certificate-time operations through these hooks. The C bridge now compiles in CI; final static linking and firmware verification remain outstanding.
 
 ### C runtime and Mbed TLS platform hooks
 
 The C bridge no longer uses POSIX allocation: TLS session allocations use Mbed TLS platform macros backed by uefi_mbedtls_calloc and uefi_mbedtls_free in src/uefi_memory.rs. Those functions use UEFI AllocatePool/FreePool and are valid only while Boot Services remain active.
 
-The custom Mbed TLS platform configuration also routes time/gmtime operations through the UEFI Runtime Services callback and a freestanding Gregorian conversion. There is no host socket, libc clock, or firmware TLS dependency in the intended runtime path. The full C build and final static link still must be verified; the current Rust CI does not compile the bridge.
+The custom Mbed TLS platform configuration also routes time/gmtime operations through the UEFI Runtime Services callback and a freestanding Gregorian conversion. There is no host socket, libc clock, or firmware TLS dependency in the intended runtime path. The Mbed TLS library and C bridge compilation passed in the most recent full-build attempt. Cargo then stopped in build.rs because it incorrectly required a PEM begin marker at byte zero; the official Mozilla bundle includes descriptive comments before the first certificate. The build script now validates bounded PEM marker presence and embeds from the first certificate, and the next CI run must confirm the final EFI link.
 
 ## Installation target
 

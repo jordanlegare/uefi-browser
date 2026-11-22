@@ -44,13 +44,36 @@ fn main() {
         let ca_path = PathBuf::from(ca_path);
         let bytes = fs::read(&ca_path)
             .unwrap_or_else(|error| panic!("cannot read CA bundle {}: {error}", ca_path.display()));
-        if !bytes.starts_with(b"-----BEGIN CERTIFICATE-----") {
-            panic!("CA bundle does not begin with a PEM certificate");
+        const MAX_CA_BUNDLE_BYTES: usize = 2 * 1024 * 1024;
+        const PEM_BEGIN: &[u8] = b"-----BEGIN CERTIFICATE-----";
+        const PEM_END: &[u8] = b"-----END CERTIFICATE-----";
+
+        if bytes.len() > MAX_CA_BUNDLE_BYTES {
+            panic!(
+                "CA bundle is too large ({} bytes; maximum is {} bytes)",
+                bytes.len(),
+                MAX_CA_BUNDLE_BYTES
+            );
+        }
+        if bytes.contains(&0) {
+            panic!("CA bundle contains an embedded NUL byte");
+        }
+
+        // Mozilla's maintained bundle begins with human-readable metadata.
+        // Locate and embed from the first PEM marker rather than rejecting
+        // that standard preamble.
+        let first_certificate = bytes
+            .windows(PEM_BEGIN.len())
+            .position(|window| window == PEM_BEGIN)
+            .unwrap_or_else(|| panic!("CA bundle contains no PEM certificate"));
+        let pem = &bytes[first_certificate..];
+        if !pem.windows(PEM_END.len()).any(|window| window == PEM_END) {
+            panic!("CA bundle has a PEM begin marker but no certificate end marker");
         }
 
         let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
         let embedded = out_dir.join("uefi-ca-bundle.pem");
-        let mut nul_terminated = bytes;
+        let mut nul_terminated = pem.to_vec();
         if nul_terminated.last() != Some(&0) {
             nul_terminated.push(0);
         }
