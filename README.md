@@ -278,7 +278,7 @@ build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UE
 
 ### SNP Ethernet adapter and smoltcp
 
-src/snp_network.rs wraps EFI_SIMPLE_NETWORK_PROTOCOL in smoltcp's `phy::Device` interface. It discovers a NIC, starts and initializes SNP, enables unicast/broadcast/multicast reception, reads the hardware MAC address, and polls complete Ethernet frames into smoltcp. The interface advertises the NIC MTU and uses firmware RNG material for smoltcp's random seed and ephemeral local ports.
+src/snp_network.rs wraps EFI_SIMPLE_NETWORK_PROTOCOL in smoltcp's `phy::Device` interface. It discovers a NIC, starts and initializes SNP, validates the Ethernet MAC/link/MTU, enables the required unicast and broadcast receive filters, and polls complete Ethernet frames into smoltcp. The interface advertises the NIC MTU and uses firmware RNG material for smoltcp's random seed and ephemeral local ports.
 
 smoltcp owns the rest of the network stack: Ethernet framing, ARP, IPv4, routing, DHCPv4, UDP, and TCP. Its DHCP socket configures the interface address, default gateway, and DNS resolver. Hickory DNS and SNTP use temporary bounded smoltcp UDP sockets with resolver/source endpoint checks. Browser TCP sessions use smoltcp TCP sockets with bounded polling and 16 KiB receive/transmit buffers. The TCP socket and SNP device remain owned by `SnpTcpStream` while Mbed TLS reads and writes through the `TlsStreamIo` interface.
 

@@ -25,6 +25,9 @@ pub enum SnpNetworkError {
     NicStartFailed,
     NicInitializeFailed,
     InvalidMacAddress,
+    NoEthernetLink,
+    UnsupportedMtu,
+    ReceiveFilterFailed,
     EntropyUnavailable,
     DhcpTimeout,
     NoDnsServer,
@@ -69,6 +72,8 @@ impl SnpDevice {
     fn open() -> Result<(Self, EthernetAddress), SnpNetworkError> {
         let handles =
             boot::find_handles::<SimpleNetwork>().map_err(|_| SnpNetworkError::NoSimpleNetwork)?;
+        let mut last_error = SnpNetworkError::NoSimpleNetwork;
+
         for handle in handles {
             let params = OpenProtocolParams {
                 handle,
@@ -82,31 +87,59 @@ impl SnpDevice {
                 Ok(p) => p,
                 Err(_) => continue,
             };
+
             if snp.mode().state == NetworkState::STOPPED && snp.start().is_err() {
+                last_error = SnpNetworkError::NicStartFailed;
                 continue;
             }
             if snp.mode().state != NetworkState::INITIALIZED && snp.initialize(0, 0).is_err() {
+                last_error = SnpNetworkError::NicInitializeFailed;
                 continue;
             }
+
+            let (hw_address_size, mac, mtu, media_present_supported, media_present) = {
+                let mode = snp.mode();
+                (
+                    mode.hw_address_size,
+                    EthernetAddress::from_bytes(&mode.current_address.0[..6]),
+                    mode.max_packet_size as usize,
+                    mode.media_present_supported == uefi_raw::Boolean::TRUE,
+                    mode.media_present == uefi_raw::Boolean::TRUE,
+                )
+            };
+
+            if hw_address_size != 6 || !mac.is_unicast() || mac.0.iter().all(|b| *b == 0) {
+                last_error = SnpNetworkError::InvalidMacAddress;
+                continue;
+            }
+            if media_present_supported && !media_present {
+                last_error = SnpNetworkError::NoEthernetLink;
+                continue;
+            }
+            if mtu < 576 {
+                last_error = SnpNetworkError::UnsupportedMtu;
+                continue;
+            }
+
+            // DHCP discovery and ARP require broadcast and unicast reception.
+            // Do not require multicast filter support from a NIC that does
+            // not implement that optional SNP receive filter.
             if snp
                 .receive_filters(
-                    ReceiveFlags::UNICAST | ReceiveFlags::BROADCAST | ReceiveFlags::MULTICAST,
+                    ReceiveFlags::UNICAST | ReceiveFlags::BROADCAST,
                     ReceiveFlags::empty(),
                     false,
                     None,
                 )
                 .is_err()
             {
+                last_error = SnpNetworkError::ReceiveFilterFailed;
                 continue;
             }
-            let mac = EthernetAddress::from_bytes(&snp.mode().current_address.0[..6]);
-            if !mac.is_unicast() || mac.0.iter().all(|b| *b == 0) {
-                continue;
-            }
-            let mtu = core::cmp::max(576, snp.mode().max_packet_size as usize);
+
             return Ok((Self { snp, mtu }, mac));
         }
-        Err(SnpNetworkError::NoSimpleNetwork)
+        Err(last_error)
     }
 }
 impl Device for SnpDevice {
