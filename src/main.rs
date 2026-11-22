@@ -41,29 +41,26 @@ fn main() -> Status {
     uefi::println!("|                         UEFI BROWSER                         |");
     uefi::println!("|               standalone x86_64 pre-OS browser               |");
     uefi::println!("+--------------------------------------------------------------+");
-    uefi::println!("Rust DNS: Hickory | Firmware networking: UDP4 + TCP4");
+    uefi::println!("Rust DNS: Hickory | IP stack: smoltcp over UEFI SNP");
     uefi::println!("TLS: embedded Mbed TLS | Rendering: UEFI text console");
     uefi::println!("");
-    uefi::println!("Initializing IPv4/DHCP and UDP4/TCP4 services...");
-    match uefi_browser::firmware_network::initialize() {
-        Ok(dns_server) => {
-            uefi::println!("IPv4 configured; DNS resolver: {}", dns_server);
-            uefi::println!("Synchronizing UTC clock from NTP...");
-            match uefi_browser::firmware_ntp::synchronize(dns_server) {
-                Ok(unix) => uefi::println!("NTP synchronized; UTC Unix time: {}", unix),
-                Err(error) => uefi::println!("NTP synchronization failed: {}", error),
-            }
-        }
-        Err(uefi_browser::firmware_network::NetworkInitError::NoSimpleNetwork) => {
-            uefi::println!("Network unavailable: no EFI Simple Network adapter/driver was found.");
-            uefi::println!("Check firmware NIC support and enable the UEFI network driver.");
-        }
-        Err(uefi_browser::firmware_network::NetworkInitError::NoIp4Config2) => {
-            uefi::println!("Network unavailable: no EFI IPv4 Config2 stack was exposed.");
-            uefi::println!("UEFI NIC drivers were asked to connect, but no IPv4 stack appeared.");
-            uefi::println!("Enable/load the firmware IPv4 network stack; SNP alone is not enough.");
-        }
-        Err(error) => uefi::println!("Network initialization failed: {:?}", error),
+    uefi::println!("Initializing SNP Ethernet and smoltcp IPv4/DHCP...");
+    match uefi_browser::firmware_rng::UefiRandom::open() {
+        Ok(mut random) => match uefi_browser::snp_network::SnpNetwork::new(&mut random) {
+            Ok(mut network) => match network.acquire_dhcp(60_000) {
+                Ok(dns_server) => {
+                    uefi::println!("smoltcp DHCP configured; DNS resolver: {}", dns_server);
+                    uefi::println!("Synchronizing UTC clock from NTP...");
+                    match uefi_browser::firmware_ntp::synchronize(&mut network, dns_server) {
+                        Ok(unix) => uefi::println!("NTP synchronized; UTC Unix time: {}", unix),
+                        Err(error) => uefi::println!("NTP synchronization failed: {}", error),
+                    }
+                }
+                Err(error) => uefi::println!("smoltcp DHCP initialization failed: {:?}", error),
+            },
+            Err(error) => uefi::println!("SNP network initialization failed: {:?}", error),
+        },
+        Err(_) => uefi::println!("Network unavailable: EFI_RNG_PROTOCOL could not seed smoltcp."),
     }
     uefi::println!("");
 

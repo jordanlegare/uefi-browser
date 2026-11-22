@@ -1,4 +1,4 @@
-//! SNTP bootstrap over the already initialized UEFI UDP4 stack.
+//! SNTP bootstrap over the application-owned SNP/smoltcp UDP stack.
 //!
 //! Plain NTP is unauthenticated. This bootstrap validates packet structure,
 //! server mode/stratum, and the echoed client nonce, but cannot authenticate
@@ -12,7 +12,7 @@ use crate::dns::UdpDnsTransport;
 use crate::dns::resolve_a;
 use crate::entropy::SecureRandom;
 use crate::firmware_rng::UefiRandom;
-use crate::uefi_udp4::UefiUdp4Transport;
+use crate::snp_network::SnpNetwork;
 
 const NTP_HOST: &str = "time.cloudflare.com";
 const NTP_PORT: u16 = 123;
@@ -23,10 +23,10 @@ const MAX_UNIX: i64 = 4_102_444_800; // 2100-01-01
 
 /// Resolve the configured NTP hostname, fetch a server timestamp, and set the
 /// UEFI real-time clock to UTC. Returns the accepted Unix timestamp.
-pub fn synchronize(dns_server: Ipv4Addr) -> Result<i64, &'static str> {
+pub fn synchronize(network: &mut SnpNetwork, dns_server: Ipv4Addr) -> Result<i64, &'static str> {
     let mut rng = UefiRandom::open().map_err(|_| "EFI_RNG_PROTOCOL unavailable")?;
     let server = resolve_a(
-        &mut UefiUdp4Transport,
+        network,
         &mut rng,
         dns_server,
         NTP_HOST,
@@ -42,7 +42,7 @@ pub fn synchronize(dns_server: Ipv4Addr) -> Result<i64, &'static str> {
     request[40..48].copy_from_slice(&nonce);
 
     let mut response = [0u8; 512];
-    let length = UefiUdp4Transport
+    let length = network
         .exchange(server, NTP_PORT, &request, &mut response, 4_000)
         .map_err(|_| "NTP UDP exchange failed")?;
     if length < 48 {
