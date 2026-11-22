@@ -104,22 +104,16 @@ if old_steps in text:
 elif new_steps not in text:
     raise SystemExit(f"{tls13_generic}: expected TLS 1.3 certificate processing sequence not found")
 
-# Put the first checkpoint before Mbed TLS's initial debug callback. A second
-# checkpoint immediately after it distinguishes callback stalls from later work.
-entry = """int mbedtls_ssl_tls13_process_certificate(mbedtls_ssl_context *ssl)
-{
-    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
-    uefi_browser_tls_log(59, 0);
-    MBEDTLS_SSL_DEBUG_MSG(2, (\\"=> parse certificate\\"));
+# Place checkpoints around the first debug callback using a narrow,
+# formatting-independent match against the pinned Mbed TLS source.
+debug_line = '    MBEDTLS_SSL_DEBUG_MSG(2, ("=> parse certificate"));'
+instrumented_debug = """    uefi_browser_tls_log(59, 0);
+    MBEDTLS_SSL_DEBUG_MSG(2, ("=> parse certificate"));
     uefi_browser_tls_log(67, 0);"""
-old_entry = """int mbedtls_ssl_tls13_process_certificate(mbedtls_ssl_context *ssl)
-{
-    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
-    MBEDTLS_SSL_DEBUG_MSG(2, (\\"=> parse certificate\\"));"""
-if old_entry in text:
-    text = text.replace(old_entry, entry, 1)
-elif entry not in text:
-    raise SystemExit(f"{tls13_generic}: expected TLS 1.3 certificate function entry not found")
+if debug_line in text:
+    text = text.replace(debug_line, instrumented_debug, 1)
+elif instrumented_debug not in text:
+    raise SystemExit(f"{tls13_generic}: expected initial certificate debug call not found")
 
 tls13_generic.write_text(text)
 
