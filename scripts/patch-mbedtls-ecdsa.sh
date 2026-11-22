@@ -386,6 +386,25 @@ patch_segment(
             "MPI modulo negative correction completion and positive correction entry",
         ),
         (
+            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
+            "    for (;;) {\n"
+            "        int cmp;\n"
+            "        uefi_browser_tls_log(162, (int) R->n);\n"
+            "        cmp = mbedtls_mpi_cmp_mpi(R, B);\n"
+            "        uefi_browser_tls_log(163, cmp);\n"
+            "        if (cmp < 0) {\n"
+            "            break;\n"
+            "        }\n"
+            "        uefi_browser_tls_log(164, 0);",
+            "MPI positive-remainder comparison",
+        ),
+        (
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));",
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n"
+            "        uefi_browser_tls_log(165, ret);",
+            "MPI positive-remainder subtraction return",
+        ),
+        (
             "    }\n\ncleanup:\n\n    return ret;",
             "    }\n"
             "    uefi_browser_tls_log(138, 0);\n\n"
