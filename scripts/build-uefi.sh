@@ -20,6 +20,8 @@ fi
 # Mbed TLS 4.x and its TF-PSA-Crypto subproject have distinct user-config hooks.
 USER_CONFIG_DEFINE='-DMBEDTLS_USER_CONFIG_FILE=\"uefi_mbedtls_config.h\"'
 PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE=\"uefi_tf_psa_config.h\"'
+BRIDGE_USER_CONFIG_DEFINE='-DMBEDTLS_USER_CONFIG_FILE="uefi_mbedtls_config.h"'
+BRIDGE_PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE="uefi_tf_psa_config.h"'
 
 bash "$ROOT/scripts/fetch-mbedtls.sh"
 
@@ -56,10 +58,11 @@ COMMON_CFLAGS=(
   -fshort-wchar
   "-I$PLATFORM_INCLUDE"
   "-I$SRC/include"
+  "-I$SRC/tf-psa-crypto/include"
   "-isystem"
   "$MINGW_INCLUDE"
-  "$USER_CONFIG_DEFINE"
-  "$PSA_USER_CONFIG_DEFINE"
+  "$BRIDGE_USER_CONFIG_DEFINE"
+  "$BRIDGE_PSA_USER_CONFIG_DEFINE"
 )
 
 clang "${COMMON_CFLAGS[@]}" \
