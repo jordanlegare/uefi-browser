@@ -24,7 +24,6 @@ unsafe extern "C" {
     fn uefi_mbedtls_link_anchor() -> i32;
 }
 
-
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 #[unsafe(no_mangle)]
 pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
