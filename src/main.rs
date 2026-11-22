@@ -320,7 +320,9 @@ fn render_page(page: &BrowserPage) {
         render_links(&page.links);
     }
     uefi::println!("");
-    uefi::println!("Commands: open N | URL | back | forward | reload | links | search WORD | help | quit");
+    uefi::println!(
+        "Commands: open N | URL | back | forward | reload | links | search WORD | help | quit"
+    );
 }
 
 fn render_links(links: &[Link]) {
