@@ -422,7 +422,8 @@ mod tests {
 
     #[test]
     fn detects_complete_chunked_response_without_waiting_for_eof() {
-        let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+        let response =
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
         assert!(response_is_complete(response, 1024).unwrap());
     }
 
