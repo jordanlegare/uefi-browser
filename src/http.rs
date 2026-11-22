@@ -4,6 +4,7 @@
 //! and pass response bytes to parse_response. Supports close-delimited,
 //! Content-Length, and chunked response bodies without depending on std.
 
+use crate::tls::TlsStreamIo;
 use crate::url::{Scheme, Url};
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -11,6 +12,8 @@ use alloc::vec::Vec;
 
 const HEADER_LIMIT: usize = 32 * 1024;
 const HEADER_COUNT_LIMIT: usize = 128;
+const RESPONSE_WIRE_OVERHEAD_LIMIT: usize = 64 * 1024;
+const STREAM_BUFFER_SIZE: usize = 4096;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Header {
@@ -63,6 +66,7 @@ pub enum HttpError {
     InvalidChunkTerminator,
     IncompleteBody,
     BodyTooLarge,
+    TransportError,
 }
 
 /// Construct a minimal HTTP/1.1 GET request.
@@ -77,6 +81,57 @@ pub fn build_get_request(url: &Url) -> Vec<u8> {
     request.push_str("Accept: text/html, text/plain;q=0.9, */*;q=0.1\r\n");
     request.push_str("Accept-Encoding: identity\r\nConnection: close\r\n\r\n");
     request.into_bytes()
+}
+
+
+/// Send an HTTP GET over any byte stream and read the response until EOF.
+///
+/// This works with a plain UEFI TCP4 stream or a Mbed TLS stream because both
+/// implement TlsStreamIo. Partial writes and short reads are handled. The
+/// response wire buffer is bounded independently of the decoded body limit.
+pub fn exchange_get<S: TlsStreamIo>(
+    stream: &mut S,
+    url: &Url,
+    max_body: usize,
+) -> Result<HttpResponse, HttpError> {
+    let request = build_get_request(url);
+    let mut sent = 0usize;
+    while sent < request.len() {
+        let count = stream
+            .send(&request[sent..])
+            .map_err(|_| HttpError::TransportError)?;
+        if count == 0 || count > request.len() - sent {
+            return Err(HttpError::TransportError);
+        }
+        sent += count;
+    }
+
+    let wire_limit = HEADER_LIMIT
+        .checked_add(max_body)
+        .and_then(|length| length.checked_add(RESPONSE_WIRE_OVERHEAD_LIMIT))
+        .ok_or(HttpError::BodyTooLarge)?;
+    let mut response = Vec::new();
+    let mut buffer = [0u8; STREAM_BUFFER_SIZE];
+
+    loop {
+        let count = stream
+            .receive(&mut buffer)
+            .map_err(|_| HttpError::TransportError)?;
+        if count == 0 {
+            break;
+        }
+        if count > buffer.len()
+            || response
+                .len()
+                .checked_add(count)
+                .is_none_or(|total| total > wire_limit)
+        {
+            return Err(HttpError::BodyTooLarge);
+        }
+        response.extend_from_slice(&buffer[..count]);
+    }
+
+    parse_response(&response, max_body)
 }
 
 fn host_header(url: &Url) -> String {
@@ -331,6 +386,55 @@ mod tests {
         let response = parse_response(wire, 1024).unwrap();
         assert!(response.is_redirect());
         assert_eq!(response.location(), Some("/next"));
+    }
+
+
+
+    struct FakeStream {
+        request: Vec<u8>,
+        response: Vec<u8>,
+        response_at: usize,
+    }
+
+    impl TlsStreamIo for FakeStream {
+        fn send(&mut self, bytes: &[u8]) -> Result<usize, ()> {
+            let count = core::cmp::min(7, bytes.len());
+            self.request.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+
+        fn receive(&mut self, output: &mut [u8]) -> Result<usize, ()> {
+            if self.response_at == self.response.len() {
+                return Ok(0);
+            }
+            let count = core::cmp::min(
+                core::cmp::min(11, output.len()),
+                self.response.len() - self.response_at,
+            );
+            output[..count]
+                .copy_from_slice(&self.response[self.response_at..self.response_at + count]);
+            self.response_at += count;
+            Ok(count)
+        }
+    }
+
+    #[test]
+    fn exchange_get_handles_partial_writes_and_short_reads() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\npage".to_vec();
+        let mut stream = FakeStream {
+            request: Vec::new(),
+            response,
+            response_at: 0,
+        };
+        let url = Url::parse("https://example.org/").unwrap();
+
+        let page = exchange_get(&mut stream, &url, 4096).unwrap();
+
+        assert_eq!(page.status, 200);
+        assert_eq!(page.body, b"page");
+        let request = core::str::from_utf8(&stream.request).unwrap();
+        assert!(request.starts_with("GET / HTTP/1.1\r\n"));
+        assert!(request.contains("Host: example.org\r\n"));
     }
 
     #[test]

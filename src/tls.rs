@@ -145,6 +145,17 @@ impl<'a, S: TlsStreamIo, R: SecureRandom> TlsConnection<'a, S, R> {
     }
 }
 
+
+impl<S: TlsStreamIo, R: SecureRandom> TlsStreamIo for TlsConnection<'_, S, R> {
+    fn send(&mut self, bytes: &[u8]) -> Result<usize, ()> {
+        self.write(bytes).map_err(|_| ())
+    }
+
+    fn receive(&mut self, output: &mut [u8]) -> Result<usize, ()> {
+        self.read(output).map_err(|_| ())
+    }
+}
+
 impl<S: TlsStreamIo, R: SecureRandom> Drop for TlsConnection<'_, S, R> {
     fn drop(&mut self) {
         if !self.raw.is_null() {
