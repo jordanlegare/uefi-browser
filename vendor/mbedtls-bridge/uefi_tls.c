@@ -49,15 +49,13 @@ static void uefi_mbedtls_debug(void *ctx, int level, const char *file,
     (void)ctx;
 
     /*
-     * These markers use the independent TLS stage logger, not the Mbed TLS
-     * debug callback. They prove whether Mbed TLS entered this callback and
-     * whether the Rust debug-log callback returned to C.
+     * Mbed TLS invokes this callback synchronously from its handshake path.
+     * The Rust callback only copies the message into a RAM ring buffer; it
+     * must not invoke UEFI console services while Mbed TLS is on the stack.
      */
-    uefi_browser_tls_log(42, level);
     if (level <= 3) {
         uefi_browser_tls_debug_log(level, file, line, message);
     }
-    uefi_browser_tls_log(43, level);
 }
 
 /*
