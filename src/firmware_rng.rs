@@ -1,8 +1,8 @@
 //! EFI_RNG_PROTOCOL-backed cryptographically secure random source.
 
+use uefi::boot;
 use uefi::boot::{self, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::rng::Rng;
-use uefi::boot;
 
 use crate::entropy::SecureRandom;
 

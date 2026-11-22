@@ -10,7 +10,10 @@ use core::ptr;
 
 use uefi::boot::{self, EventType, ScopedProtocol, Tpl};
 use uefi::proto::unsafe_protocol;
-use uefi::{Handle, Status, boot::{OpenProtocolAttributes, OpenProtocolParams}};
+use uefi::{
+    Handle, Status,
+    boot::{OpenProtocolAttributes, OpenProtocolParams},
+};
 use uefi_raw::Boolean;
 use uefi_raw::Ipv4Address;
 use uefi_raw::protocol::driver::ServiceBindingProtocol;

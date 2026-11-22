@@ -12,23 +12,24 @@ use core::ptr;
 use core::ptr::NonNull;
 
 use uefi::boot::{self, EventType, ScopedProtocol, Tpl};
-use uefi::proto::unsafe_protocol;
-use uefi::{Event, Handle, Status, boot::{OpenProtocolAttributes, OpenProtocolParams}};
-use uefi_raw::Boolean;
 use uefi::proto::network::ip4config2::Ip4Config2;
+use uefi::proto::unsafe_protocol;
+use uefi::{
+    Event, Handle, Status,
+    boot::{OpenProtocolAttributes, OpenProtocolParams},
+};
+use uefi_raw::Boolean;
 use uefi_raw::protocol::driver::ServiceBindingProtocol;
 use uefi_raw::protocol::network::ip4_config2::Ip4Config2DataType;
-use uefi_raw::{Guid, Ipv4Address};
 use uefi_raw::time::Time;
+use uefi_raw::{Guid, Ipv4Address};
 
-use crate::dns::{DnsIoError, UdpDnsTransport, DNS_PORT};
-use crate::firmware_rng::UefiRandom;
+use crate::dns::{DNS_PORT, DnsIoError, UdpDnsTransport};
 use crate::entropy::SecureRandom;
+use crate::firmware_rng::UefiRandom;
 
-const UDP4_SERVICE_BINDING_GUID: Guid =
-    uefi::guid!("83f01464-99bd-45e5-b383-af6305d8e9e6");
-const UDP4_PROTOCOL_GUID: Guid =
-    uefi::guid!("3ad9df29-4501-478d-b1f8-7f7fe70e50f3");
+const UDP4_SERVICE_BINDING_GUID: Guid = uefi::guid!("83f01464-99bd-45e5-b383-af6305d8e9e6");
+const UDP4_PROTOCOL_GUID: Guid = uefi::guid!("3ad9df29-4501-478d-b1f8-7f7fe70e50f3");
 const MAX_DNS_FRAGMENTS: usize = 16;
 const DEFAULT_TIMEOUT_MS: u64 = 2500;
 
@@ -49,10 +50,7 @@ struct Udp4Protocol {
         mnp_mode: *mut c_void,
         snp_mode: *mut c_void,
     ) -> Status,
-    configure: unsafe extern "efiapi" fn(
-        this: *mut Self,
-        config: *const Udp4ConfigData,
-    ) -> Status,
+    configure: unsafe extern "efiapi" fn(this: *mut Self, config: *const Udp4ConfigData) -> Status,
     groups: unsafe extern "efiapi" fn(
         this: *mut Self,
         join: Boolean,
@@ -65,18 +63,9 @@ struct Udp4Protocol {
         mask: *const Ipv4Address,
         gateway: *const Ipv4Address,
     ) -> Status,
-    transmit: unsafe extern "efiapi" fn(
-        this: *mut Self,
-        token: *mut Udp4CompletionToken,
-    ) -> Status,
-    receive: unsafe extern "efiapi" fn(
-        this: *mut Self,
-        token: *mut Udp4CompletionToken,
-    ) -> Status,
-    cancel: unsafe extern "efiapi" fn(
-        this: *mut Self,
-        token: *mut Udp4CompletionToken,
-    ) -> Status,
+    transmit: unsafe extern "efiapi" fn(this: *mut Self, token: *mut Udp4CompletionToken) -> Status,
+    receive: unsafe extern "efiapi" fn(this: *mut Self, token: *mut Udp4CompletionToken) -> Status,
+    cancel: unsafe extern "efiapi" fn(this: *mut Self, token: *mut Udp4CompletionToken) -> Status,
     poll: unsafe extern "efiapi" fn(this: *mut Self) -> Status,
 }
 
@@ -178,8 +167,7 @@ impl UdpDnsTransport for UefiUdp4Transport {
             return Err(DnsIoError::InvalidDatagram);
         }
 
-        let handles = boot::find_handles::<Udp4Binding>()
-            .map_err(|_| DnsIoError::Network)?;
+        let handles = boot::find_handles::<Udp4Binding>().map_err(|_| DnsIoError::Network)?;
         let mut last_error = DnsIoError::Network;
 
         for controller in handles.iter().copied() {
@@ -189,7 +177,11 @@ impl UdpDnsTransport for UefiUdp4Transport {
                 port,
                 query,
                 output,
-                if timeout_ms == 0 { DEFAULT_TIMEOUT_MS } else { timeout_ms },
+                if timeout_ms == 0 {
+                    DEFAULT_TIMEOUT_MS
+                } else {
+                    timeout_ms
+                },
             ) {
                 Ok(length) => return Ok(length),
                 Err(error) => last_error = error,
@@ -225,15 +217,12 @@ impl UefiUdp4Transport {
 
         let mut child_ptr = ptr::null_mut();
         // SAFETY: The service-binding pointer is valid and child_ptr is an out pointer.
-        let status = unsafe {
-            (binding.0.create_child)(&mut binding.0, &mut child_ptr)
-        };
+        let status = unsafe { (binding.0.create_child)(&mut binding.0, &mut child_ptr) };
         if status != Status::SUCCESS {
             return Err(map_status(status));
         }
         // SAFETY: successful CreateChild returns a non-null handle.
-        let child = unsafe { Handle::from_ptr(child_ptr) }
-            .ok_or(DnsIoError::Network)?;
+        let child = unsafe { Handle::from_ptr(child_ptr) }.ok_or(DnsIoError::Network)?;
 
         // SAFETY: child was created by this service-binding instance.
         let protocol_result = unsafe {
@@ -257,9 +246,9 @@ impl UefiUdp4Transport {
 
         let mut rng = UefiRandom::open().map_err(|_| DnsIoError::Network)?;
         let mut random_port_bytes = [0u8; 2];
-        rng.fill_bytes(&mut random_port_bytes).map_err(|_| DnsIoError::Network)?;
-        let station_port =
-            49_152u16 + (u16::from_be_bytes(random_port_bytes) % 16_384);
+        rng.fill_bytes(&mut random_port_bytes)
+            .map_err(|_| DnsIoError::Network)?;
+        let station_port = 49_152u16 + (u16::from_be_bytes(random_port_bytes) % 16_384);
 
         let remote = Ipv4Address(resolver.octets());
         let config = Udp4ConfigData {
@@ -295,11 +284,11 @@ impl UefiUdp4Transport {
         let mut receive_token = Udp4CompletionToken {
             event: receive_event.as_ptr(),
             status: Status::NOT_READY,
-            packet: Udp4Packet { rx_data: ptr::null_mut() },
+            packet: Udp4Packet {
+                rx_data: ptr::null_mut(),
+            },
         };
-        let receive_status = unsafe {
-            (protocol.0.receive)(&mut protocol.0, &mut receive_token)
-        };
+        let receive_status = unsafe { (protocol.0.receive)(&mut protocol.0, &mut receive_token) };
         if receive_status != Status::SUCCESS {
             let _ = boot::close_event(receive_event);
             let _ = boot::close_event(transmit_event);
@@ -358,30 +347,25 @@ impl UefiUdp4Transport {
             let _ = unsafe { (protocol.0.poll)(&mut protocol.0) };
 
             if !tx_complete {
-                tx_complete = boot::check_event(&transmit_event)
-                    .map_err(|_| DnsIoError::Network)?;
+                tx_complete =
+                    boot::check_event(&transmit_event).map_err(|_| DnsIoError::Network)?;
                 if tx_complete && transmit_token.status != Status::SUCCESS {
                     cancel_receive_and_drain(&mut protocol, &mut receive_token);
                     let _ = boot::close_event(receive_event);
                     let _ = boot::close_event(transmit_event);
                     drop(protocol);
-                    let _ = unsafe {
-                        (binding.0.destroy_child)(&mut binding.0, child.as_ptr())
-                    };
+                    let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
                     return Err(map_status(transmit_token.status));
                 }
             }
 
             if !rx_complete {
-                rx_complete = boot::check_event(&receive_event)
-                    .map_err(|_| DnsIoError::Network)?;
+                rx_complete = boot::check_event(&receive_event).map_err(|_| DnsIoError::Network)?;
                 if rx_complete && receive_token.status != Status::SUCCESS {
                     let _ = boot::close_event(receive_event);
                     let _ = boot::close_event(transmit_event);
                     drop(protocol);
-                    let _ = unsafe {
-                        (binding.0.destroy_child)(&mut binding.0, child.as_ptr())
-                    };
+                    let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
                     return Err(map_status(receive_token.status));
                 }
             }
@@ -421,9 +405,7 @@ impl UefiUdp4Transport {
 
         // Copy data while the receive buffer is owned by the UDP driver, then
         // signal its recycle event exactly once.
-        let received = unsafe {
-            copy_and_recycle(rx_data, resolver, port, output)
-        };
+        let received = unsafe { copy_and_recycle(rx_data, resolver, port, output) };
 
         let _ = boot::close_event(receive_event);
         let _ = boot::close_event(transmit_event);
@@ -473,9 +455,7 @@ unsafe fn copy_and_recycle(
             }
             // SAFETY: The fragment pointer and length are supplied by the live
             // driver-owned RxData object and are consumed before recycle.
-            let bytes = unsafe {
-                core::slice::from_raw_parts(fragment.fragment_buffer, length)
-            };
+            let bytes = unsafe { core::slice::from_raw_parts(fragment.fragment_buffer, length) };
             output[offset..offset + length].copy_from_slice(bytes);
             offset += length;
         }
@@ -531,19 +511,13 @@ fn wait_for_event(
     }
 }
 
-fn cancel_receive_and_drain(
-    udp: &mut ScopedProtocol<Udp4>,
-    token: &mut Udp4CompletionToken,
-) {
+fn cancel_receive_and_drain(udp: &mut ScopedProtocol<Udp4>, token: &mut Udp4CompletionToken) {
     // SAFETY: token is still live and was submitted to this protocol.
     let _ = unsafe { (udp.0.cancel)(&mut udp.0, token) };
     drain_token(udp, token.event);
 }
 
-fn cancel_transmit_and_drain(
-    udp: &mut ScopedProtocol<Udp4>,
-    token: &mut Udp4CompletionToken,
-) {
+fn cancel_transmit_and_drain(udp: &mut ScopedProtocol<Udp4>, token: &mut Udp4CompletionToken) {
     // SAFETY: token is still live and was submitted to this protocol.
     let _ = unsafe { (udp.0.cancel)(&mut udp.0, token) };
     drain_token(udp, token.event);

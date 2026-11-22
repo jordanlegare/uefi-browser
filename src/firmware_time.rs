@@ -15,10 +15,7 @@ pub fn unix_time_utc() -> Option<i64> {
 }
 
 pub fn time_to_unix_utc(time: &Time) -> Option<i64> {
-    if time.is_valid().is_err()
-        || time.year() < MIN_TRUSTED_YEAR
-        || time.time_zone().is_none()
-    {
+    if time.is_valid().is_err() || time.year() < MIN_TRUSTED_YEAR || time.time_zone().is_none() {
         return None;
     }
 
@@ -43,8 +40,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
     let year_of_era = adjusted_year - era * 400;
     let month_prime = month + if month > 2 { -3 } else { 9 };
     let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
-    let day_of_era =
-        year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
 
     era.checked_mul(146_097)?
         .checked_add(day_of_era)?
@@ -102,7 +98,10 @@ mod tests {
 
     #[test]
     fn rejects_unspecified_timezone_and_implausible_clock() {
-        assert_eq!(time_to_unix_utc(&firmware_time(2026, 1, 1, 0, 0, 0, None)), None);
+        assert_eq!(
+            time_to_unix_utc(&firmware_time(2026, 1, 1, 0, 0, 0, None)),
+            None
+        );
         assert_eq!(
             time_to_unix_utc(&firmware_time(2001, 1, 1, 0, 0, 0, Some(0))),
             None
