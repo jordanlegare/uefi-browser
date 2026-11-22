@@ -52,7 +52,12 @@ if [[ "$MINGW_MARKER_COUNT" -eq 1 && "$MINGW_GUARD_COUNT" -eq 1 && "$MINGW_OVERR
     echo "Mbed TLS debug.c MinGW formatter override remains after patching." >&2
     exit 1
   fi
-elif [[ "$MINGW_MARKER_COUNT" -eq 0 && "$MINGW_GUARD_COUNT" -eq 0 && "$MINGW_OVERRIDE_COUNT" -eq 0 ]]; then
+elif [[ "$MINGW_GUARD_COUNT" -eq 0 && "$MINGW_OVERRIDE_COUNT" -eq 0 && "$MINGW_MARKER_COUNT" -le 1 ]]; then
+  # Older build-script revisions removed only the preprocessor block and left
+  # its explanatory comment behind. Clean up that orphaned comment as well.
+  if [[ "$MINGW_MARKER_COUNT" -eq 1 ]]; then
+    sed -i '/^\/\* Temporary hack: on MingW/,/^ \*\//d' "$DEBUG_SOURCE"
+  fi
   echo "Mbed TLS debug.c MinGW formatter override is already absent; skipping patch."
 else
   echo "Unexpected Mbed TLS debug.c MinGW formatter block; refusing an unsafe patch." >&2
