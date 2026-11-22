@@ -185,8 +185,25 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         );
         TLS_HANDSHAKE_ACTIVE.store(true, Ordering::Release);
     } else if stage == 12 {
-        // Stage 12 is called only after mbedtls_ssl_handshake() has returned.
+        // Stage 12 is called after the final handshake step has returned.
         TLS_HANDSHAKE_ACTIVE.store(false, Ordering::Release);
+    } else if matches!(stage, 50 | 51 | 52 | 54) {
+        // These checkpoints are emitted by Rust between individual
+        // mbedtls_ssl_handshake_step() calls, never from inside Mbed TLS.
+        let message = match stage {
+            50 => format!("TLS handshake step {}: entering", detail),
+            51 => format!("TLS handshake step returned; state={}", detail),
+            52 => format!("TLS handshake step failed: {}", detail),
+            54 => format!("TLS handshake state before step: {}", detail),
+            _ => unreachable!(),
+        };
+        uefi::println!("{}", message);
+        if stage == 51 {
+            // Debug callbacks only append to the RAM ring while Mbed TLS runs.
+            // Render their tail after each step has returned.
+            uefi::println!("{}", tls_debug_report());
+        }
+        return;
     } else if TLS_HANDSHAKE_ACTIVE.load(Ordering::Acquire) {
         // These callbacks execute synchronously underneath Mbed TLS. Record
         // only the latest event; never call firmware console or clock APIs.
@@ -221,6 +238,10 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         37 => "TLS Rust: stream receive returned",
         40 => "TLS X.509: peer certificate chain depth",
         41 => "TLS X.509: verification flags (unchanged)",
+        50 => "TLS handshake step entering",
+        51 => "TLS handshake step returned",
+        52 => "TLS handshake step failed",
+        54 => "TLS handshake state",
         _ => "TLS diagnostic",
     };
     if let Some(elapsed) = tls_handshake_elapsed_seconds() {
