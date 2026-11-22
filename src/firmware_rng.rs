@@ -63,7 +63,6 @@ impl SecureRandom for UefiRandom {
     }
 }
 
-
 /// C ABI entropy callback used by TF-PSA-Crypto's Mbed TLS 4.x RNG.
 ///
 /// Each request opens EFI_RNG_PROTOCOL for the duration of the read. This

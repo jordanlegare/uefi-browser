@@ -7,7 +7,6 @@ use alloc::ffi::CString;
 use core::ffi::{c_int, c_void};
 use core::marker::PhantomData;
 
-
 pub trait TlsStreamIo {
     /// Write some bytes to the established TCP stream. Implementations block
     /// or poll until progress, EOF, or a bounded timeout.
@@ -69,11 +68,7 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
     ///
     /// ca_pem must be a trusted PEM CA bundle with its trailing NUL byte.
     /// hostname is used for SNI and certificate hostname verification.
-    pub fn new(
-        hostname: &str,
-        ca_pem: &[u8],
-        stream: &'a mut S,
-    ) -> Result<Self, TlsError> {
+    pub fn new(hostname: &str, ca_pem: &[u8], stream: &'a mut S) -> Result<Self, TlsError> {
         let hostname = CString::new(hostname).map_err(|_| TlsError::InvalidHostname)?;
         if ca_pem.last() != Some(&0) {
             return Err(TlsError::InvalidCaBundle);
