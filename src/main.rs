@@ -416,13 +416,28 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             121 => format!("MPI division: operands copied (limbs={})", detail),
             122 => format!("MPI division: divisor aligned (limb_shift={})", detail),
             123 => "MPI division: entering initial subtract loop".to_string(),
-            124 => format!("MPI division: initial subtract loop returned (limbs={})", detail),
+            124 => format!(
+                "MPI division: initial subtract loop returned (limbs={})",
+                detail
+            ),
             125 => format!("MPI division: entering quotient limb (index={})", detail),
-            126 => format!("MPI division: entering quotient correction (index={})", detail),
-            127 => format!("MPI division: quotient correction returned (index={})", detail),
-            128 => format!("MPI division: partial remainder subtraction returned (index={})", detail),
+            126 => format!(
+                "MPI division: entering quotient correction (index={})",
+                detail
+            ),
+            127 => format!(
+                "MPI division: quotient correction returned (index={})",
+                detail
+            ),
+            128 => format!(
+                "MPI division: partial remainder subtraction returned (index={})",
+                detail
+            ),
             129 => format!("MPI division: quotient limb completed (index={})", detail),
-            130 => format!("MPI division: quotient loop returned (divisor_limbs={})", detail),
+            130 => format!(
+                "MPI division: quotient loop returned (divisor_limbs={})",
+                detail
+            ),
             131 => format!("MPI division: remainder copied (limbs={})", detail),
             132 => format!("MPI division returned (result={})", detail),
             61 => format!(
