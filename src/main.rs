@@ -189,7 +189,32 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         TLS_HANDSHAKE_ACTIVE.store(false, Ordering::Release);
     } else if matches!(
         stage,
-        50 | 51 | 52 | 54 | 55 | 56 | 57 | 58 | 59 | 60 | 61 | 62 | 63 | 64 | 65 | 66 | 67
+        50 | 51
+            | 52
+            | 54
+            | 55
+            | 56
+            | 57
+            | 58
+            | 59
+            | 60
+            | 61
+            | 62
+            | 63
+            | 64
+            | 65
+            | 66
+            | 67
+            | 68
+            | 69
+            | 70
+            | 71
+            | 72
+            | 73
+            | 74
+            | 75
+            | 76
+            | 77
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
@@ -214,6 +239,34 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 detail
             ),
             67 => "TLS 1.3: initial debug callback returned".to_string(),
+            68 => "X.509: entering firmware-time conversion".to_string(),
+            69 => format!(
+                "X.509: firmware-time conversion returned (result={})",
+                detail
+            ),
+            70 => "X.509: entering certificate-chain construction".to_string(),
+            71 => format!(
+                "X.509: certificate-chain construction returned (result={})",
+                detail
+            ),
+            72 => format!("X.509: searching for issuer (chain depth={})", detail),
+            73 => format!("X.509: issuer search returned (result={})", detail),
+            74 => format!(
+                "X.509: hashing certificate signature input (bytes={})",
+                detail
+            ),
+            75 => format!(
+                "X.509: certificate signature hash returned (status={})",
+                detail
+            ),
+            76 => format!(
+                "X.509: entering public-key signature verification (algorithm={})",
+                detail
+            ),
+            77 => format!(
+                "X.509: public-key signature verification returned (result={})",
+                detail
+            ),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
                 detail
