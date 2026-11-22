@@ -65,26 +65,17 @@ Hickory DNS over UDP         NTP over UDP/123
 HTML text/link parser -> firmware-console renderer -> keyboard navigation
 ~~~
 
-The firmware path is implemented in src/snp_network.rs. It locates an EFI_SIMPLE_NETWORK_PROTOCOL handle, starts and initializes the NIC, enables unicast/broadcast/multicast reception, and exposes complete Ethernet frames through smoltcp's Device trait. smoltcp performs ARP, IPv4 routing, DHCPv4, UDP, and TCP in the EFI application. DHCP configuration supplies the address, default route, and DNS resolver; no EFI IPv4 Config2 protocol is consulted. connect_firmware_url() creates this stack, acquires a lease, resolves the hostname with Hickory over a smoltcp UDP socket, and opens a smoltcp TCP socket. FirmwareConnection keeps the stack and TCP socket alive for the lifetime of HTTP/TLS I/O. The original URL hostname remains available for TLS SNI and certificate identity checks.
+The firmware path is implemented in src/snp_network.rs. It locates an EFI_SIMPLE_NETWORK_PROTOCOL handle, starts and initializes the NIC, enables unicast/broadcast/multicast reception, and exposes complete Ethernet frames through smoltcp's Device trait. smoltcp performs ARP, IPv4 routing, DHCPv4, UDP, and TCP in the EFI application. DHCP configuration supplies the address, default route, and DNS resolver; no EFI IPv4 Config2 protocol is consulted. The browser creates the SNP/smoltcp stack once at startup, acquires its DHCP lease, synchronizes the clock, and retains the interface for the entire navigation session. Each connect_firmware_url() call resolves the requested hostname with Hickory over a smoltcp UDP socket and opens a smoltcp TCP socket on that already-configured interface. The returned FirmwareConnection temporarily borrows the persistent stack while HTTP/TLS I/O runs; dropping the connection closes only its TCP socket, not the DHCP lease or NIC state. The original URL hostname remains available for TLS SNI and certificate identity checks.
 
 The SNP adapter polls the firmware receive queue and emits complete Ethernet frames through smoltcp TxTokens. smoltcp owns protocol state and socket buffers; the application polls the interface while waiting for DHCP, UDP replies, TCP connection completion, and stream I/O. No UEFI IP4 Config2, UDP4, or TCP4 Service Binding interfaces are opened. The NIC's SNP driver remains firmware-provided; this project does not bundle a hardware-specific Ethernet driver.
 
-The key handoff is implemented in src/network.rs:
-
-- connect_url() calls the Hickory-backed dns::resolve_a().
-- It passes the resulting IPv4 address and URL port to Tcp4Connector::connect_tcp4().
-- It retains the original URL hostname in ConnectedPeer.
-- ConnectedPeer::start_tls() passes that hostname and the connected TCP stream to TlsConnection::new().
+The UEFI handoff is implemented by connect_firmware_url() in src/network.rs: it borrows the long-lived SnpNetwork, resolves the hostname via Hickory/UDP, opens a smoltcp TCP socket, and returns a stream wrapper borrowing the interface. The portable connect_url()/Tcp4Connector abstraction remains available for host-side testing; the UEFI browser does not use EFI_TCP4_PROTOCOL. In both paths, ConnectedPeer retains the original URL hostname so ConnectedPeer::start_tls() can pass it to TlsConnection::new() for SNI and X.509 identity checks.
 
 This separation matters for HTTPS: TCP connects to the numeric IP address, while Mbed TLS must still receive the DNS hostname so that SNI and certificate identity checks use the expected server name.
 
-### UEFI DNS4 versus UDP4
+### DNS policy and transport
 
-This implementation intentionally does **not** call EFI_DNS4_PROTOCOL. Hickory performs DNS wire-format encoding and decoding in Rust. Its packets are transported by the concrete EFI_UDP4_PROTOCOL adapter in src/uefi_udp4.rs.
-
-The adapter creates a UDP4 service-binding child, configures the firmware-provided default IPv4 address, sends to the configured resolver on UDP port 53, and waits for both transmit and receive completion. It rejects a reply unless the source IPv4 address and UDP source port match the selected resolver. The receive fragments are copied into the bounded DNS response buffer, then the driver's recycle event is signalled to return the packet buffers to firmware.
-
-DNS server discovery reads EFI IPv4 Config2 DNS_SERVER data, normally provisioned by DHCP. The adapter does not implement DHCP itself; the firmware network stack remains responsible for NIC initialization, address configuration, routing, and resolver provisioning. The startup path can connect drivers already registered with UEFI, but it cannot supply a NIC driver or IPv4 stack that the firmware does not provide.
+This implementation does not use EFI_DNS4_PROTOCOL or any firmware IP-layer resolver. Hickory builds and validates DNS wire messages; the application transports them through smoltcp UDP sockets over the SNP-backed Ethernet interface. DHCPv4 supplies the resolver address, and responses are accepted only from the selected resolver IPv4 address and UDP source port. Temporary UDP sockets use bounded packet buffers and timeout loops. The same UDP transport is used for SNTP.
 
 The DNS policy uses hickory-proto 0.26.3 with default features disabled. It sends IPv4 A/IN queries with a secure random transaction ID, retries a timeout once, and validates transaction ID, response/opcode, truncation flag, response code, question type/class/name, and answer owner/class. It currently does not chase CNAME chains, issue AAAA queries, use DNSSEC, cache answers, expand search domains, or retry truncated UDP messages over DNS/TCP.
 
@@ -99,10 +90,10 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | HTML title/text/anchor extraction | Implemented in portable core |
 | Hickory DNS message encoding/decoding | Implemented with default std features disabled |
 | DNS A-query client and response validation | Implemented with bounded retries and response checks |
-| DNS server discovery from EFI IPv4 Config2 | Implemented |
-| UEFI UDP4 concrete adapter | Implemented using a local UEFI 2.11 ABI binding |
-| UEFI TCP4 concrete adapter | Implemented using TCP4 Service Binding and child protocols |
-| TCP connect/send/receive timeout handling | Implemented with polling, cancellation, and token draining |
+| SNP Ethernet driver adapter | Implemented using EFI_SIMPLE_NETWORK_PROTOCOL |
+| DHCPv4, IPv4 routing, ARP, UDP and TCP | Implemented in the application with smoltcp |
+| Hickory DNS and SNTP over UDP | Implemented on the persistent smoltcp interface |
+| TCP connect/send/receive timeout handling | Implemented with bounded smoltcp polling and socket cleanup |
 | Secure random source abstraction and EFI RNG implementation | Implemented; no weak fallback |
 | Firmware UTC conversion and fail-closed date policy | Implemented; unspecified timezone, DST flags, invalid RTC and implausibly old time are rejected |
 | DNS-to-TCP-to-TLS orchestration | Implemented; hostname is retained for SNI and certificate checks |
@@ -116,7 +107,7 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | HTTP/1.1 GET and response parsing | Implemented |
 | Content-Length, chunked and close-delimited response bodies | Implemented with bounded response sizes |
 | Redirect following | Implemented with a hop limit and HTTPS-to-HTTP downgrade rejection |
-| HTTP fetch over TCP4 | Integrated in the browser loop |
+| HTTP fetch over smoltcp TCP | Integrated in the browser loop |
 | HTTPS fetch over Mbed TLS | Integrated conditionally; requires the static bridge and embedded CA bundle |
 | Terminal navigation loop | Implemented: open URL, links, back, forward, reload, search, help, quit |
 | Reflowing ELinks-style viewport, keyboard link focus and scrolling controls | Not yet implemented |
@@ -124,7 +115,7 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | QEMU/OVMF network integration test | Not yet run |
 | EFI image | Produced and uploaded as a CI artifact; OVMF/physical-firmware validation remains pending |
 
-The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits. The latest CI run passes Rust formatting, portable-core tests, the x86-64 UEFI target check, Mbed TLS 4.3.0 static compilation, UEFI C bridge compilation, final Rust+Mbed TLS link, PE/COFF inspection, and artifact upload. Firmware protocol behavior and real network browsing under OVMF/physical firmware remain release gates.
+The SNP adapter and smoltcp integration are concrete implementations, not just traits. CI passes Rust formatting, portable-core tests, the x86-64 UEFI target check, Mbed TLS 4.3.0 static compilation, UEFI C bridge compilation, final Rust+Mbed TLS link, PE/COFF inspection, and EFI artifact upload. SNP driver interoperability, DHCP, DNS, NTP, HTTP, and HTTPS must still be verified under OVMF and on physical hardware.
 
 ## Repository layout
 
@@ -137,12 +128,10 @@ The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits
 | src/dns.rs | Hickory DNS A-query construction, bounded UDP exchange contract and response validation |
 | src/entropy.rs | Secure-random provider interface used by DNS; TLS uses PSA Crypto's EFI_RNG entropy driver |
 | src/firmware_rng.rs | EFI_RNG_PROTOCOL-backed DNS RNG and C-ABI entropy provider for TF-PSA-Crypto |
-| src/firmware_network.rs | Connect registered NIC/network-stack drivers, bring up DHCP/IPv4 through IPv4 Config2, and check UDP4/TCP4 service bindings |
-| src/firmware_ntp.rs | SNTP time bootstrap over UDP4 and UEFI Runtime Services SetTime |
+| src/snp_network.rs | SNP Ethernet device and persistent smoltcp interface, DHCPv4, UDP/DNS, TCP streams |
+| src/firmware_ntp.rs | SNTP time bootstrap over smoltcp UDP and UEFI Runtime Services SetTime |
 | src/firmware_time.rs | Runtime Services UTC conversion with fail-closed validity and DST policy |
 | src/network.rs | DNS-to-TCP orchestration, firmware composition helper and retained-hostname Mbed TLS handoff |
-| src/uefi_udp4.rs | UDP4 service-binding child, DNS datagrams, source filtering and DNS-server discovery |
-| src/uefi_tcp4.rs | TCP4 service-binding child, bounded connect/transmit/receive, cancellation and cleanup |
 | src/tls.rs | Rust Mbed TLS FFI boundary and TCP BIO callback adapter; PSA Crypto supplies TLS randomness |
 | src/uefi_memory.rs | UEFI Boot Services pool allocator hooks for Mbed TLS |
 | src/ca_bundle.rs | Optional build-time embedded PEM trust bundle |
@@ -179,7 +168,7 @@ SHA-256: 1c87cba094cb40f097ebe0eba440a74939b71dab4e1d0d566bc90749ff381d18
 
 The intended final image contains static Mbed TLS libraries and the UEFI-specific C bridge. It must not require a DLL, shared object, firmware TLS protocol, or operating-system crypto service at runtime.
 
-The C bridge configures mandatory X.509 verification (MBEDTLS_SSL_VERIFY_REQUIRED), installs the supplied CA chain, initializes PSA Crypto before TLS setup, sets the original URL hostname for SNI and identity checks, and installs stream BIO callbacks. The Rust TlsConnection provides the BIO callbacks over the TCP4 stream. Mbed TLS 4.3 no longer uses the legacy `mbedtls_ssl_conf_rng` API: TF-PSA-Crypto's `MBEDTLS_PSA_DRIVER_GET_ENTROPY` hook calls a Rust C-ABI function that opens EFI_RNG_PROTOCOL and fills the requested buffer. Only successful firmware reads report full entropy; there is no libc or OS random source.
+The C bridge configures mandatory X.509 verification (MBEDTLS_SSL_VERIFY_REQUIRED), installs the supplied CA chain, initializes PSA Crypto before TLS setup, sets the original URL hostname for SNI and identity checks, and installs stream BIO callbacks. The Rust TlsConnection provides the BIO callbacks over the smoltcp TCP stream. Mbed TLS 4.3 no longer uses the legacy `mbedtls_ssl_conf_rng` API: TF-PSA-Crypto's `MBEDTLS_PSA_DRIVER_GET_ENTROPY` hook calls a Rust C-ABI function that opens EFI_RNG_PROTOCOL and fills the requested buffer. Only successful firmware reads report full entropy; there is no libc or OS random source.
 
 The UEFI port routes allocation to src/uefi_memory.rs using UEFI Boot Services AllocatePool/FreePool, and routes certificate time to src/firmware_time.rs through vendor/mbedtls-bridge/uefi_platform.c. The C-side Gregorian conversion implements the `mbedtls_platform_gmtime_r` hook; rejected or unavailable firmware time fails certificate validity checks closed.
 
@@ -283,7 +272,7 @@ dist/EFI/BOOT/BOOTX64.EFI
 
 build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UEFI_MBEDTLS_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
 
-**Verification record (22 November 2026):** GitHub Actions run [#44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870) passed both jobs on commit `b5c4107b6cb75e47202d7515d0613413b8fbec9e`. The full-build job compiled Mbed TLS 4.3.0 and the UEFI bridge, linked the standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `553d4c7c5757a921adf53fcddf55bf9f6cb45a15e6618dfc63352ce0fe45d0cb` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
+**Historical verification record (22 November 2026):** GitHub Actions run [#44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870) passed the earlier firmware-transport implementation. It is not the artifact for the SNP/smoltcp stack. The full-build job compiled Mbed TLS 4.3.0 and the UEFI bridge, linked the standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `553d4c7c5757a921adf53fcddf55bf9f6cb45a15e6618dfc63352ce0fe45d0cb` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
 
 ## Firmware adapter details
 
@@ -298,8 +287,6 @@ The application requires the firmware's SNP implementation and an Ethernet link,
 ### DHCP and NTP clock bootstrap
 
 At startup, the browser creates an SNP/smoltcp stack and runs its DHCPv4 client. The DHCP lease supplies the station address, default route, and DNS resolver. `src/firmware_ntp.rs` resolves `time.cloudflare.com` with Hickory over smoltcp UDP, sends an SNTP request over UDP port 123, validates response length, LI/version/mode/stratum and the echoed originate timestamp, then sets and reads back UTC using UEFI Runtime Services. The DHCP/UDP/TCP operations share the same application-owned IP stack.
-
-**Security limitation:** ordinary NTP is unauthenticated. Packet and nonce checks reject malformed or unrelated replies but do not prevent an on-path attacker from forging a response. Certificate verification remains mandatory; no TLS date-check bypass is introduced.
 
 **Security limitation:** ordinary NTP is unauthenticated. The nonce and packet checks prevent unrelated or malformed replies from being accepted, but do not prevent an on-path attacker from forging a response. This is a best-effort clock bootstrap, not a cryptographic time authority. Certificate verification remains mandatory and no TLS date-check bypass is introduced. Authenticated Network Time Security (NTS) is a future hardening item; it itself requires an initially trustworthy TLS time or a separately provisioned trust mechanism.
 
@@ -358,7 +345,7 @@ Copying a binary to this path does not guarantee network access. Firmware must e
 - [x] Implement bounded redirects and reject HTTPS-to-HTTP redirect downgrade.
 - [x] Run and verify the complete Mbed TLS 4.3.0 C cross-build and final PE/COFF link in CI.
 - [x] Build and inspect an EFI binary containing the CA roots and Mbed TLS libraries.
-- [ ] Run the browser under OVMF with UDP4/TCP4 network drivers and test real HTTP/HTTPS sites.
+- [ ] Run the browser under OVMF with SNP Ethernet and DHCPv4 networking and test real HTTP/HTTPS sites.
 - [ ] Test on multiple physical UEFI implementations and NIC drivers.
 - [ ] Add DNS CNAME/AAAA, DNS-over-TCP fallback, and cache.
 - [ ] Add terminal viewport scrolling, reflow, heading/list/table rendering, and keyboard link focus.
