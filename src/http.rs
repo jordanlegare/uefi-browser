@@ -139,7 +139,7 @@ pub fn exchange_get<S: TlsStreamIo>(
 /// Return true once a length-delimited or chunked HTTP response is complete.
 /// Close-delimited responses still require transport EOF.
 fn response_is_complete(input: &[u8], max_body: usize) -> Result<bool, HttpError> {
-    let Some(header_end) = find_bytes(input, b"\\r\\n\\r\\n") else {
+    let Some(header_end) = find_bytes(input, b"\r\n\r\n") else {
         if input.len() > HEADER_LIMIT {
             return Err(HttpError::HeaderTooLarge);
         }
@@ -153,7 +153,7 @@ fn response_is_complete(input: &[u8], max_body: usize) -> Result<bool, HttpError
         .map_err(|_| HttpError::InvalidHeader)?;
     let mut content_length = None;
     let mut chunked = false;
-    for line in headers.split("\\r\\n").skip(1) {
+    for line in headers.split("\r\n").skip(1) {
         let (name, value) = line.split_once(':').ok_or(HttpError::InvalidHeader)?;
         if name.eq_ignore_ascii_case("content-length") {
             let length = value.trim().parse::<usize>()
@@ -403,23 +403,23 @@ mod tests {
 
     #[test]
     fn detects_complete_content_length_response_without_waiting_for_eof() {
-        let response = b"HTTP/1.1 200 OK\\r\\nContent-Length: 5\\r\\n\\r\\nhello";
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
         assert!(response_is_complete(response, 1024).unwrap());
         assert!(!response_is_complete(
-            b"HTTP/1.1 200 OK\\r\\nContent-Length: 5\\r\\n\\r\\nhell",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhell",
             1024
         ).unwrap());
     }
 
     #[test]
     fn detects_complete_chunked_response_without_waiting_for_eof() {
-        let response = b"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n5\\r\\nhello\\r\\n0\\r\\n\\r\\n";
+        let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
         assert!(response_is_complete(response, 1024).unwrap());
     }
 
     #[test]
     fn close_delimited_response_waits_for_transport_eof() {
-        let response = b"HTTP/1.1 200 OK\\r\\nContent-Type: text/plain\\r\\n\\r\\nhello";
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nhello";
         assert!(!response_is_complete(response, 1024).unwrap());
     }
 
