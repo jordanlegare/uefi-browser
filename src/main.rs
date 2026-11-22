@@ -6,6 +6,9 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::ffi::{c_char, CStr};
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+use core::sync::atomic::{AtomicI64, Ordering};
 
 use uefi::proto::console::text::Key;
 use uefi::{Status, helpers, system};
@@ -25,8 +28,25 @@ unsafe extern "C" {
 }
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_HANDSHAKE_START_UNIX: AtomicI64 = AtomicI64::new(-1);
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+fn tls_handshake_elapsed_seconds() -> Option<i64> {
+    let start = TLS_HANDSHAKE_START_UNIX.load(Ordering::Relaxed);
+    let now = uefi_browser::firmware_time::uefi_browser_time_unix();
+    (start >= 0 && now >= start).then_some(now - start)
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 #[unsafe(no_mangle)]
 pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
+    if stage == 11 {
+        TLS_HANDSHAKE_START_UNIX.store(
+            uefi_browser::firmware_time::uefi_browser_time_unix(),
+            Ordering::Relaxed,
+        );
+    }
+
     let message = match stage {
         1 => "TLS init: entering psa_crypto_init",
         2 => "TLS init: PSA crypto initialized",
@@ -50,9 +70,53 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         35 => "TLS Rust: stream send returned",
         36 => "TLS Rust: stream receive entering",
         37 => "TLS Rust: stream receive returned",
+        40 => "TLS X.509: peer certificate chain depth",
+        41 => "TLS X.509: verification flags (unchanged)",
         _ => "TLS diagnostic",
     };
-    uefi::println!("{} (detail={})", message, detail);
+    if let Some(elapsed) = tls_handshake_elapsed_seconds() {
+        uefi::println!("{} (elapsed={}s detail={})", message, elapsed, detail);
+    } else {
+        uefi::println!("{} (elapsed=unknown detail={})", message, detail);
+    }
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+#[unsafe(no_mangle)]
+pub extern "C" fn uefi_browser_tls_debug_log(
+    level: i32,
+    file: *const c_char,
+    line: i32,
+    message: *const c_char,
+) {
+    if message.is_null() {
+        return;
+    }
+
+    let message_bytes = unsafe { CStr::from_ptr(message) }.to_bytes();
+    let message_bytes = &message_bytes[..message_bytes.len().min(240)];
+    let message = core::str::from_utf8(message_bytes).unwrap_or("<non-UTF-8 debug text>");
+
+    let source = if file.is_null() {
+        "?"
+    } else {
+        let bytes = unsafe { CStr::from_ptr(file) }.to_bytes();
+        let bytes = &bytes[..bytes.len().min(80)];
+        core::str::from_utf8(bytes).unwrap_or("?")
+    };
+
+    if let Some(elapsed) = tls_handshake_elapsed_seconds() {
+        uefi::println!(
+            "TLS MbedTLS +{}s L{} {}:{} {}",
+            elapsed,
+            level,
+            source,
+            line,
+            message
+        );
+    } else {
+        uefi::println!("TLS MbedTLS L{} {}:{} {}", level, source, line, message);
+    }
 }
 
 struct BrowserPage {
