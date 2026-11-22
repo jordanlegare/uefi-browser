@@ -278,11 +278,11 @@ impl UefiUdp4Transport {
             return Err(map_status(status));
         }
 
-        let receive_event = create_notify_event().map_err(|_| DnsIoError::Network)?;
-        let transmit_event = create_notify_event().map_err(|_| DnsIoError::Network)?;
+        let receive_events = create_completion_events()?;
+        let transmit_events = create_completion_events()?;
 
         let mut receive_token = Udp4CompletionToken {
-            event: receive_event.as_ptr(),
+            event: receive_events.notify_ptr(),
             status: Status::NOT_READY,
             packet: Udp4Packet {
                 rx_data: ptr::null_mut(),
@@ -290,8 +290,8 @@ impl UefiUdp4Transport {
         };
         let receive_status = unsafe { (protocol.0.receive)(&mut protocol.0, &mut receive_token) };
         if receive_status != Status::SUCCESS {
-            let _ = boot::close_event(receive_event);
-            let _ = boot::close_event(transmit_event);
+            let _ = 
+            let _ = 
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(map_status(receive_status));
@@ -317,7 +317,7 @@ impl UefiUdp4Transport {
             },
         };
         let mut transmit_token = Udp4CompletionToken {
-            event: transmit_event.as_ptr(),
+            event: transmit_events.notify_ptr(),
             status: Status::NOT_READY,
             packet: Udp4Packet {
                 tx_data: ptr::addr_of_mut!(tx_packet.header),
@@ -329,9 +329,9 @@ impl UefiUdp4Transport {
         let transmit_status =
             unsafe { (protocol.0.transmit)(&mut protocol.0, &mut transmit_token) };
         if transmit_status != Status::SUCCESS {
-            cancel_receive_and_drain(&mut protocol, &mut receive_token);
-            let _ = boot::close_event(receive_event);
-            let _ = boot::close_event(transmit_event);
+            cancel_receive_and_drain(&mut protocol, &mut receive_token, receive_events.wait_event());
+            let _ = 
+            let _ = 
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(map_status(transmit_status));
@@ -348,11 +348,11 @@ impl UefiUdp4Transport {
 
             if !tx_complete {
                 tx_complete =
-                    boot::check_event(&transmit_event).map_err(|_| DnsIoError::Network)?;
+                    boot::check_event(transmit_events.wait_event()).map_err(|_| DnsIoError::Network)?;
                 if tx_complete && transmit_token.status != Status::SUCCESS {
-                    cancel_receive_and_drain(&mut protocol, &mut receive_token);
-                    let _ = boot::close_event(receive_event);
-                    let _ = boot::close_event(transmit_event);
+                    cancel_receive_and_drain(&mut protocol, &mut receive_token, receive_events.wait_event());
+                    let _ = 
+                    let _ = 
                     drop(protocol);
                     let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
                     return Err(map_status(transmit_token.status));
@@ -360,10 +360,10 @@ impl UefiUdp4Transport {
             }
 
             if !rx_complete {
-                rx_complete = boot::check_event(&receive_event).map_err(|_| DnsIoError::Network)?;
+                rx_complete = boot::check_event(receive_events.wait_event()).map_err(|_| DnsIoError::Network)?;
                 if rx_complete && receive_token.status != Status::SUCCESS {
-                    let _ = boot::close_event(receive_event);
-                    let _ = boot::close_event(transmit_event);
+                    let _ = 
+                    let _ = 
                     drop(protocol);
                     let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
                     return Err(map_status(receive_token.status));
@@ -375,19 +375,19 @@ impl UefiUdp4Transport {
             }
 
             let step = core::cmp::min(1000, timeout_us - elapsed_us);
-            boot::stall(step as usize).map_err(|_| DnsIoError::Network)?;
+            let _ = boot::stall(step as usize);
             elapsed_us += step;
         }
 
         if !rx_complete || !tx_complete {
             if !rx_complete {
-                cancel_receive_and_drain(&mut protocol, &mut receive_token);
+                cancel_receive_and_drain(&mut protocol, &mut receive_token, receive_events.wait_event());
             }
             if !tx_complete {
-                cancel_transmit_and_drain(&mut protocol, &mut transmit_token);
+                cancel_transmit_and_drain(&mut protocol, &mut transmit_token, transmit_events.wait_event());
             }
-            let _ = boot::close_event(receive_event);
-            let _ = boot::close_event(transmit_event);
+            let _ = 
+            let _ = 
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(DnsIoError::Timeout);
@@ -396,8 +396,8 @@ impl UefiUdp4Transport {
         // SAFETY: a successful receive token provides the driver-owned RxData.
         let rx_data = unsafe { receive_token.packet.rx_data };
         if rx_data.is_null() {
-            let _ = boot::close_event(receive_event);
-            let _ = boot::close_event(transmit_event);
+            let _ = 
+            let _ = 
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(DnsIoError::InvalidDatagram);
@@ -407,8 +407,8 @@ impl UefiUdp4Transport {
         // signal its recycle event exactly once.
         let received = unsafe { copy_and_recycle(rx_data, resolver, port, output) };
 
-        let _ = boot::close_event(receive_event);
-        let _ = boot::close_event(transmit_event);
+        let _ = 
+        let _ = 
         drop(protocol);
         let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
 
@@ -474,20 +474,73 @@ unsafe fn copy_and_recycle(
     result
 }
 
-fn create_notify_event() -> Result<Event, DnsIoError> {
-    // UEFI UDP4 completion events must be EVT_NOTIFY_SIGNAL at TPL_CALLBACK.
-    unsafe {
+/// UEFI requires UDP4 completion tokens to reference EVT_NOTIFY_SIGNAL
+/// events. A paired plain event is signalled by the notification callback so
+/// the application can poll it with CheckEvent.
+struct CompletionEvents {
+    notify: Option<Event>,
+    wait: Option<Event>,
+}
+
+impl CompletionEvents {
+    fn notify_ptr(&self) -> uefi_raw::Event {
+        self.notify.as_ref().expect("notify event is live").as_ptr()
+    }
+
+    fn wait_event(&self) -> &Event {
+        self.wait.as_ref().expect("wait event is live")
+    }
+}
+
+impl Drop for CompletionEvents {
+    fn drop(&mut self) {
+        if let Some(event) = self.notify.take() {
+            let _ = boot::close_event(event);
+        }
+        if let Some(event) = self.wait.take() {
+            let _ = boot::close_event(event);
+        }
+    }
+}
+
+fn create_completion_events() -> Result<CompletionEvents, DnsIoError> {
+    let wait = unsafe { boot::create_event(EventType::empty(), Tpl::APPLICATION, None, None) }
+        .map_err(|_| DnsIoError::Network)?;
+    let context = NonNull::new(wait.as_ptr()).ok_or(DnsIoError::Network)?;
+    let notify = match unsafe {
         boot::create_event(
             EventType::NOTIFY_SIGNAL,
             Tpl::CALLBACK,
-            Some(noop_notify),
-            None,
+            Some(signal_completion_event),
+            Some(context),
         )
-    }
-    .map_err(|_| DnsIoError::Network)
+    } {
+        Ok(event) => event,
+        Err(_) => {
+            let _ = boot::close_event(wait);
+            return Err(DnsIoError::Network);
+        }
+    };
+
+    Ok(CompletionEvents {
+        notify: Some(notify),
+        wait: Some(wait),
+    })
 }
 
-unsafe extern "efiapi" fn noop_notify(_event: Event, _context: Option<NonNull<c_void>>) {}
+unsafe extern "efiapi" fn signal_completion_event(
+    _event: Event,
+    context: Option<NonNull<c_void>>,
+) {
+    let Some(context) = context else {
+        return;
+    };
+    // SAFETY: context points to the paired plain wait event. CompletionEvents
+    // closes the notify event before it closes the wait event.
+    if let Some(event) = unsafe { Event::from_ptr(context.as_ptr()) } {
+        let _ = boot::signal_event(&event);
+    }
+}
 
 fn wait_for_event(
     udp: &mut ScopedProtocol<Udp4>,
@@ -506,30 +559,34 @@ fn wait_for_event(
             return Err(DnsIoError::Timeout);
         }
         let step = core::cmp::min(1000, timeout_us - elapsed);
-        boot::stall(step as usize).map_err(|_| DnsIoError::Network)?;
+        let _ = boot::stall(step as usize);
         elapsed += step;
     }
 }
 
-fn cancel_receive_and_drain(udp: &mut ScopedProtocol<Udp4>, token: &mut Udp4CompletionToken) {
+fn cancel_receive_and_drain(
+    udp: &mut ScopedProtocol<Udp4>,
+    token: &mut Udp4CompletionToken,
+    wait_event: &Event,
+) {
     // SAFETY: token is still live and was submitted to this protocol.
     let _ = unsafe { (udp.0.cancel)(&mut udp.0, token) };
-    drain_token(udp, token.event);
+    drain_token(udp, wait_event);
 }
 
-fn cancel_transmit_and_drain(udp: &mut ScopedProtocol<Udp4>, token: &mut Udp4CompletionToken) {
+fn cancel_transmit_and_drain(
+    udp: &mut ScopedProtocol<Udp4>,
+    token: &mut Udp4CompletionToken,
+    wait_event: &Event,
+) {
     // SAFETY: token is still live and was submitted to this protocol.
     let _ = unsafe { (udp.0.cancel)(&mut udp.0, token) };
-    drain_token(udp, token.event);
+    drain_token(udp, wait_event);
 }
 
-fn drain_token(udp: &mut ScopedProtocol<Udp4>, raw_event: uefi_raw::Event) {
-    // SAFETY: raw_event belongs to the live completion token.
-    let Some(event) = (unsafe { Event::from_ptr(raw_event) }) else {
-        return;
-    };
+fn drain_token(udp: &mut ScopedProtocol<Udp4>, event: &Event) {
     loop {
-        if boot::check_event(&event).unwrap_or(false) {
+        if boot::check_event(event).unwrap_or(false) {
             return;
         }
         // SAFETY: protocol remains open until token completion.

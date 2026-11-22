@@ -293,7 +293,7 @@ impl Tcp4Stream {
 
         if wait.is_err() {
             let tcp = self.protocol()?;
-            cancel_io_and_drain(tcp, &mut token);
+            cancel_io_and_drain(tcp, &mut token, events.wait_event());
             return Err(());
         }
 
@@ -355,14 +355,12 @@ impl Tcp4Stream {
         };
         if wait.is_err() {
             let tcp = self.protocol()?;
-            cancel_io_and_drain(tcp, &mut token);
+            cancel_io_and_drain(tcp, &mut token, events.wait_event());
             return Err(());
         }
 
         let completion = token.completion_token.status;
         let received = packet.header.data_length as usize;
-        let _ = boot::close_event(event);
-
         if completion != Status::SUCCESS || received > capacity {
             return Err(());
         }
