@@ -74,7 +74,6 @@ fn main() -> Status {
     };
     uefi::println!("");
 
-
     #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
     {
         // Touch the allocator and clock exports so their definitions remain
@@ -241,7 +240,10 @@ fn main() -> Status {
     Status::SUCCESS
 }
 
-fn fetch_document(initial_url: &Url, network: &mut uefi_browser::snp_network::SnpNetwork) -> Result<BrowserPage, String> {
+fn fetch_document(
+    initial_url: &Url,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Result<BrowserPage, String> {
     let mut current = initial_url.clone();
 
     for redirect_index in 0..=MAX_REDIRECTS {
@@ -301,7 +303,10 @@ fn fetch_document(initial_url: &Url, network: &mut uefi_browser::snp_network::Sn
     Err(String::from("redirect limit exceeded"))
 }
 
-fn fetch_response(url: &Url, network: &mut uefi_browser::snp_network::SnpNetwork) -> Result<HttpResponse, String> {
+fn fetch_response(
+    url: &Url,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Result<HttpResponse, String> {
     #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle)))]
     if url.scheme == Scheme::Https {
         return Err(String::from(
