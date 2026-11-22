@@ -118,7 +118,7 @@ pub fn build_a_query(hostname: &str, transaction_id: u16) -> Result<alloc::vec::
 
     let mut message = Message::new(transaction_id, MessageType::Query, OpCode::Query);
     message.metadata.recursion_desired = true;
-    message.add_query(Query::new(name, RecordType::A));
+    message.add_query(Query::query(name, RecordType::A));
 
     message.to_vec().map_err(|_| DnsError::EncodeFailed)
 }
@@ -248,7 +248,7 @@ mod tests {
     fn response(id: u16) -> Vec<u8> {
         let name = Name::from_ascii("example.org.").unwrap();
         let mut message = Message::new(id, MessageType::Response, OpCode::Query);
-        message.add_query(Query::new(name.clone(), RecordType::A));
+        message.add_query(Query::query(name.clone(), RecordType::A));
         message.add_answer(Record::from_rdata(
             name,
             60,
@@ -311,7 +311,7 @@ mod tests {
 
         let mut truncated = Message::new(7, MessageType::Response, OpCode::Query);
         truncated.metadata.truncation = true;
-        truncated.add_query(Query::new(
+        truncated.add_query(Query::query(
             Name::from_ascii("example.org.").unwrap(),
             RecordType::A,
         ));
