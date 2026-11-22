@@ -136,11 +136,10 @@ impl Device for SnpDevice {
         Some(SnpTxToken(self))
     }
     fn capabilities(&self) -> DeviceCapabilities {
-        DeviceCapabilities {
-            medium: Medium::Ethernet,
-            max_transmission_unit: self.mtu,
-            ..DeviceCapabilities::default()
-        }
+        let mut capabilities = DeviceCapabilities::default();
+        capabilities.medium = Medium::Ethernet;
+        capabilities.max_transmission_unit = self.mtu;
+        capabilities
     }
 }
 
