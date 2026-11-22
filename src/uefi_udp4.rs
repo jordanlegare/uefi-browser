@@ -327,7 +327,11 @@ impl UefiUdp4Transport {
         let transmit_status =
             unsafe { (protocol.0.transmit)(&mut protocol.0, &mut transmit_token) };
         if transmit_status != Status::SUCCESS {
-            cancel_receive_and_drain(&mut protocol, &mut receive_token, receive_events.wait_event());
+            cancel_receive_and_drain(
+                &mut protocol,
+                &mut receive_token,
+                receive_events.wait_event(),
+            );
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(map_status(transmit_status));
@@ -343,11 +347,14 @@ impl UefiUdp4Transport {
             let _ = unsafe { (protocol.0.poll)(&mut protocol.0) };
 
             if !tx_complete {
-                tx_complete =
-                    boot::check_event(transmit_events.wait_event()).unwrap_or(false);
+                tx_complete = boot::check_event(transmit_events.wait_event()).unwrap_or(false);
                 if tx_complete && transmit_token.status != Status::SUCCESS {
-                    cancel_receive_and_drain(&mut protocol, &mut receive_token, receive_events.wait_event());
-                                    drop(protocol);
+                    cancel_receive_and_drain(
+                        &mut protocol,
+                        &mut receive_token,
+                        receive_events.wait_event(),
+                    );
+                    drop(protocol);
                     let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
                     return Err(map_status(transmit_token.status));
                 }
@@ -356,7 +363,7 @@ impl UefiUdp4Transport {
             if !rx_complete {
                 rx_complete = boot::check_event(receive_events.wait_event()).unwrap_or(false);
                 if rx_complete && receive_token.status != Status::SUCCESS {
-                                    drop(protocol);
+                    drop(protocol);
                     let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
                     return Err(map_status(receive_token.status));
                 }
@@ -373,10 +380,18 @@ impl UefiUdp4Transport {
 
         if !rx_complete || !tx_complete {
             if !rx_complete {
-                cancel_receive_and_drain(&mut protocol, &mut receive_token, receive_events.wait_event());
+                cancel_receive_and_drain(
+                    &mut protocol,
+                    &mut receive_token,
+                    receive_events.wait_event(),
+                );
             }
             if !tx_complete {
-                cancel_transmit_and_drain(&mut protocol, &mut transmit_token, transmit_events.wait_event());
+                cancel_transmit_and_drain(
+                    &mut protocol,
+                    &mut transmit_token,
+                    transmit_events.wait_event(),
+                );
             }
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
@@ -514,10 +529,7 @@ fn create_completion_events() -> Result<CompletionEvents, DnsIoError> {
     })
 }
 
-unsafe extern "efiapi" fn signal_completion_event(
-    _event: Event,
-    context: Option<NonNull<c_void>>,
-) {
+unsafe extern "efiapi" fn signal_completion_event(_event: Event, context: Option<NonNull<c_void>>) {
     let Some(context) = context else {
         return;
     };

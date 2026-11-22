@@ -410,7 +410,6 @@ impl Tcp4Stream {
         }
         self.closed = true;
     }
-
 }
 
 impl TlsStreamIo for Tcp4Stream {
