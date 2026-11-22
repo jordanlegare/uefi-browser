@@ -189,7 +189,7 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         TLS_HANDSHAKE_ACTIVE.store(false, Ordering::Release);
     } else if matches!(
         stage,
-        50 | 51 | 52 | 54 | 55 | 56 | 57 | 58 | 59 | 60 | 61 | 62 | 63 | 64 | 65 | 66
+        50 | 51 | 52 | 54 | 55 | 56 | 57 | 58 | 59 | 60 | 61 | 62 | 63 | 64 | 65 | 66 | 67
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
@@ -208,11 +208,12 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 "TLS 1.3: server-certificate processor returned (result={})",
                 detail
             ),
-            59 => "TLS 1.3: fetching Certificate handshake message".to_string(),
+            59 => "TLS 1.3: entered certificate processor before debug callback".to_string(),
             60 => format!(
                 "TLS 1.3: Certificate message fetch returned (result={})",
                 detail
             ),
+            67 => "TLS 1.3: initial debug callback returned".to_string(),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
                 detail
