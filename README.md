@@ -7,7 +7,7 @@ A standalone Rust application for x86-64 UEFI firmware, intended to grow into a 
 ## Goals
 
 - Run directly as an x86-64 UEFI application without Linux, initramfs, shell, or host userspace.
-- Start after firmware has initialized networking and acquired IPv4 configuration.
+- Run while UEFI Boot Services remain active; connect already-registered NIC/network-stack drivers and request DHCP when the IPv4 Config2 stack is available.
 - Use UEFI UDP4 and TCP4 protocols directly; do not call host OS socket APIs.
 - Use a Rust DNS client library for DNS packet encoding and decoding.
 - Bundle Mbed TLS into the EFI image so HTTPS does not depend on a firmware TLS service.
@@ -61,7 +61,7 @@ HTTP/1.1 request/response codec over TCP4 or Mbed TLS streams
 HTML text/link parser -> firmware-console renderer -> keyboard navigation
 ~~~
 
-The high-level firmware path is provided by connect_firmware_url() in src/network.rs. It reads DNS server addresses from EFI IPv4 Config2, opens EFI RNG for the DNS query, resolves the hostname using Hickory over the UDP4 adapter, then connects TCP4 to the resulting address. The returned FirmwareConnection retains the stream and original hostname for SNI and certificate identity. Mbed TLS 4.3 obtains its later PSA entropy requests independently through the TF-PSA firmware RNG hook.
+The high-level firmware path is provided by connect_firmware_url() in src/network.rs. Before navigation, src/firmware_network.rs first looks for EFI IPv4 Config2 handles. If none are exposed, it enumerates EFI_SIMPLE_NETWORK_PROTOCOL NIC handles and asks UEFI Boot Services to connect the registered driver stack recursively on each controller, then searches again for IPv4 Config2. It requests DHCP through IfUp and checks for UDP4/TCP4 service bindings and a DNS resolver. After startup, connect_firmware_url() reads DNS server addresses from EFI IPv4 Config2, opens EFI RNG for the DNS query, resolves the hostname using Hickory over the UDP4 adapter, then connects TCP4 to the resulting address. The returned FirmwareConnection retains the stream and original hostname for SNI and certificate identity. Mbed TLS 4.3 obtains its later PSA entropy requests independently through the TF-PSA firmware RNG hook.
 
 The low-level firmware adapters use UEFI Service Binding child handles. TCP4 and UDP4 completion tokens are asynchronous: the code uses EVT_NOTIFY_SIGNAL events at TPL_CALLBACK and paired plain wait events for application-side polling. Pending operation tokens are cancelled and drained before their memory, event, or protocol child is released. This is important because firmware may continue referencing token and fragment memory until the completion event is signalled.
 
@@ -80,7 +80,7 @@ This implementation intentionally does **not** call EFI_DNS4_PROTOCOL. Hickory p
 
 The adapter creates a UDP4 service-binding child, configures the firmware-provided default IPv4 address, sends to the configured resolver on UDP port 53, and waits for both transmit and receive completion. It rejects a reply unless the source IPv4 address and UDP source port match the selected resolver. The receive fragments are copied into the bounded DNS response buffer, then the driver's recycle event is signalled to return the packet buffers to firmware.
 
-DNS server discovery reads EFI IPv4 Config2 DNS_SERVER data, normally provisioned by DHCP. The adapter does not implement DHCP itself; the firmware network stack remains responsible for NIC initialization, address configuration, routing, and resolver provisioning.
+DNS server discovery reads EFI IPv4 Config2 DNS_SERVER data, normally provisioned by DHCP. The adapter does not implement DHCP itself; the firmware network stack remains responsible for NIC initialization, address configuration, routing, and resolver provisioning. The startup path can connect drivers already registered with UEFI, but it cannot supply a NIC driver or IPv4 stack that the firmware does not provide.
 
 The DNS policy uses hickory-proto 0.26.3 with default features disabled. It sends IPv4 A/IN queries with a secure random transaction ID, retries a timeout once, and validates transaction ID, response/opcode, truncation flag, response code, question type/class/name, and answer owner/class. It currently does not chase CNAME chains, issue AAAA queries, use DNSSEC, cache answers, expand search domains, or retry truncated UDP messages over DNS/TCP.
 
@@ -133,7 +133,7 @@ The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits
 | src/dns.rs | Hickory DNS A-query construction, bounded UDP exchange contract and response validation |
 | src/entropy.rs | Secure-random provider interface used by DNS; TLS uses PSA Crypto's EFI_RNG entropy driver |
 | src/firmware_rng.rs | EFI_RNG_PROTOCOL-backed DNS RNG and C-ABI entropy provider for TF-PSA-Crypto |
-| src/firmware_network.rs | DHCP/IPv4 bring-up through IPv4 Config2 and UDP4/TCP4 service-binding checks |
+| src/firmware_network.rs | Connect registered NIC/network-stack drivers, bring up DHCP/IPv4 through IPv4 Config2, and check UDP4/TCP4 service bindings |
 | src/firmware_ntp.rs | SNTP time bootstrap over UDP4 and UEFI Runtime Services SetTime |
 | src/firmware_time.rs | Runtime Services UTC conversion with fail-closed validity and DST policy |
 | src/network.rs | DNS-to-TCP orchestration, firmware composition helper and retained-hostname Mbed TLS handoff |
@@ -247,7 +247,7 @@ The complete build requires:
 - Clang/LLVM capable of emitting x86-64 COFF objects and llvm-ar.
 - curl, sha256sum and tar to obtain the pinned Mbed TLS source and trust bundle.
 - UEFI firmware exposing UDP4, TCP4, EFI_RNG_PROTOCOL, IPv4 Config2 DNS data and Runtime Services time.
-- Firmware network drivers exposing IPv4 Config2, UDP4 and TCP4 service bindings; the application requests DHCP through IPv4 Config2 IfUp.
+- UEFI network drivers exposing Simple Network Protocol and registered IPv4/UDP4/TCP4 stack drivers; the application asks Boot Services to connect available drivers, then requests DHCP through IPv4 Config2 IfUp. Firmware must still provide the drivers.
 
 Install the Rust target:
 
@@ -301,7 +301,7 @@ Each TCP4 completion token uses an EVT_NOTIFY_SIGNAL event at TPL_CALLBACK. The 
 
 ### Firmware network startup and NTP clock bootstrap
 
-At application startup, src/firmware_network.rs calls EFI IPv4 Config2 IfUp on discovered interfaces. If an interface has no station address, IfUp requests DHCP and waits up to the UEFI crate's 30-second timeout. Startup then verifies that UDP4 and TCP4 service-binding protocols are present and that DHCP supplied a DNS resolver. UDP4 and TCP4 child protocols are created on demand by the existing transport adapters; the browser does not install NIC drivers or implement Ethernet/IP itself.
+At application startup, src/firmware_network.rs first searches for EFI IPv4 Config2 interfaces. If none exist, it discovers EFI_SIMPLE_NETWORK_PROTOCOL controllers and calls Boot Services ConnectController recursively so already-registered firmware drivers can bind their managed-network, IPv4, DHCP, UDP4 and TCP4 layers. It then searches again for IPv4 Config2. On discovered interfaces, IfUp requests DHCP when no station address is configured and waits up to the UEFI crate's 30-second timeout. Startup verifies UDP4 and TCP4 service-binding protocols and that a DNS resolver was supplied. UDP4 and TCP4 child protocols are created on demand by the transport adapters. The browser does not load missing NIC/stack driver images or implement Ethernet/IP itself. If IPv4 Config2 remains absent after the connect pass, the firmware network stack is unavailable to this application.
 
 src/firmware_ntp.rs resolves time.cloudflare.com using the DHCP-provided resolver and Hickory, then sends an SNTP client request over UDP4 port 123. It checks the server response mode, version, leap indicator, stratum, packet length, and echoed originate timestamp before accepting the transmit timestamp. The timestamp is converted to a UTC EFI_TIME and written with Runtime Services SetTime. GetTime is read back and checked before the browser reports synchronization. The NTP query runs only after IPv4/DHCP and both transport service bindings have been verified.
 
@@ -340,7 +340,7 @@ The intended x86-64 removable-media path is:
 EFI/BOOT/BOOTX64.EFI
 ~~~
 
-Copying a binary to this path does not guarantee network access. Firmware must have initialized and exposed the NIC, UDP4, TCP4, RNG, and time protocols before the app starts.
+Copying a binary to this path does not guarantee network access. The application can ask UEFI to connect registered NIC/network-stack drivers, but the firmware must supply those drivers and the resulting IPv4 Config2, UDP4, TCP4, RNG, and Runtime Services time protocols.
 
 ## Roadmap
 
@@ -353,7 +353,7 @@ Copying a binary to this path does not guarantee network access. Firmware must h
 - [x] Implement concrete UEFI UDP4 transport with source filtering and receive-buffer recycling.
 - [x] Implement concrete UEFI TCP4 active connect, partial I/O, timeouts, cancellation and cleanup.
 - [x] Implement EFI_RNG_PROTOCOL and UEFI UTC clock adapters with fail-closed policy.
-- [x] Add DHCP/IPv4 startup, verify UDP4/TCP4 service bindings, and bootstrap the UEFI clock with validated SNTP before TLS initialization.
+- [x] Connect registered UEFI NIC/network-stack drivers when needed; add DHCP/IPv4 startup, verify UDP4/TCP4 service bindings, and bootstrap the UEFI clock with validated SNTP before TLS initialization.
 - [x] Connect Hickory DNS -> UDP4 -> TCP4 -> Mbed TLS while retaining the server hostname for SNI.
 - [x] Add Mbed TLS 4.3.0 source pin and archive checksum verification.
 - [x] Add UEFI allocator, platform time/gmtime hooks, and static COFF build/link scaffolding for Mbed TLS.
