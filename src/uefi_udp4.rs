@@ -13,7 +13,8 @@ use core::ptr::NonNull;
 
 use uefi::boot::{self, EventType, ScopedProtocol, Tpl};
 use uefi::proto::unsafe_protocol;
-use uefi::{Boolean, Event, Handle, Status, boot::{OpenProtocolAttributes, OpenProtocolParams}};
+use uefi::{Event, Handle, Status, boot::{OpenProtocolAttributes, OpenProtocolParams}};
+use uefi_raw::Boolean;
 use uefi::proto::network::ip4config2::Ip4Config2;
 use uefi_raw::protocol::driver::ServiceBindingProtocol;
 use uefi_raw::protocol::network::ip4_config2::Ip4Config2DataType;

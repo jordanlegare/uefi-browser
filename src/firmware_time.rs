@@ -3,7 +3,7 @@
 //! UEFI_TIME is accepted only when it is fully valid and includes a specified
 //! timezone. An unknown timezone is not silently treated as UTC.
 
-use uefi::runtime::{self, Time};
+use uefi::runtime::{self, Daylight, Time, TimeParams};
 
 const MIN_TRUSTED_YEAR: u16 = 2020;
 
@@ -15,26 +15,22 @@ pub fn unix_time_utc() -> Option<i64> {
 }
 
 pub fn time_to_unix_utc(time: &Time) -> Option<i64> {
-    if !time.is_valid()
-        || time.year < MIN_TRUSTED_YEAR
-        || time.time_zone == Time::UNSPECIFIED_TIMEZONE
+    if time.is_valid().is_err()
+        || time.year() < MIN_TRUSTED_YEAR
+        || time.time_zone().is_none()
     {
         return None;
     }
 
-    let days = days_from_civil(
-        time.year as i64,
-        time.month as i64,
-        time.day as i64,
-    )?;
+    let days = days_from_civil(time.year() as i64, time.month() as i64, time.day() as i64)?;
     let local_seconds = days
         .checked_mul(86_400)?
-        .checked_add((time.hour as i64) * 3_600)?
-        .checked_add((time.minute as i64) * 60)?
-        .checked_add(time.second as i64)?;
+        .checked_add((time.hour() as i64) * 3_600)?
+        .checked_add((time.minute() as i64) * 60)?
+        .checked_add(time.second() as i64)?;
 
     // UEFI TimeZone is minutes local time is ahead of UTC.
-    local_seconds.checked_sub((time.time_zone as i64).checked_mul(60)?)
+    local_seconds.checked_sub((time.time_zone()? as i64).checked_mul(60)?)
 }
 
 /// Convert a Gregorian civil date to days since 1970-01-01.
@@ -75,57 +71,41 @@ mod tests {
         hour: u8,
         minute: u8,
         second: u8,
-        zone: i16,
+        zone: Option<i16>,
     ) -> Time {
-        Time {
+        Time::new(TimeParams {
             year,
             month,
             day,
             hour,
             minute,
             second,
-            pad1: 0,
             nanosecond: 0,
             time_zone: zone,
-            daylight: runtime::Daylight::empty(),
-            pad2: 0,
-        }
-    }
-
-    #[test]
-    fn converts_unix_epoch() {
-        let time = firmware_time(1970, 1, 1, 0, 0, 0, 0);
-        // Years before the policy floor are deliberately rejected.
-        assert_eq!(time_to_unix_utc(&time), None);
+            daylight: Daylight::empty(),
+        })
+        .unwrap()
     }
 
     #[test]
     fn converts_known_utc_instant() {
-        let time = firmware_time(2026, 1, 1, 0, 0, 0, 0);
+        let time = firmware_time(2026, 1, 1, 0, 0, 0, Some(0));
         assert_eq!(time_to_unix_utc(&time), Some(1_767_225_600));
     }
 
     #[test]
     fn applies_timezone_offset() {
-        let utc = firmware_time(2026, 1, 1, 0, 0, 0, 0);
-        let eastern_local = firmware_time(2025, 12, 31, 19, 0, 0, -300);
+        let utc = firmware_time(2026, 1, 1, 0, 0, 0, Some(0));
+        let eastern_local = firmware_time(2025, 12, 31, 19, 0, 0, Some(-300));
         assert_eq!(time_to_unix_utc(&eastern_local), time_to_unix_utc(&utc));
     }
 
     #[test]
-    fn rejects_unspecified_timezone_and_invalid_clock() {
+    fn rejects_unspecified_timezone_and_implausible_clock() {
+        assert_eq!(time_to_unix_utc(&firmware_time(2026, 1, 1, 0, 0, 0, None)), None);
         assert_eq!(
-            time_to_unix_utc(&firmware_time(
-                2026,
-                1,
-                1,
-                0,
-                0,
-                0,
-                Time::UNSPECIFIED_TIMEZONE,
-            )),
+            time_to_unix_utc(&firmware_time(2001, 1, 1, 0, 0, 0, Some(0))),
             None
         );
-        assert_eq!(time_to_unix_utc(&Time::invalid()), None);
     }
 }

@@ -2,7 +2,7 @@
 
 use uefi::boot::{self, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::rng::Rng;
-use uefi::{Handle, boot};
+use uefi::boot;
 
 use crate::entropy::SecureRandom;
 
