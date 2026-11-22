@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SRC="\${1:?usage: patch-mbedtls-ecdsa.sh MbedTLS-source-directory}"
+SRC="${1:?usage: patch-mbedtls-ecdsa.sh MbedTLS-source-directory}"
 TF="$SRC/tf-psa-crypto"
 
 python3 - "$TF/extras/pk_wrap.c" "$TF/core/psa_crypto.c" \
