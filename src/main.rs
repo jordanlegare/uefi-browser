@@ -45,7 +45,7 @@ fn main() -> Status {
     uefi::println!("TLS: embedded Mbed TLS | Rendering: UEFI text console");
     uefi::println!("");
     uefi::println!("Initializing SNP Ethernet and smoltcp IPv4/DHCP...");
-    match uefi_browser::firmware_rng::UefiRandom::open() {
+    let mut network = match uefi_browser::firmware_rng::UefiRandom::open() {
         Ok(mut random) => match uefi_browser::snp_network::SnpNetwork::new(&mut random) {
             Ok(mut network) => match network.acquire_dhcp(60_000) {
                 Ok(dns_server) => {
@@ -55,14 +55,25 @@ fn main() -> Status {
                         Ok(unix) => uefi::println!("NTP synchronized; UTC Unix time: {}", unix),
                         Err(error) => uefi::println!("NTP synchronization failed: {}", error),
                     }
+                    Some(network)
                 }
-                Err(error) => uefi::println!("smoltcp DHCP initialization failed: {:?}", error),
+                Err(error) => {
+                    uefi::println!("smoltcp DHCP initialization failed: {:?}", error);
+                    None
+                }
             },
-            Err(error) => uefi::println!("SNP network initialization failed: {:?}", error),
+            Err(error) => {
+                uefi::println!("SNP network initialization failed: {:?}", error);
+                None
+            }
         },
-        Err(_) => uefi::println!("Network unavailable: EFI_RNG_PROTOCOL could not seed smoltcp."),
-    }
+        Err(_) => {
+            uefi::println!("Network unavailable: EFI_RNG_PROTOCOL could not seed smoltcp.");
+            None
+        }
+    };
     uefi::println!("");
+
 
     #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
     {
@@ -110,7 +121,12 @@ fn main() -> Status {
     history.push(first_url);
     let mut history_index = 0usize;
 
-    let mut page = match fetch_document(&history[history_index]) {
+    let Some(network) = network.as_mut() else {
+        uefi::println!("No usable DHCP configuration; returning to firmware.");
+        return Status::SUCCESS;
+    };
+
+    let mut page = match fetch_document(&history[history_index], network) {
         Ok(page) => page,
         Err(error) => {
             uefi::println!("Navigation failed: {error}");
@@ -204,7 +220,7 @@ fn main() -> Status {
             continue;
         };
 
-        match fetch_document(&target) {
+        match fetch_document(&target, network) {
             Ok(next_page) => {
                 if let Some(index) = target_index {
                     history_index = index;
@@ -225,11 +241,11 @@ fn main() -> Status {
     Status::SUCCESS
 }
 
-fn fetch_document(initial_url: &Url) -> Result<BrowserPage, String> {
+fn fetch_document(initial_url: &Url, network: &mut uefi_browser::snp_network::SnpNetwork) -> Result<BrowserPage, String> {
     let mut current = initial_url.clone();
 
     for redirect_index in 0..=MAX_REDIRECTS {
-        let response = fetch_response(&current)?;
+        let response = fetch_response(&current, network)?;
         if response.is_redirect() {
             if redirect_index == MAX_REDIRECTS {
                 return Err(String::from("redirect limit exceeded"));
@@ -285,7 +301,7 @@ fn fetch_document(initial_url: &Url) -> Result<BrowserPage, String> {
     Err(String::from("redirect limit exceeded"))
 }
 
-fn fetch_response(url: &Url) -> Result<HttpResponse, String> {
+fn fetch_response(url: &Url, network: &mut uefi_browser::snp_network::SnpNetwork) -> Result<HttpResponse, String> {
     #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle)))]
     if url.scheme == Scheme::Https {
         return Err(String::from(
@@ -293,7 +309,7 @@ fn fetch_response(url: &Url) -> Result<HttpResponse, String> {
         ));
     }
 
-    let mut connection = connect_firmware_url(url, 15_000)
+    let mut connection = connect_firmware_url(network, url, 15_000)
         .map_err(|error| format!("firmware network setup failed: {error:?}"))?;
 
     match url.scheme {

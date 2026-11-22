@@ -362,14 +362,14 @@ impl UdpDnsTransport for SnpNetwork {
     }
 }
 
-pub struct SnpTcpStream {
-    network: SnpNetwork,
+pub struct SnpTcpStream<'a> {
+    network: &'a mut SnpNetwork,
     socket: SocketHandle,
     timeout_ms: u64,
     closed: bool,
 }
-impl SnpTcpStream {
-    pub fn new(network: SnpNetwork, socket: SocketHandle, timeout_ms: u64) -> Self {
+impl<'a> SnpTcpStream<'a> {
+    pub fn new(network: &'a mut SnpNetwork, socket: SocketHandle, timeout_ms: u64) -> Self {
         Self {
             network,
             socket,
@@ -378,7 +378,7 @@ impl SnpTcpStream {
         }
     }
 }
-impl crate::tls::TlsStreamIo for SnpTcpStream {
+impl crate::tls::TlsStreamIo for SnpTcpStream<'_> {
     fn send(&mut self, bytes: &[u8]) -> Result<usize, ()> {
         if self.closed {
             return Err(());
@@ -429,7 +429,7 @@ impl crate::tls::TlsStreamIo for SnpTcpStream {
         Err(())
     }
 }
-impl Drop for SnpTcpStream {
+impl Drop for SnpTcpStream<'_> {
     fn drop(&mut self) {
         if self.closed {
             return;

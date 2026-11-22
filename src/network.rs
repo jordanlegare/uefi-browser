@@ -107,16 +107,16 @@ where
 
 /// A firmware connection owns a smoltcp TCP socket and the SNP device stack.
 #[cfg(target_os = "uefi")]
-pub struct FirmwareConnection {
-    pub peer: ConnectedPeer<crate::snp_network::SnpTcpStream>,
+pub struct FirmwareConnection<'a> {
+    pub peer: ConnectedPeer<crate::snp_network::SnpTcpStream<'a>>,
 }
 
 #[cfg(target_os = "uefi")]
-impl FirmwareConnection {
+impl FirmwareConnection<'_> {
     pub fn start_tls(
         &mut self,
         ca_bundle_pem: &[u8],
-    ) -> Result<TlsConnection<'_, crate::snp_network::SnpTcpStream>, TlsError> {
+    ) -> Result<TlsConnection<'_, crate::snp_network::SnpTcpStream<'_>>, TlsError> {
         self.peer.start_tls(ca_bundle_pem)
     }
 }
@@ -124,20 +124,18 @@ impl FirmwareConnection {
 /// Create an SNP/smoltcp stack, acquire DHCP, resolve DNS, and connect TCP.
 /// No UEFI IPv4 Config2, UDP4, or TCP4 protocol is required.
 #[cfg(target_os = "uefi")]
-pub fn connect_firmware_url(
+pub fn connect_firmware_url<'a>(
+    network: &'a mut crate::snp_network::SnpNetwork,
     url: &Url,
     timeout_ms: u64,
-) -> Result<FirmwareConnection, ConnectError> {
+) -> Result<FirmwareConnection<'a>, ConnectError> {
     use crate::dns;
-    use crate::snp_network::{SnpNetwork, SnpTcpStream};
+    use crate::snp_network::SnpTcpStream;
 
     let mut random = crate::firmware_rng::UefiRandom::open()
         .map_err(|_| ConnectError::FirmwareRandomUnavailable)?;
-    let mut network = SnpNetwork::new(&mut random).map_err(ConnectError::FirmwareNetwork)?;
-    let dns_server = network
-        .acquire_dhcp(timeout_ms)
-        .map_err(ConnectError::FirmwareNetwork)?;
-    let address = dns::resolve_a(&mut network, &mut random, dns_server, &url.host, timeout_ms)
+    let dns_server = network.dns_server().ok_or(ConnectError::NoDnsServer)?;
+    let address = dns::resolve_a(network, &mut random, dns_server, &url.host, timeout_ms)
         .map_err(ConnectError::Dns)?;
     let socket = network
         .connect_tcp(address, url.port, timeout_ms)
