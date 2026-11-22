@@ -10,6 +10,12 @@ BUILD="$ROOT/build/mbedtls-$VERSION"
 PREFIX="$ROOT/build/mbedtls-install"
 BRIDGE_BUILD="$ROOT/build/uefi-mbedtls-bridge"
 PLATFORM_INCLUDE="$ROOT/vendor/mbedtls-bridge/include"
+MINGW_INCLUDE="${MINGW_INCLUDE:-/usr/x86_64-w64-mingw32/include}"
+if [[ ! -d "$MINGW_INCLUDE" ]]; then
+  echo "MinGW-w64 C headers not found at $MINGW_INCLUDE." >&2
+  echo "Install mingw-w64-x86-64-dev or set MINGW_INCLUDE." >&2
+  exit 1
+fi
 USER_CONFIG_DEFINE='-DMBEDTLS_USER_CONFIG_FILE=\"uefi_mbedtls_config.h\"'
 
 bash "$ROOT/scripts/fetch-mbedtls.sh"
@@ -20,7 +26,7 @@ command -v clang >/dev/null
 command -v llvm-ar >/dev/null
 rustup target add "$TARGET"
 
-C_FLAGS="-ffreestanding -fno-builtin -fshort-wchar -I$PLATFORM_INCLUDE $USER_CONFIG_DEFINE"
+C_FLAGS="-ffreestanding -fno-builtin -fshort-wchar -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE $USER_CONFIG_DEFINE"
 
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_SYSTEM_NAME=Generic \
@@ -47,6 +53,8 @@ COMMON_CFLAGS=(
   -fshort-wchar
   "-I$PLATFORM_INCLUDE"
   "-I$SRC/include"
+  "-isystem"
+  "$MINGW_INCLUDE"
   "$USER_CONFIG_DEFINE"
 )
 

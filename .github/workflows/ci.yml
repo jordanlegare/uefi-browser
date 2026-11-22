@@ -35,7 +35,7 @@ jobs:
       - name: Install C cross-build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang llvm lld curl bzip2
+          sudo apt-get install -y cmake ninja-build clang llvm lld curl bzip2 mingw-w64-common mingw-w64-x86-64-dev
       - name: Install stable Rust and UEFI target
         uses: dtolnay/rust-toolchain@stable
         with:
