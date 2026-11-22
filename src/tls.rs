@@ -7,8 +7,6 @@ use alloc::ffi::CString;
 use core::ffi::{c_int, c_void};
 use core::marker::PhantomData;
 
-use crate::entropy::SecureRandom;
-
 pub trait TlsStreamIo {
     /// Write some bytes to the established TCP stream. Implementations block
     /// or poll until progress, EOF, or a bounded timeout.
@@ -25,7 +23,6 @@ struct RawTlsSession {
 
 type SendCallback = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> c_int;
 type ReceiveCallback = unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> c_int;
-type RandomCallback = unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> c_int;
 
 unsafe extern "C" {
     fn uefi_mbedtls_client_new(
@@ -36,8 +33,6 @@ unsafe extern "C" {
         io_context: *mut c_void,
         send_callback: Option<SendCallback>,
         receive_callback: Option<ReceiveCallback>,
-        random_context: *mut c_void,
-        random_callback: Option<RandomCallback>,
         output: *mut *mut RawTlsSession,
     ) -> c_int;
     fn uefi_mbedtls_client_free(session: *mut RawTlsSession);
@@ -59,26 +54,21 @@ pub enum TlsError {
     Write(c_int),
 }
 
-/// A TLS session borrowing the underlying TCP stream and firmware RNG.
+/// A TLS session borrowing the underlying TCP stream.
 ///
-/// The lifetime prevents either callback context from being dropped while
-/// Mbed TLS still holds its pointer.
-pub struct TlsConnection<'a, S: TlsStreamIo, R: SecureRandom> {
+/// PSA Crypto obtains entropy independently through the UEFI firmware RNG
+/// callback configured in TF-PSA-Crypto.
+pub struct TlsConnection<'a, S: TlsStreamIo> {
     raw: *mut RawTlsSession,
-    _borrow: PhantomData<(&'a mut S, &'a mut R)>,
+    _borrow: PhantomData<&'a mut S>,
 }
 
-impl<'a, S: TlsStreamIo, R: SecureRandom> TlsConnection<'a, S, R> {
+impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
     /// Create an Mbed TLS client over an already-connected UEFI TCP4 stream.
     ///
     /// ca_pem must be a trusted PEM CA bundle with its trailing NUL byte.
     /// hostname is used for SNI and certificate hostname verification.
-    pub fn new(
-        hostname: &str,
-        ca_pem: &[u8],
-        stream: &'a mut S,
-        random: &'a mut R,
-    ) -> Result<Self, TlsError> {
+    pub fn new(hostname: &str, ca_pem: &[u8], stream: &'a mut S) -> Result<Self, TlsError> {
         let hostname = CString::new(hostname).map_err(|_| TlsError::InvalidHostname)?;
         if ca_pem.last() != Some(&0) {
             return Err(TlsError::InvalidCaBundle);
@@ -94,8 +84,6 @@ impl<'a, S: TlsStreamIo, R: SecureRandom> TlsConnection<'a, S, R> {
                 stream as *mut S as *mut c_void,
                 Some(send_callback::<S>),
                 Some(receive_callback::<S>),
-                random as *mut R as *mut c_void,
-                Some(random_callback::<R>),
                 &mut raw,
             )
         };
@@ -145,7 +133,17 @@ impl<'a, S: TlsStreamIo, R: SecureRandom> TlsConnection<'a, S, R> {
     }
 }
 
-impl<S: TlsStreamIo, R: SecureRandom> Drop for TlsConnection<'_, S, R> {
+impl<S: TlsStreamIo> TlsStreamIo for TlsConnection<'_, S> {
+    fn send(&mut self, bytes: &[u8]) -> Result<usize, ()> {
+        self.write(bytes).map_err(|_| ())
+    }
+
+    fn receive(&mut self, output: &mut [u8]) -> Result<usize, ()> {
+        self.read(output).map_err(|_| ())
+    }
+}
+
+impl<S: TlsStreamIo> Drop for TlsConnection<'_, S> {
     fn drop(&mut self) {
         if !self.raw.is_null() {
             unsafe {
@@ -195,27 +193,5 @@ unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
     match stream.receive(buffer) {
         Ok(read) if read <= c_int::MAX as usize => read as c_int,
         _ => -1,
-    }
-}
-
-unsafe extern "C" fn random_callback<R: SecureRandom>(
-    context: *mut c_void,
-    output: *mut u8,
-    length: usize,
-) -> c_int {
-    if context.is_null() || (output.is_null() && length != 0) {
-        return -1;
-    }
-    if length == 0 {
-        return 0;
-    }
-    let Some(random) = (unsafe { (context as *mut R).as_mut() }) else {
-        return -1;
-    };
-    let buffer = unsafe { core::slice::from_raw_parts_mut(output, length) };
-    if random.fill_bytes(buffer).is_ok() {
-        0
-    } else {
-        -1
     }
 }

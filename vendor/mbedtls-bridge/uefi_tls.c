@@ -5,15 +5,15 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/error.h"
+#include "mbedtls/platform.h"
+#include <psa/crypto.h>
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
 typedef int (*uefi_recv_cb)(void *, unsigned char *, size_t);
-typedef int (*uefi_rng_cb)(void *, unsigned char *, size_t);
 
 typedef struct {
     mbedtls_ssl_context ssl;
@@ -38,14 +38,14 @@ int uefi_mbedtls_client_new(
     const unsigned char *hostname, size_t hostname_len,
     const unsigned char *ca_pem, size_t ca_pem_len,
     void *io_context, uefi_send_cb send_cb, uefi_recv_cb recv_cb,
-    void *random_context, uefi_rng_cb random_cb, uefi_tls_session **output
+    uefi_tls_session **output
 ) {
     (void)hostname_len;
-    if (!hostname || !ca_pem || !output || !send_cb || !recv_cb || !random_cb) {
+    if (!hostname || !ca_pem || !output || !send_cb || !recv_cb) {
         return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
     }
 
-    uefi_tls_session *session = (uefi_tls_session *)calloc(1, sizeof(*session));
+    uefi_tls_session *session = (uefi_tls_session *)mbedtls_calloc(1, sizeof(*session));
     if (!session) return MBEDTLS_ERR_SSL_ALLOC_FAILED;
 
     session->io_context = io_context;
@@ -56,7 +56,18 @@ int uefi_mbedtls_client_new(
     mbedtls_ssl_config_init(&session->config);
     mbedtls_x509_crt_init(&session->roots);
 
-    int ret = mbedtls_x509_crt_parse(&session->roots, ca_pem, ca_pem_len);
+    static int psa_initialized = 0;
+    int ret = 0;
+    if (!psa_initialized) {
+        psa_status_t status = psa_crypto_init();
+        if (status != PSA_SUCCESS) {
+            ret = (int)status;
+            goto fail;
+        }
+        psa_initialized = 1;
+    }
+
+    ret = mbedtls_x509_crt_parse(&session->roots, ca_pem, ca_pem_len);
     if (ret != 0) goto fail;
 
     ret = mbedtls_ssl_config_defaults(
@@ -69,7 +80,6 @@ int uefi_mbedtls_client_new(
 
     mbedtls_ssl_conf_authmode(&session->config, MBEDTLS_SSL_VERIFY_REQUIRED);
     mbedtls_ssl_conf_ca_chain(&session->config, &session->roots, NULL);
-    mbedtls_ssl_conf_rng(&session->config, random_cb, random_context);
 
     ret = mbedtls_ssl_setup(&session->ssl, &session->config);
     if (ret != 0) goto fail;
@@ -85,7 +95,7 @@ fail:
     mbedtls_x509_crt_free(&session->roots);
     mbedtls_ssl_config_free(&session->config);
     mbedtls_ssl_free(&session->ssl);
-    free(session);
+    mbedtls_free(session);
     return ret;
 }
 
@@ -101,8 +111,12 @@ int uefi_mbedtls_handshake(uefi_tls_session *session) {
 }
 
 int uefi_mbedtls_read(uefi_tls_session *session, unsigned char *output, size_t capacity) {
-    if (!session || !output) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
-    return mbedtls_ssl_read(&session->ssl, output, capacity);
+    if (!session || (!output && capacity != 0)) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+    int ret = mbedtls_ssl_read(&session->ssl, output, capacity);
+    if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+        return 0;
+    }
+    return ret;
 }
 
 int uefi_mbedtls_write(uefi_tls_session *session, const unsigned char *input, size_t length) {
@@ -121,5 +135,8 @@ void uefi_mbedtls_client_free(uefi_tls_session *session) {
     mbedtls_x509_crt_free(&session->roots);
     mbedtls_ssl_config_free(&session->config);
     mbedtls_ssl_free(&session->ssl);
-    free(session);
+    mbedtls_free(session);
 }
+
+/* Force the linker to include this translation unit and its Mbed TLS references. */
+int uefi_mbedtls_link_anchor(void) { return 0; }
