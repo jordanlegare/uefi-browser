@@ -101,8 +101,12 @@ int uefi_mbedtls_handshake(uefi_tls_session *session) {
 }
 
 int uefi_mbedtls_read(uefi_tls_session *session, unsigned char *output, size_t capacity) {
-    if (!session || !output) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
-    return mbedtls_ssl_read(&session->ssl, output, capacity);
+    if (!session || (!output && capacity != 0)) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+    int ret = mbedtls_ssl_read(&session->ssl, output, capacity);
+    if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+        return 0;
+    }
+    return ret;
 }
 
 int uefi_mbedtls_write(uefi_tls_session *session, const unsigned char *input, size_t length) {

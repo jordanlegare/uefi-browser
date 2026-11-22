@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn applies_timezone_offset() {
-        let utc = firmware_time(2026, 1, 1, 0, 0, 0, Some(0), Daylight::empty());
+        let utc = firmware_time(2026, 1, 1, 0, 0, 0, Some(0));
         let eastern_local = firmware_time(2025, 12, 31, 19, 0, 0, Some(-300), Daylight::empty());
         assert_eq!(time_to_unix_utc(&eastern_local), time_to_unix_utc(&utc));
     }
@@ -105,14 +105,7 @@ mod tests {
     fn rejects_daylight_adjusted_local_time() {
         assert_eq!(
             time_to_unix_utc(&firmware_time(
-                2026,
-                7,
-                1,
-                12,
-                0,
-                0,
-                Some(-300),
-                Daylight::IN_DAYLIGHT
+                2026, 7, 1, 12, 0, 0, Some(-300), Daylight::IN_DAYLIGHT
             )),
             None
         );
@@ -125,16 +118,7 @@ mod tests {
             None
         );
         assert_eq!(
-            time_to_unix_utc(&firmware_time(
-                2001,
-                1,
-                1,
-                0,
-                0,
-                0,
-                Some(0),
-                Daylight::empty()
-            )),
+            time_to_unix_utc(&firmware_time(2001, 1, 1, 0, 0, 0, Some(0), Daylight::empty())),
             None
         );
     }
