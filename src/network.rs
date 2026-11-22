@@ -116,10 +116,8 @@ impl<'network> FirmwareConnection<'network> {
     pub fn start_tls<'connection>(
         &'connection mut self,
         ca_bundle_pem: &[u8],
-    ) -> Result<
-        TlsConnection<'connection, crate::snp_network::SnpTcpStream<'network>>,
-        TlsError,
-    > {
+    ) -> Result<TlsConnection<'connection, crate::snp_network::SnpTcpStream<'network>>, TlsError>
+    {
         self.peer.start_tls(ca_bundle_pem)
     }
 }
