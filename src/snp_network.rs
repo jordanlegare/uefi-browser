@@ -602,6 +602,13 @@ impl<'a> SnpTcpStream<'a> {
             closed: false,
         }
     }
+
+    /// Set the maximum wait for an individual blocking stream operation.
+    /// TLS uses a shorter value so an unresponsive peer cannot pin the
+    /// firmware console indefinitely during its handshake.
+    pub fn set_io_timeout_ms(&mut self, timeout_ms: u64) {
+        self.timeout_ms = timeout_ms.max(1);
+    }
 }
 impl crate::tls::TlsStreamIo for SnpTcpStream<'_> {
     fn send(&mut self, bytes: &[u8]) -> Result<usize, ()> {
