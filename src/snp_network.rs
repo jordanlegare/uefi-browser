@@ -276,6 +276,9 @@ impl Device for SnpDevice {
         Self: 'a;
     fn receive(&mut self, _: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         self.reclaim_transmit_buffers();
+        if self.pending_tx.len() >= MAX_PENDING_TX_BUFFERS {
+            return None;
+        }
 
         let mut frame = vec![0u8; core::cmp::max(FRAME_BUFFER_SIZE, self.mtu + 64)];
         let mut header_size = 0usize;

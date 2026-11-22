@@ -338,7 +338,7 @@ fn fetch_response(
         Err(error) => {
             let d = network.diagnostics();
             return Err(format!(
-                "DNS/TCP connection failed: {error:?}\\nSNP TX: queued={} recycled={} failures={} queue-full={} last-status=0x{:x}\\nSNP RX: frames={} errors={} last-status=0x{:x}\\nUDP: sent={} received={} timeouts={}; TCP: attempts={} failures={} timeouts={}",
+                "DNS/TCP connection failed: {error:?}\nSNP TX: queued={} recycled={} failures={} queue-full={} last-status=0x{:x}\nSNP RX: frames={} errors={} last-status=0x{:x}\nUDP: sent={} received={} timeouts={}; TCP: attempts={} failures={} timeouts={}",
                 d.tx_queued,
                 d.tx_recycled,
                 d.tx_failures,
