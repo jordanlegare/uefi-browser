@@ -314,7 +314,11 @@ fn fetch_response(
         ));
     }
 
-    uefi::println!("Resolving {} and opening TCP port {}...", url.host, url.port);
+    uefi::println!(
+        "Resolving {} and opening TCP port {}...",
+        url.host,
+        url.port
+    );
     let mut connection = connect_firmware_url(network, url, 15_000)
         .map_err(|error| format!("DNS/TCP connection failed: {error:?}"))?;
     uefi::println!(
@@ -330,7 +334,7 @@ fn fetch_response(
                 .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
             uefi::println!("HTTP response received ({} bytes).", response.body.len());
             Ok(response)
-        },
+        }
         Scheme::Https => {
             #[cfg(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle))]
             {
@@ -340,8 +344,9 @@ fn fetch_response(
                 let mut tls = connection
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
-                tls.handshake()
-                    .map_err(|error| format!("TLS handshake / certificate verification failed: {error:?}"))?;
+                tls.handshake().map_err(|error| {
+                    format!("TLS handshake / certificate verification failed: {error:?}")
+                })?;
                 uefi::println!("TLS verified. Sending HTTPS request...");
                 let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
