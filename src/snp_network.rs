@@ -234,6 +234,10 @@ impl SnpNetwork {
         }
     }
 
+    pub fn dns_server(&self) -> Option<Ipv4Addr> {
+        self.dns_server
+    }
+
     pub fn acquire_dhcp(&mut self, timeout_ms: u64) -> Result<Ipv4Addr, SnpNetworkError> {
         let timeout = if timeout_ms == 0 {
             DHCP_TIMEOUT_MS
