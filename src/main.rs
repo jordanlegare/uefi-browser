@@ -391,7 +391,9 @@ fn render_page(page: &BrowserPage, navigation_error: Option<&str>) {
     if let Some(error) = navigation_error {
         uefi::println!("NAVIGATION ERROR: {error}");
         uefi::println!("Previous page remains available. Enter a new URL or 'reload'.");
-        uefi::println!("--------------------------------------------------------------------------");
+        uefi::println!(
+            "--------------------------------------------------------------------------"
+        );
     }
     uefi::println!("{}", page.text);
     if !page.links.is_empty() {

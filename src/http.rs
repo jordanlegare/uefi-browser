@@ -153,10 +153,15 @@ fn response_is_complete(input: &[u8], max_body: usize) -> Result<bool, HttpError
 
     let headers =
         core::str::from_utf8(&input[..header_end]).map_err(|_| HttpError::InvalidHeader)?;
-    let status_line = headers.split("\r\n").next().ok_or(HttpError::InvalidStatusLine)?;
+    let status_line = headers
+        .split("\r\n")
+        .next()
+        .ok_or(HttpError::InvalidStatusLine)?;
     let (_, status, _) = parse_status_line(status_line)?;
     if (100..200).contains(&status) && status != 101 {
-        let next = header_end.checked_add(4).ok_or(HttpError::NoFinalResponse)?;
+        let next = header_end
+            .checked_add(4)
+            .ok_or(HttpError::NoFinalResponse)?;
         if next >= input.len() {
             return Ok(false);
         }
@@ -284,8 +289,8 @@ pub fn parse_response(input: &[u8], max_body: usize) -> Result<HttpResponse, Htt
 /// so the parser returns the final response to the original request.
 fn skip_informational_responses(mut input: &[u8]) -> Result<&[u8], HttpError> {
     loop {
-        let header_end = find_bytes(input, b"\r\n\r\n")
-            .ok_or(HttpError::MissingHeaderTerminator)?;
+        let header_end =
+            find_bytes(input, b"\r\n\r\n").ok_or(HttpError::MissingHeaderTerminator)?;
         if header_end > HEADER_LIMIT {
             return Err(HttpError::HeaderTooLarge);
         }
