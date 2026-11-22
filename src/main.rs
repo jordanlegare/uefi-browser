@@ -246,6 +246,14 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             | 106
             | 107
             | 108
+            | 110
+            | 111
+            | 112
+            | 113
+            | 114
+            | 115
+            | 116
+            | 117
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
@@ -383,6 +391,14 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 "ECP: projective point normalization returned (result={})",
                 detail
             ),
+            110 => "ECDSA: entering u1 = e * s_inv multiplication".to_string(),
+            111 => format!("ECDSA: u1 multiplication returned (result={})", detail),
+            112 => "ECDSA: entering u1 modulo curve-order reduction".to_string(),
+            113 => format!("ECDSA: u1 modular reduction returned (result={})", detail),
+            114 => "ECDSA: entering u2 = r * s_inv multiplication".to_string(),
+            115 => format!("ECDSA: u2 multiplication returned (result={})", detail),
+            116 => "ECDSA: entering u2 modulo curve-order reduction".to_string(),
+            117 => format!("ECDSA: u2 modular reduction returned (result={})", detail),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
                 detail
