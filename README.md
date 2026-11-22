@@ -27,40 +27,45 @@ URL: https://www.example.org/path
        v
 Hickory DNS protocol client (Rust, no_std)
   - builds DNS A / IN query
-  - transaction ID supplied by EFI_RNG_PROTOCOL
-  - checks response ID, QR/opcode, question, RCODE, TC and answer owner
+  - transaction ID from EFI_RNG_PROTOCOL
+  - validates transaction ID, response code, question and answer owner
        |
        v
-EFI_UDP4_PROTOCOL adapter (to be implemented)
-  - datagram to configured DNS resolver:53
-  - verifies response source IP and source port
-  - timeout and bounded 512-byte DNS packet
+EFI_UDP4_PROTOCOL adapter (implemented)
+  - DNS datagram to configured resolver:53
+  - validates response source IPv4 address and UDP source port
+  - bounded packet buffer and timeout
        |
        v
 IPv4 address
        |
        v
-EFI_TCP4_PROTOCOL adapter (to be implemented)
-  - connect to resolved IPv4 address:443
-  - bounded connect/read/write and cleanup
+EFI_TCP4_PROTOCOL adapter (implemented)
+  - active TCP4 connect to resolved IPv4 address and URL port
+  - bounded transmit/receive operations and cancellation
+  - preserves completion-token storage until firmware signals completion
        |
        v
-Mbed TLS 4.3.0 (statically linked into BOOTX64.EFI)
+Mbed TLS 4.3.0 (intended static link into BOOTX64.EFI)
   - receives the original hostname, not the numeric IP
   - SNI and hostname verification
   - mandatory X.509 chain verification
-  - CA trust anchors embedded in the image
+  - intended embedded CA trust anchors
   - random bytes from EFI_RNG_PROTOCOL
-  - certificate time validation from UEFI Runtime Services
+  - intended certificate time validation from Runtime Services
        |
        v
-HTTP/1.1 over the TLS byte stream
+HTTP/1.1 request/response codec (implemented, not yet wired to stream)
        |
        v
-HTML parser -> text renderer -> keyboard navigation
+HTML parser -> terminal renderer -> keyboard navigation
 ~~~
 
-The key handoff is implemented in src/network.rs:
+The high-level firmware path is provided by connect_firmware_url() in src/network.rs. It reads DNS server addresses from EFI IPv4 Config2, opens EFI RNG, resolves the hostname using Hickory over the UDP4 adapter, then connects TCP4 to the resulting address. The returned FirmwareConnection retains the RNG and original hostname so start_tls() can create the Mbed TLS session with the correct SNI and certificate identity.
+
+The low-level firmware adapters use UEFI Service Binding child handles. TCP4 and UDP4 completion tokens are asynchronous: the code uses EVT_NOTIFY_SIGNAL events at TPL_CALLBACK and paired plain wait events for application-side polling. Pending operation tokens are cancelled and drained before their memory, event, or protocol child is released. This is important because firmware may continue referencing token and fragment memory until the completion event is signalled.
+
+The key handoff is implemented in src/network.rs:The key handoff is implemented in src/network.rs:
 
 - connect_url() calls the Hickory-backed dns::resolve_a().
 - It passes the resulting IPv4 address and URL port to Tcp4Connector::connect_tcp4().
@@ -71,11 +76,13 @@ This separation matters for HTTPS: TCP connects to the numeric IP address, while
 
 ### UEFI DNS4 versus UDP4
 
-This implementation intentionally does **not** call EFI_DNS4_PROTOCOL. The DNS client is Hickory in Rust. Its wire-format packets are sent through an adapter implemented with EFI_UDP4_PROTOCOL. The adapter must use the configured DNS server address (normally learned from DHCP option 6 or supplied by a static network configuration); this project does not yet read that setting from firmware.
+This implementation intentionally does **not** call EFI_DNS4_PROTOCOL. Hickory performs DNS wire-format encoding and decoding in Rust. Its packets are transported by the concrete EFI_UDP4_PROTOCOL adapter in src/uefi_udp4.rs.
 
-hickory-proto is the low-level DNS protocol crate used by the higher-level Hickory DNS project. It supports no_std builds when the std feature is disabled. This makes it suitable for firmware packet serialization and response parsing; the project supplies the UEFI UDP4 transport because a normal host UDP socket resolver cannot run in UEFI. The src/dns.rs module is the DNS client policy layer, and UdpDnsTransport is the adapter contract.
+The adapter creates a UDP4 service-binding child, configures the firmware-provided default IPv4 address, sends to the configured resolver on UDP port 53, and waits for both transmit and receive completion. It rejects a reply unless the source IPv4 address and UDP source port match the selected resolver. The receive fragments are copied into the bounded DNS response buffer, then the driver's recycle event is signalled to return the packet buffers to firmware.
 
-Current DNS scope: IPv4 A queries through UDP, with secure random transaction IDs, two bounded timeout attempts, and strict response validation. The 512-byte packet limit follows classic DNS-over-UDP sizing. Truncated responses fail closed; DNS-over-TCP fallback, CNAME chain chasing, AAAA/IPv6, DNSSEC validation, caching, and search-domain expansion are not yet implemented.
+DNS server discovery reads EFI IPv4 Config2 DNS_SERVER data, normally provisioned by DHCP. The adapter does not implement DHCP itself; the firmware network stack remains responsible for NIC initialization, address configuration, routing, and resolver provisioning.
+
+The DNS policy uses hickory-proto 0.26.3 with default features disabled. It sends IPv4 A/IN queries with a secure random transaction ID, retries a timeout once, and validates transaction ID, response/opcode, truncation flag, response code, question type/class/name, and answer owner/class. It currently does not chase CNAME chains, issue AAAA queries, use DNSSEC, cache answers, expand search domains, or retry truncated UDP messages over DNS/TCP.
 
 ## Current implementation status
 
@@ -86,39 +93,52 @@ Current DNS scope: IPv4 A queries through UDP, with secure random transaction ID
 | Firmware console startup diagnostic | Present |
 | HTTP/HTTPS URL parser and relative URL resolution | Implemented in portable core |
 | HTML title/text/anchor extraction | Implemented in portable core |
-| Hickory DNS message encoding/decoding | Implemented |
-| DNS A-query stub client and response validation | Implemented |
-| Secure random source abstraction shared by DNS and TLS | Implemented as an interface |
-| DNS-to-TCP endpoint orchestration | Implemented through adapter traits |
-| TCP stream-to-Mbed-TLS callback bridge | Implemented as an interface |
-| Mbed TLS 4.3.0 fetch and archive checksum verification | Implemented |
-| UEFI UDP4 concrete adapter | Not implemented |
-| UEFI TCP4 concrete adapter | Not implemented |
-| DNS server discovery from DHCP/configuration | Not implemented |
-| EFI RNG implementation | Not implemented |
-| Valid UTC clock integration for certificate dates | Not implemented |
-| Embedded CA bundle and update process | Not implemented |
-| EFI-safe C allocator/runtime shims | Not implemented |
-| Mbed TLS static link into final PE/COFF EFI image | Not implemented |
-| HTTP/1.1 request/response engine | Not implemented |
-| Integrated navigation loop and page renderer | Not implemented |
+| Hickory DNS message encoding/decoding | Implemented, no_std feature set |
+| DNS A-query client and response validation | Implemented with bounded retries and response checks |
+| DNS server discovery from EFI IPv4 Config2 | Implemented; reads configured DNS server addresses |
+| UEFI UDP4 concrete adapter | Implemented using a local UEFI 2.11 ABI binding |
+| UEFI TCP4 concrete adapter | Implemented using TCP4 Service Binding and TCP4 child protocols |
+| TCP connect/send/receive timeout handling | Implemented with polling, cancellation, and token draining |
+| Secure random source abstraction | Implemented |
+| EFI RNG implementation | Implemented through EFI_RNG_PROTOCOL; no weak fallback |
+| Firmware UTC clock conversion | Implemented with fail-closed checks for invalid/unspecified time |
+| DNS-to-TCP-to-TLS orchestration | Implemented through firmware composition helper and retained hostname |
+| TCP stream-to-Mbed-TLS callback bridge | Implemented as Rust/C interfaces |
+| Mbed TLS 4.3.0 source fetch and archive checksum verification | Implemented |
+| HTTP/1.1 GET request generation | Implemented in portable core |
+| HTTP status/header parsing | Implemented in portable core |
+| Content-Length and chunked body decoding | Implemented with body-size bounds |
+| Redirect metadata extraction | Implemented; redirect-follow policy not yet wired |
+| Embedded CA bundle and update process | Not yet embedded |
+| UEFI-safe C allocator for Mbed TLS | Not yet connected |
+| Mbed TLS platform clock and certificate-date hook | Rust clock exists; not yet wired into Mbed TLS build |
+| Mbed TLS static link into final PE/COFF EFI image | Not yet completed |
+| Integrated TLS HTTP fetch loop | Not yet connected end-to-end |
+| Integrated navigation loop and terminal page renderer | Not yet implemented |
 | Tested network-capable browser image | Not produced |
+
+The UDP4 and TCP4 adapters are concrete source implementations, not just traits. They have not yet been exercised against physical firmware or a network-enabled OVMF configuration. The current EFI entry point remains a diagnostic screen until the Mbed TLS link, CA bundle, HTTP stream loop, and terminal UI are integrated.
 
 ## Repository layout
 
 | Path | Responsibility |
 |---|---|
-| src/main.rs | UEFI entry point and current startup diagnostic |
-| src/url.rs | HTTP/HTTPS URL parsing, default ports, authority validation, relative URL resolution |
+| src/main.rs | UEFI entry point and current diagnostic shell |
+| src/url.rs | HTTP/HTTPS URL parsing, default ports, and relative URL resolution |
 | src/document.rs | Basic HTML visible-text and anchor extraction |
-| src/dns.rs | Hickory-backed DNS A query construction, UDP exchange contract, and response validation |
-| src/entropy.rs | Secure random provider contract shared by DNS transaction IDs and Mbed TLS |
-| src/network.rs | DNS-resolve -> EFI TCP4 connect -> Mbed TLS handoff |
+| src/http.rs | HTTP/1.1 GET builder, response headers/status, Content-Length and chunked decoding |
+| src/dns.rs | Hickory DNS A-query construction and response validation |
+| src/entropy.rs | Shared cryptographic-randomness interface |
+| src/firmware_rng.rs | EFI_RNG_PROTOCOL-backed random source |
+| src/firmware_time.rs | Runtime Services UTC conversion with fail-closed validity policy |
+| src/network.rs | DNS-to-TCP orchestration and retained-hostname Mbed TLS handoff |
+| src/uefi_udp4.rs | UDP4 service-binding child, DNS datagrams, source filtering, and DNS-server discovery |
+| src/uefi_tcp4.rs | TCP4 service-binding child, bounded connect/transmit/receive, cancellation, and cleanup |
 | src/tls.rs | Rust Mbed TLS FFI boundary and TCP BIO callback adapter |
-| vendor/mbedtls-bridge/uefi_tls.c | Mbed TLS configuration, BIO callbacks, handshake, and certificate verification |
-| scripts/fetch-mbedtls.sh | Downloads and SHA-256 verifies the official upstream Mbed TLS release archive |
-| scripts/build-uefi.sh | Experimental Mbed TLS static-library cross-build setup; final EFI link is not complete |
-| Cargo.toml | Rust package, UEFI dependency, Hickory DNS dependency, release profile |
+| vendor/mbedtls-bridge/uefi_tls.c | Mbed TLS client setup, BIO callbacks, and mandatory X.509 verification |
+| scripts/fetch-mbedtls.sh | Downloads and checksum-verifies the pinned Mbed TLS source archive |
+| scripts/build-uefi.sh | Experimental freestanding Mbed TLS cross-build scaffold; final link is unfinished |
+| .github/workflows/ci.yml | Formatting, portable tests, and x86-64 UEFI target compilation |
 
 ## Rust DNS dependency
 
@@ -201,42 +221,33 @@ Prepare the Mbed TLS source and experimental static-library build:
 
 The current script does **not** produce a complete browser EFI image. A final build command will be documented once the UEFI protocol adapters, C runtime, and static link are implemented and verified.
 
-## Firmware adapter requirements
+## Firmware adapter details
 
-### UDP4 DNS adapter
+### UDP4 DNS transport
 
-The concrete UdpDnsTransport implementation must:
+The concrete UdpDnsTransport implementation is in src/uefi_udp4.rs. The pinned uefi-raw release does not expose UDP4 bindings, so this module declares the small ABI surface from the UEFI 2.11 specification locally: UDP4 Service Binding, UDP4 protocol entry points, configuration, session, transmit, receive, and completion-token layouts.
 
-- create/configure a child using EFI_UDP4_SERVICE_BINDING_PROTOCOL and EFI_UDP4_PROTOCOL;
-- send a single bounded DNS datagram to the configured resolver on UDP port 53;
-- receive into a 512-byte packet buffer;
-- reject datagrams whose source IPv4 address or source port does not match the configured resolver;
-- apply a bounded timeout and release events/tokens/child handles on every path;
-- return the response bytes to dns::resolve_a() for Hickory validation.
+Each request creates a UDP4 child and an ephemeral local source port selected using EFI_RNG_PROTOCOL. It configures the default address and sends a single bounded DNS datagram. Receive processing verifies the sender address and port before Hickory sees the packet. All protocol children, events, and receive recycle notifications are handled in the adapter.
 
-The DNS module checks the transaction ID, response/opcode bits, truncation flag, response code, question name/type/class, and the owner name/class of returned A records.
+Because the UDP4 binding is locally declared, it requires hardware/firmware integration testing on real UEFI network stacks. A successful Rust cross-check cannot validate firmware ABI conformance at runtime.
 
-### TCP4 stream adapter
+### TCP4 stream transport
 
-The concrete Tcp4Connector implementation must:
+The concrete Tcp4Connector and TlsStreamIo implementation is in src/uefi_tcp4.rs. It discovers TCP4 service bindings, creates a child protocol instance, configures an active open to the resolved IPv4 address and destination port, and performs the asynchronous three-way handshake.
 
-- create/configure a child using EFI_TCP4_SERVICE_BINDING_PROTOCOL and EFI_TCP4_PROTOCOL;
-- connect to the IPv4 address returned by the Hickory resolver;
-- implement the TlsStreamIo send/receive contract with bounded waits;
-- correctly process partial writes, EOF, reset, cancellation, and timeout;
-- close the connection and destroy the child on all error paths.
+Transmit and receive use bounded 16 KiB fragments. The TlsStreamIo send method reports partial progress so Mbed TLS can retry the remainder. Connect and I/O waits poll the TCP4 instance and enforce timeouts. On timeout, the adapter cancels the corresponding token and keeps its token, fragment, and event storage alive until firmware signals completion. Dropping the stream aborts/closes the connection, releases the TCP protocol interface, and destroys the service-binding child.
 
-ConnectedPeer::start_tls() then creates the Mbed TLS session over this stream, passing the original DNS hostname and embedded CA bundle.
+Each TCP4 completion token uses an EVT_NOTIFY_SIGNAL event at TPL_CALLBACK. The callback signals a separate plain wait event because CheckEvent must not be called on the notify event itself.
 
-### Entropy and time
+### Firmware randomness and time
 
-SecureRandom must be implemented with EFI_RNG_PROTOCOL. The implementation must propagate failures.
+src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. Failure to locate or read the RNG is propagated; the code has no clock, counter, or weak PRNG fallback.
 
-Certificate date checks need trustworthy UTC from UEFI Runtime Services. If the platform does not have a valid real-time clock, HTTPS must fail closed; disabling certificate time checks is not an acceptable default.
+src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects dates earlier than the configured policy floor, and converts the resulting civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The Mbed TLS C bridge and build configuration do not yet call this function, so certificate validity-time enforcement is **not yet active in the final TLS path**.
 
-### C runtime and memory
+### C runtime and Mbed TLS platform hooks
 
-Mbed TLS is a C library. A UEFI target does not provide a POSIX libc. The final link must provide the minimal C ABI functionality required by the chosen Mbed TLS configuration and route allocation to UEFI Boot Services pool allocation while Boot Services remain active. The current bridge uses calloc and free, so those symbols must be supplied by the UEFI compatibility layer before linking.
+Mbed TLS still needs a freestanding UEFI build configuration and runtime integration. The current C bridge calls calloc/free and has not yet installed an EFI allocator through mbedtls_platform_set_calloc_free. The Rust UTC callback has not yet been connected through Mbed TLS's platform-time hook, and the build does not yet enable and verify X.509 date checking. These are blocking items for a complete secure HTTPS build.
 
 ## Installation target
 

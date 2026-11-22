@@ -13,12 +13,14 @@ fn main() -> Status {
     uefi::println!("|               standalone x86_64 pre-OS browser               |");
     uefi::println!("+--------------------------------------------------------------+");
     uefi::println!("");
-    uefi::println!("Browser core: URL and HTML text model initialized.");
-    uefi::println!("TLS boundary: Mbed TLS static-link integration source added.");
+    uefi::println!("Core: URL, HTML and HTTP/1.1 codecs initialized.");
+    uefi::println!("DNS: Hickory over firmware UDP4; resolver from IPv4 Config2.");
+    uefi::println!("TCP: firmware TCP4 adapter; bounded async I/O and cleanup.");
+    uefi::println!("RNG: EFI_RNG_PROTOCOL; clock: UEFI Runtime Services.");
     uefi::println!("");
-    uefi::println!("NETWORK TRANSPORT NOT READY");
-    uefi::println!("The UDP4/TCP4 adapters and Mbed TLS firmware callbacks are");
-    uefi::println!("not connected to the navigation loop in this milestone.");
+    uefi::println!("BROWSER FETCH LOOP NOT YET AVAILABLE");
+    uefi::println!("Mbed TLS static link, embedded CA bundle and terminal");
+    uefi::println!("navigation renderer still need integration.");
     uefi::println!("");
     uefi::println!("Returning to firmware.");
     Status::SUCCESS
