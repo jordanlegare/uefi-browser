@@ -17,6 +17,7 @@
 #undef MBEDTLS_TIMING_C
 #undef MBEDTLS_FS_IO
 #undef MBEDTLS_DEBUG_C
+#undef MBEDTLS_SELF_TEST
 
 /* Platform allocator/time hooks are configured only in uefi_tf_psa_config.h. */
 #define MBEDTLS_PLATFORM_C
