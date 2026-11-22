@@ -463,27 +463,54 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             131 => format!("MPI division: remainder copied (limbs={})", detail),
             132 => format!("MPI division returned (result={})", detail),
             140 => "ECP: entering first scalar multiplication".to_string(),
-            141 => format!("ECP: first scalar multiplication returned (result={})", detail),
+            141 => format!(
+                "ECP: first scalar multiplication returned (result={})",
+                detail
+            ),
             142 => "ECP: entering second scalar multiplication".to_string(),
-            143 => format!("ECP: second scalar multiplication returned (result={})", detail),
+            143 => format!(
+                "ECP: second scalar multiplication returned (result={})",
+                detail
+            ),
             144 => "ECP: entering mixed point addition".to_string(),
             145 => format!("ECP: mixed point addition returned (result={})", detail),
             146 => "ECP: entering final point normalization".to_string(),
-            147 => format!("ECP: final point normalization returned (result={})", detail),
+            147 => format!(
+                "ECP: final point normalization returned (result={})",
+                detail
+            ),
             148 => "ECP: private-scalar validation returned; checking public point".to_string(),
-            149 => format!("ECP: scalar and point validation returned (result={})", detail),
+            149 => format!(
+                "ECP: scalar and point validation returned (result={})",
+                detail
+            ),
             150 => format!("ECP: entering comb multiplication (curve_bits={})", detail),
             151 => format!("ECP: comb multiplication returned (result={})", detail),
             152 => format!("ECP: comb engine entered (curve_bits={})", detail),
-            153 => format!("ECP: entering precomputed-point table generation (table_size={})", detail),
-            154 => format!("ECP: precomputed-point table generation returned (result={})", detail),
-            155 => format!("ECP: entering scalar evaluation with precomputed table (table_size={})", detail),
+            153 => format!(
+                "ECP: entering precomputed-point table generation (table_size={})",
+                detail
+            ),
+            154 => format!(
+                "ECP: precomputed-point table generation returned (result={})",
+                detail
+            ),
+            155 => format!(
+                "ECP: entering scalar evaluation with precomputed table (table_size={})",
+                detail
+            ),
             156 => format!("ECP: entering scalar recoding (comb_depth={})", detail),
             157 => format!("ECP: scalar recoding returned (result={})", detail),
             158 => "ECP: entering comb scalar-multiplication core".to_string(),
-            159 => format!("ECP: comb scalar-multiplication core returned (result={})", detail),
+            159 => format!(
+                "ECP: comb scalar-multiplication core returned (result={})",
+                detail
+            ),
             160 => "ECP: entering scalar-result normalization".to_string(),
-            161 => format!("ECP: scalar-result normalization returned (result={})", detail),
+            161 => format!(
+                "ECP: scalar-result normalization returned (result={})",
+                detail
+            ),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
                 detail
