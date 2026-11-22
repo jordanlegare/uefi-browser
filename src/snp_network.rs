@@ -658,21 +658,8 @@ impl crate::tls::TlsStreamIo for SnpTcpStream<'_> {
             }
             self.network.wait_step();
         }
-        let socket = self.network.sockets.get::<tcp::Socket>(self.socket);
-        let diagnostics = self.network.diagnostics();
-        uefi::println!(
-            "TLS TCP receive timeout: state={:?} may_recv={} rx_frames={} rx_errors={} tx_queued={} tx_failures={} tx_recycled={} tx_queue_full={} rx_status=0x{:x} tx_status=0x{:x}",
-            socket.state(),
-            socket.may_recv(),
-            diagnostics.rx_frames,
-            diagnostics.rx_errors,
-            diagnostics.tx_queued,
-            diagnostics.tx_failures,
-            diagnostics.tx_recycled,
-            diagnostics.tx_queue_full,
-            diagnostics.rx_last_status,
-            diagnostics.tx_last_status,
-        );
+        // This timeout occurs beneath the Mbed TLS BIO callback. Defer
+        // diagnostics until the handshake unwinds to the Rust caller.
         Err(())
     }
 }
