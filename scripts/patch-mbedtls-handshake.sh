@@ -5,12 +5,13 @@ SRC="${1:?usage: patch-mbedtls-handshake.sh MbedTLS-source-directory}"
 TLS12="$SRC/library/ssl_tls12_client.c"
 TLS13="$SRC/library/ssl_tls13_client.c"
 TLS13_GENERIC="$SRC/library/ssl_tls13_generic.c"
+X509="$SRC/library/x509_crt.c"
 
-python3 - "$TLS12" "$TLS13" "$TLS13_GENERIC" <<'PY'
+python3 - "$TLS12" "$TLS13" "$TLS13_GENERIC" "$X509" <<'PY'
 from pathlib import Path
 import sys
 
-tls12, tls13, tls13_generic = map(Path, sys.argv[1:])
+tls12, tls13, tls13_generic, x509 = map(Path, sys.argv[1:])
 
 def insert_declaration(path: Path) -> str:
     text = path.read_text()
@@ -117,5 +118,95 @@ elif instrumented_debug not in text:
 
 tls13_generic.write_text(text)
 
-print("Mbed TLS server-certificate checkpoints installed (or already present).")
+# X.509 verifier checkpoints: distinguish firmware time, chain construction,
+# issuer/signature search, hashing, and public-key verification.
+text = insert_declaration(x509)
+
+old_time = """#if defined(MBEDTLS_HAVE_TIME_DATE)
+    if (mbedtls_x509_time_gmtime(mbedtls_time(NULL), &now) != 0) {
+        return MBEDTLS_ERR_X509_FATAL_ERROR;
+    }
+#endif"""
+new_time = """#if defined(MBEDTLS_HAVE_TIME_DATE)
+    uefi_browser_tls_log(68, 0);
+    if (mbedtls_x509_time_gmtime(mbedtls_time(NULL), &now) != 0) {
+        uefi_browser_tls_log(69, MBEDTLS_ERR_X509_FATAL_ERROR);
+        return MBEDTLS_ERR_X509_FATAL_ERROR;
+    }
+    uefi_browser_tls_log(69, 0);
+#endif"""
+if old_time in text:
+    text = text.replace(old_time, new_time, 1)
+elif new_time not in text:
+    raise SystemExit(f"{x509}: expected X.509 time initialization not found")
+
+old_chain = """    /* Check the chain */
+    ret = x509_crt_verify_chain(crt, trust_ca, ca_crl,
+                                f_ca_cb, p_ca_cb, profile,
+                                &ver_chain, rs_ctx);"""
+new_chain = """    /* Check the chain */
+    uefi_browser_tls_log(70, 0);
+    ret = x509_crt_verify_chain(crt, trust_ca, ca_crl,
+                                f_ca_cb, p_ca_cb, profile,
+                                &ver_chain, rs_ctx);
+    uefi_browser_tls_log(71, ret);"""
+if old_chain in text:
+    text = text.replace(old_chain, new_chain, 1)
+elif new_chain not in text:
+    raise SystemExit(f"{x509}: expected certificate-chain verification call not found")
+
+old_parent = """        ret = x509_crt_find_parent(child, cur_trust_ca, &parent,
+                                   &parent_is_trusted, &signature_is_good,
+                                   ver_chain->len - 1, self_cnt, rs_ctx,
+                                   &now);"""
+new_parent = """        uefi_browser_tls_log(72, (int) ver_chain->len);
+        ret = x509_crt_find_parent(child, cur_trust_ca, &parent,
+                                   &parent_is_trusted, &signature_is_good,
+                                   ver_chain->len - 1, self_cnt, rs_ctx,
+                                   &now);
+        uefi_browser_tls_log(73, ret);"""
+if old_parent in text:
+    text = text.replace(old_parent, new_parent, 1)
+elif new_parent not in text:
+    raise SystemExit(f"{x509}: expected issuer search call not found")
+
+old_hash = """    status = psa_hash_compute(hash_alg,
+                              child->tbs.p,
+                              child->tbs.len,
+                              hash,
+                              sizeof(hash),
+                              &hash_len);"""
+new_hash = """    uefi_browser_tls_log(74, (int) child->tbs.len);
+    status = psa_hash_compute(hash_alg,
+                              child->tbs.p,
+                              child->tbs.len,
+                              hash,
+                              sizeof(hash),
+                              &hash_len);
+    uefi_browser_tls_log(75, (int) status);"""
+if old_hash in text:
+    text = text.replace(old_hash, new_hash, 1)
+elif new_hash not in text:
+    raise SystemExit(f"{x509}: expected certificate signature hash call not found")
+
+old_verify = """    return mbedtls_pk_verify_ext(child->sig_pk, &parent->pk,
+                                 child->sig_md, hash, hash_len,
+                                 child->sig.p, child->sig.len);"""
+new_verify = """    {
+        int verify_ret;
+        uefi_browser_tls_log(76, (int) child->sig_pk);
+        verify_ret = mbedtls_pk_verify_ext(child->sig_pk, &parent->pk,
+                                           child->sig_md, hash, hash_len,
+                                           child->sig.p, child->sig.len);
+        uefi_browser_tls_log(77, verify_ret);
+        return verify_ret;
+    }"""
+if old_verify in text:
+    text = text.replace(old_verify, new_verify, 1)
+elif new_verify not in text:
+    raise SystemExit(f"{x509}: expected public-key signature verification call not found")
+
+x509.write_text(text)
+
+print("Mbed TLS TLS and X.509 verification checkpoints installed (or already present).")
 PY
