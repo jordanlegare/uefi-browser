@@ -101,10 +101,14 @@ fail:
 
 int uefi_mbedtls_handshake(uefi_tls_session *session) {
     if (!session) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
-    int ret;
-    do {
-        ret = mbedtls_ssl_handshake(&session->ssl);
-    } while (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE);
+    /*
+     * The UEFI BIO callbacks are deliberately blocking: the SNP/smoltcp
+     * stream polls packets and returns only after data, EOF, or its bounded
+     * I/O timeout. Retrying WANT_READ/WANT_WRITE here would therefore spin
+     * forever if a callback ever returned a non-progress status. Let the
+     * Rust caller receive the exact Mbed TLS status instead of hanging in C.
+     */
+    int ret = mbedtls_ssl_handshake(&session->ssl);
     if (ret != 0) return ret;
     return mbedtls_ssl_get_verify_result(&session->ssl) == 0
         ? 0 : MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;

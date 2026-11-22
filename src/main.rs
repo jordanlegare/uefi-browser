@@ -377,6 +377,10 @@ fn fetch_response(
                 let ca_bundle = uefi_browser::ca_bundle::pem()
                     .ok_or_else(|| String::from("no embedded CA trust bundle"))?;
                 uefi::println!("Starting TLS handshake and X.509 verification...");
+                // The TCP stream's normal navigation timeout is 15 seconds.
+                // Use a shorter per-I/O timeout for TLS so a peer that accepts
+                // TCP but never sends a ServerHello cannot freeze the UI.
+                connection.peer.stream.set_io_timeout_ms(5_000);
                 let mut tls = connection
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
