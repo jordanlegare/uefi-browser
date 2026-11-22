@@ -59,6 +59,7 @@ COMMON_CFLAGS=(
   "-I$PLATFORM_INCLUDE"
   "-I$SRC/include"
   "-I$SRC/tf-psa-crypto/include"
+  "-I$PREFIX/include"
   "-isystem"
   "$MINGW_INCLUDE"
   "$BRIDGE_USER_CONFIG_DEFINE"
