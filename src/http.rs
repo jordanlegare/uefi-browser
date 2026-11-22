@@ -412,11 +412,8 @@ mod tests {
         let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
         assert!(response_is_complete(response, 1024).unwrap());
         assert!(
-            !response_is_complete(
-                b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhell",
-                1024
-            )
-            .unwrap()
+            !response_is_complete(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhell", 1024)
+                .unwrap()
         );
     }
 
