@@ -27,12 +27,18 @@ typedef struct {
 
 static int bio_send(void *ctx, const unsigned char *data, size_t length) {
     uefi_tls_session *session = (uefi_tls_session *)ctx;
-    return session->send_cb(session->io_context, data, length);
+    uefi_browser_tls_log(30, (int)length);
+    int ret = session->send_cb(session->io_context, data, length);
+    uefi_browser_tls_log(31, ret);
+    return ret;
 }
 
 static int bio_recv(void *ctx, unsigned char *data, size_t length) {
     uefi_tls_session *session = (uefi_tls_session *)ctx;
-    return session->recv_cb(session->io_context, data, length);
+    uefi_browser_tls_log(32, (int)length);
+    int ret = session->recv_cb(session->io_context, data, length);
+    uefi_browser_tls_log(33, ret);
+    return ret;
 }
 
 int uefi_mbedtls_client_new(

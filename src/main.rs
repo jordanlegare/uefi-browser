@@ -42,6 +42,14 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         12 => "TLS handshake: Mbed TLS returned",
         20 => "TLS entropy: entering EFI_RNG_PROTOCOL",
         21 => "TLS entropy: EFI_RNG_PROTOCOL returned",
+        30 => "TLS BIO: send callback entering",
+        31 => "TLS BIO: send callback returned",
+        32 => "TLS BIO: receive callback entering",
+        33 => "TLS BIO: receive callback returned",
+        34 => "TLS Rust: stream send entering",
+        35 => "TLS Rust: stream send returned",
+        36 => "TLS Rust: stream receive entering",
+        37 => "TLS Rust: stream receive returned",
         _ => "TLS diagnostic",
     };
     uefi::println!("{} (detail={})", message, detail);

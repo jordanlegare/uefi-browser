@@ -168,11 +168,14 @@ unsafe extern "C" fn send_callback<S: TlsStreamIo>(
     let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else {
         return -1;
     };
+    uefi_browser_tls_log(34, length as i32);
     let bytes = unsafe { core::slice::from_raw_parts(data, length) };
-    match stream.send(bytes) {
+    let result = match stream.send(bytes) {
         Ok(written) if written <= c_int::MAX as usize => written as c_int,
         _ => -1,
-    }
+    };
+    uefi_browser_tls_log(35, result);
+    result
 }
 
 unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
@@ -189,9 +192,12 @@ unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
     let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else {
         return -1;
     };
+    uefi_browser_tls_log(36, capacity as i32);
     let buffer = unsafe { core::slice::from_raw_parts_mut(output, capacity) };
-    match stream.receive(buffer) {
+    let result = match stream.receive(buffer) {
         Ok(read) if read <= c_int::MAX as usize => read as c_int,
         _ => -1,
-    }
+    };
+    uefi_browser_tls_log(37, result);
+    result
 }
