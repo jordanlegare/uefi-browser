@@ -80,13 +80,6 @@ static TLS_DEBUG_RING: TlsDebugRing = TlsDebugRing {
     entries: UnsafeCell::new([TlsDebugEntry::EMPTY; TLS_DEBUG_CAPACITY]),
 };
 
-// Emit a small live diagnostic window while the handshake is executing.
-// The complete rolling tail remains buffered for the final error report.
-#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-const TLS_DEBUG_LIVE_LIMIT: usize = 32;
-#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-static TLS_DEBUG_LIVE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 fn tls_debug_lock() {
     while TLS_DEBUG_RING
@@ -105,7 +98,6 @@ fn tls_debug_unlock() {
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 fn tls_debug_reset() {
-    TLS_DEBUG_LIVE_COUNT.store(0, Ordering::Relaxed);
     tls_debug_lock();
     TLS_DEBUG_RING.next.store(0, Ordering::Relaxed);
     unsafe {
@@ -206,8 +198,6 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         37 => "TLS Rust: stream receive returned",
         40 => "TLS X.509: peer certificate chain depth",
         41 => "TLS X.509: verification flags (unchanged)",
-        42 => "TLS C: Mbed TLS debug callback entered",
-        43 => "TLS C: Mbed TLS debug callback returned",
         _ => "TLS diagnostic",
     };
     if let Some(elapsed) = tls_handshake_elapsed_seconds() {
@@ -235,21 +225,12 @@ pub extern "C" fn uefi_browser_tls_debug_log(
     } else {
         unsafe { CStr::from_ptr(file) }.to_bytes()
     };
+    // This callback runs synchronously inside Mbed TLS while the TLS
+    // handshake is active. Never call UEFI console services here: firmware
+    // console output can block or re-enter firmware code and stall the
+    // handshake. Keep this path limited to copying into the RAM ring buffer;
+    // the caller prints the captured tail after Mbed TLS returns.
     tls_debug_record(level, source_bytes, line, message_bytes);
-
-    // Do not defer all Mbed TLS output until handshake() returns: that hides
-    // the exact point of a firmware-side stall. Bound console traffic so a
-    // verbose peer cannot flood the UEFI text console indefinitely.
-    let sequence = TLS_DEBUG_LIVE_COUNT.fetch_add(1, Ordering::Relaxed);
-    if sequence < TLS_DEBUG_LIVE_LIMIT {
-        let source = &source_bytes[source_bytes.len().saturating_sub(TLS_DEBUG_SOURCE_BYTES)..];
-        let message = &message_bytes[..message_bytes.len().min(TLS_DEBUG_MESSAGE_BYTES)];
-        let source = core::str::from_utf8(source).unwrap_or("?");
-        let message = core::str::from_utf8(message).unwrap_or("<non-UTF-8 Mbed TLS message>");
-        uefi::println!("TLS MbedTLS L{} {}:{} {}", level, source, line, message);
-    } else if sequence == TLS_DEBUG_LIVE_LIMIT {
-        uefi::println!("TLS MbedTLS: live diagnostic limit reached; retaining rolling tail.");
-    }
 }
 
 struct BrowserPage {
