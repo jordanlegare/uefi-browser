@@ -142,7 +142,7 @@ The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits
 | src/ca_bundle.rs | Optional build-time embedded PEM trust bundle |
 | vendor/mbedtls-bridge/uefi_tls.c | Mbed TLS client setup, BIO callbacks, handshake and mandatory X.509 verification |
 | vendor/mbedtls-bridge/uefi_platform.c | Freestanding time and gmtime hooks backed by UEFI Runtime Services |
-| vendor/mbedtls-bridge/include/ | Mbed TLS UEFI configuration and freestanding platform headers |
+| vendor/mbedtls-bridge/include/ | Mbed TLS and TF-PSA-Crypto UEFI configurations plus freestanding platform headers |
 | scripts/fetch-mbedtls.sh | Downloads and checksum-verifies the pinned Mbed TLS source archive |
 | scripts/build-uefi.sh | Builds static Mbed TLS libraries and the UEFI C bridge, then invokes the Rust EFI build |
 | scripts/update-ca-bundle.sh | Fetches and verifies the Mozilla-derived PEM trust bundle for image embedding |
@@ -174,9 +174,7 @@ The intended final image contains static Mbed TLS libraries and the UEFI-specifi
 
 The C bridge configures mandatory X.509 verification (MBEDTLS_SSL_VERIFY_REQUIRED), installs the supplied CA chain, configures the EFI_RNG-backed callback, sets the original URL hostname for SNI and identity checks, and installs stream BIO callbacks. The Rust TlsConnection provides those callbacks over the TCP4 stream.
 
-The UEFI port now has compile-time Mbed TLS configuration for custom allocation and time. src/uefi_memory.rs routes Mbed TLS calloc/free to UEFI Boot Services pool allocation. vendor/mbedtls-bridge/uefi_platform.c supplies a freestanding UTC time and Gregorian gmtime_r implementation driven by src/firmware_time.rs; unavailable or rejected firmware time returns failure instead of disabling X.509 date checks.
 
-scripts/build-uefi.sh fetches the pinned source, configures an x86-64 COFF static-library build, compiles the bridge, and sets the link environment consumed by build.rs. The script is now the intended full-image build entry point. **The complete Mbed TLS 4.3.0 C build and final PE/COFF link still need to be run and verified in the release environment.** The Rust-only CI job does not execute this script.
 
 ### Trust bundle
 
@@ -249,7 +247,7 @@ dist/EFI/BOOT/BOOTX64.EFI
 
 build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UEFI_MBEDTLS_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
 
-**Verification boundary:** the GitHub Actions job currently runs Rust formatting, portable tests, and cargo check --target x86_64-unknown-uefi. It does not download/compile Mbed TLS or link the final EFI image. Run the full build script and test the produced binary under network-enabled OVMF and on target firmware before treating it as release-ready.
+**Verification boundary:** GitHub Actions has a portable Rust job and a separate Mbed TLS/static- EFI build job. The portable job passes on the current branch. The latest full-build attempt reaches Mbed TLS compilation but fails because the TF-PSA-Crypto configuration did not yet receive the UEFI platform settings; the separate configuration file and build flag in this branch address that failure, but the rerun is still required. No successful final PE/COFF EFI link or firmware network test is claimed yet. Run the complete build and test the resulting binary under network-enabled OVMF and on target firmware before treating it as release-ready.
 
 ## Firmware adapter details
 
