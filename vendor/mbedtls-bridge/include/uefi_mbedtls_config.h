@@ -2,8 +2,8 @@
  * Mbed TLS 4.3 UEFI configuration.
  *
  * Mbed TLS owns the TLS/X.509 configuration. TF-PSA-Crypto has a separate
- * user-configuration hook; the same platform settings are repeated in
- * uefi_tf_psa_config.h so its configuration checker sees the UEFI hooks too.
+ * user-configuration hook. UEFI platform hooks are intentionally configured
+ * only in uefi_tf_psa_config.h, as required by the 4.x configuration split.
  */
 #ifndef UEFI_MBEDTLS_CONFIG_H
 #define UEFI_MBEDTLS_CONFIG_H
