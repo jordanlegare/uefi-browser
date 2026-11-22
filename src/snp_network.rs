@@ -23,7 +23,7 @@ const TX_SUBMIT_RETRIES: usize = 100;
 
 /// Counters collected from the SNP and smoltcp request path. The EFI status
 /// fields contain the raw UEFI status value from the last non-retryable error.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SnpNetworkDiagnostics {
     pub tx_queued: u64,
     pub tx_recycled: u64,
