@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.91"
 description = "Standalone x86_64 UEFI text browser"
 license = "MIT OR Apache-2.0"
+build = "build.rs"
 
 [lib]
 path = "src/lib.rs"

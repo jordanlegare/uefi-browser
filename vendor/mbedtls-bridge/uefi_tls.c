@@ -5,11 +5,11 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/error.h"
+#include "mbedtls/platform.h"
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
 typedef int (*uefi_recv_cb)(void *, unsigned char *, size_t);
@@ -45,7 +45,7 @@ int uefi_mbedtls_client_new(
         return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
     }
 
-    uefi_tls_session *session = (uefi_tls_session *)calloc(1, sizeof(*session));
+    uefi_tls_session *session = (uefi_tls_session *)mbedtls_calloc(1, sizeof(*session));
     if (!session) return MBEDTLS_ERR_SSL_ALLOC_FAILED;
 
     session->io_context = io_context;
@@ -85,7 +85,7 @@ fail:
     mbedtls_x509_crt_free(&session->roots);
     mbedtls_ssl_config_free(&session->config);
     mbedtls_ssl_free(&session->ssl);
-    free(session);
+    mbedtls_free(session);
     return ret;
 }
 
@@ -123,3 +123,6 @@ void uefi_mbedtls_client_free(uefi_tls_session *session) {
     mbedtls_ssl_free(&session->ssl);
     free(session);
 }
+
+/* Force the linker to include this translation unit and its Mbed TLS references. */
+int uefi_mbedtls_link_anchor(void) { return 0; }
