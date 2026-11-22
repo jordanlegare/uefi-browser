@@ -146,7 +146,7 @@ fn tls_debug_report() -> String {
         let message = core::str::from_utf8(&entry.message[..entry.message_len as usize])
             .unwrap_or("<non-UTF-8>");
         report.push_str(&format!(
-            "\\n  L{} {}:{} {}",
+            "\n  L{} {}:{} {}",
             entry.level, source, entry.line, message
         ));
     }
@@ -604,7 +604,7 @@ fn fetch_response(
                     // so embedding it here preserves the report on screen.
                     let diagnostics = tls_debug_report();
                     return Err(format!(
-                        "TLS handshake / certificate verification failed: {error:?}\\n{diagnostics}"
+                        "TLS handshake / certificate verification failed: {error:?}\n{diagnostics}"
                     ));
                 }
                 uefi::println!("TLS verified. Sending HTTPS request...");
