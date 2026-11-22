@@ -290,8 +290,6 @@ impl UefiUdp4Transport {
         };
         let receive_status = unsafe { (protocol.0.receive)(&mut protocol.0, &mut receive_token) };
         if receive_status != Status::SUCCESS {
-            let _ = 
-            let _ = 
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(map_status(receive_status));
@@ -330,8 +328,6 @@ impl UefiUdp4Transport {
             unsafe { (protocol.0.transmit)(&mut protocol.0, &mut transmit_token) };
         if transmit_status != Status::SUCCESS {
             cancel_receive_and_drain(&mut protocol, &mut receive_token, receive_events.wait_event());
-            let _ = 
-            let _ = 
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(map_status(transmit_status));
@@ -348,23 +344,19 @@ impl UefiUdp4Transport {
 
             if !tx_complete {
                 tx_complete =
-                    boot::check_event(transmit_events.wait_event()).map_err(|_| DnsIoError::Network)?;
+                    boot::check_event(transmit_events.wait_event()).unwrap_or(false);
                 if tx_complete && transmit_token.status != Status::SUCCESS {
                     cancel_receive_and_drain(&mut protocol, &mut receive_token, receive_events.wait_event());
-                    let _ = 
-                    let _ = 
-                    drop(protocol);
+                                    drop(protocol);
                     let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
                     return Err(map_status(transmit_token.status));
                 }
             }
 
             if !rx_complete {
-                rx_complete = boot::check_event(receive_events.wait_event()).map_err(|_| DnsIoError::Network)?;
+                rx_complete = boot::check_event(receive_events.wait_event()).unwrap_or(false);
                 if rx_complete && receive_token.status != Status::SUCCESS {
-                    let _ = 
-                    let _ = 
-                    drop(protocol);
+                                    drop(protocol);
                     let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
                     return Err(map_status(receive_token.status));
                 }
@@ -386,8 +378,6 @@ impl UefiUdp4Transport {
             if !tx_complete {
                 cancel_transmit_and_drain(&mut protocol, &mut transmit_token, transmit_events.wait_event());
             }
-            let _ = 
-            let _ = 
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(DnsIoError::Timeout);
@@ -396,8 +386,6 @@ impl UefiUdp4Transport {
         // SAFETY: a successful receive token provides the driver-owned RxData.
         let rx_data = unsafe { receive_token.packet.rx_data };
         if rx_data.is_null() {
-            let _ = 
-            let _ = 
             drop(protocol);
             let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
             return Err(DnsIoError::InvalidDatagram);
@@ -407,8 +395,6 @@ impl UefiUdp4Transport {
         // signal its recycle event exactly once.
         let received = unsafe { copy_and_recycle(rx_data, resolver, port, output) };
 
-        let _ = 
-        let _ = 
         drop(protocol);
         let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
 
