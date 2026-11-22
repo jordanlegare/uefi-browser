@@ -135,9 +135,8 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
 
             let mut complete = 0;
             let mut next_state = state;
-            let result = unsafe {
-                uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut next_state)
-            };
+            let result =
+                unsafe { uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut next_state) };
 
             state = next_state;
             tls_log(51, state);
