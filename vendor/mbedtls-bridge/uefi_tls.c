@@ -14,6 +14,7 @@
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
 typedef int (*uefi_recv_cb)(void *, unsigned char *, size_t);
+extern void uefi_browser_tls_log(int stage, int detail);
 
 typedef struct {
     mbedtls_ssl_context ssl;
@@ -59,35 +60,46 @@ int uefi_mbedtls_client_new(
     static int psa_initialized = 0;
     int ret = 0;
     if (!psa_initialized) {
+        uefi_browser_tls_log(1, 0);
         psa_status_t status = psa_crypto_init();
         if (status != PSA_SUCCESS) {
             ret = (int)status;
+            uefi_browser_tls_log(2, ret);
             goto fail;
         }
         psa_initialized = 1;
+        uefi_browser_tls_log(2, 0);
     }
 
+    uefi_browser_tls_log(3, (int)ca_pem_len);
     ret = mbedtls_x509_crt_parse(&session->roots, ca_pem, ca_pem_len);
-    if (ret != 0) goto fail;
+    if (ret != 0) { uefi_browser_tls_log(4, ret); goto fail; }
+    uefi_browser_tls_log(4, ret);
 
+    uefi_browser_tls_log(5, 0);
     ret = mbedtls_ssl_config_defaults(
         &session->config,
         MBEDTLS_SSL_IS_CLIENT,
         MBEDTLS_SSL_TRANSPORT_STREAM,
         MBEDTLS_SSL_PRESET_DEFAULT
     );
-    if (ret != 0) goto fail;
+    if (ret != 0) { uefi_browser_tls_log(6, ret); goto fail; }
+    uefi_browser_tls_log(6, ret);
 
     mbedtls_ssl_conf_authmode(&session->config, MBEDTLS_SSL_VERIFY_REQUIRED);
     mbedtls_ssl_conf_ca_chain(&session->config, &session->roots, NULL);
 
+    uefi_browser_tls_log(7, 0);
     ret = mbedtls_ssl_setup(&session->ssl, &session->config);
-    if (ret != 0) goto fail;
+    if (ret != 0) { uefi_browser_tls_log(8, ret); goto fail; }
+    uefi_browser_tls_log(8, ret);
 
+    uefi_browser_tls_log(9, 0);
     ret = mbedtls_ssl_set_hostname(&session->ssl, (const char *)hostname);
-    if (ret != 0) goto fail;
+    if (ret != 0) { uefi_browser_tls_log(9, ret); goto fail; }
 
     mbedtls_ssl_set_bio(&session->ssl, session, bio_send, bio_recv, NULL);
+    uefi_browser_tls_log(10, 0);
     *output = session;
     return 0;
 
@@ -108,7 +120,9 @@ int uefi_mbedtls_handshake(uefi_tls_session *session) {
      * forever if a callback ever returned a non-progress status. Let the
      * Rust caller receive the exact Mbed TLS status instead of hanging in C.
      */
+    uefi_browser_tls_log(11, 0);
     int ret = mbedtls_ssl_handshake(&session->ssl);
+    uefi_browser_tls_log(12, ret);
     if (ret != 0) return ret;
     return mbedtls_ssl_get_verify_result(&session->ssl) == 0
         ? 0 : MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;

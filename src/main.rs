@@ -24,6 +24,30 @@ unsafe extern "C" {
     fn uefi_mbedtls_link_anchor() -> i32;
 }
 
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+#[unsafe(no_mangle)]
+pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
+    let message = match stage {
+        1 => "TLS init: entering psa_crypto_init",
+        2 => "TLS init: PSA crypto initialized",
+        3 => "TLS init: parsing embedded CA bundle",
+        4 => "TLS init: CA bundle parsed",
+        5 => "TLS init: applying Mbed TLS client defaults",
+        6 => "TLS init: Mbed TLS defaults applied",
+        7 => "TLS init: allocating SSL session",
+        8 => "TLS init: SSL session allocated",
+        9 => "TLS init: setting SNI and hostname",
+        10 => "TLS init: session configured",
+        11 => "TLS handshake: entering mbedtls_ssl_handshake",
+        12 => "TLS handshake: Mbed TLS returned",
+        20 => "TLS entropy: entering EFI_RNG_PROTOCOL",
+        21 => "TLS entropy: EFI_RNG_PROTOCOL returned",
+        _ => "TLS diagnostic",
+    };
+    uefi::println!("{} (detail={})", message, detail);
+}
+
 struct BrowserPage {
     url: Url,
     status: u16,
@@ -384,6 +408,7 @@ fn fetch_response(
                 let mut tls = connection
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
+                uefi::println!("TLS session initialized; beginning handshake.");
                 tls.handshake().map_err(|error| {
                     format!("TLS handshake / certificate verification failed: {error:?}")
                 })?;
