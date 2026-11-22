@@ -42,9 +42,8 @@ fn main() {
 
     if let Ok(ca_path) = env::var("UEFI_CA_BUNDLE_PATH") {
         let ca_path = PathBuf::from(ca_path);
-        let bytes = fs::read(&ca_path).unwrap_or_else(|error| {
-            panic!("cannot read CA bundle {}: {error}", ca_path.display())
-        });
+        let bytes = fs::read(&ca_path)
+            .unwrap_or_else(|error| panic!("cannot read CA bundle {}: {error}", ca_path.display()));
         if !bytes.starts_with(b"-----BEGIN CERTIFICATE-----") {
             panic!("CA bundle does not begin with a PEM certificate");
         }
@@ -55,8 +54,7 @@ fn main() {
         if nul_terminated.last() != Some(&0) {
             nul_terminated.push(0);
         }
-        fs::write(&embedded, nul_terminated)
-            .expect("failed to stage the NUL-terminated CA bundle");
+        fs::write(&embedded, nul_terminated).expect("failed to stage the NUL-terminated CA bundle");
 
         println!("cargo:rustc-env=UEFI_CA_BUNDLE_FILE={}", embedded.display());
         println!("cargo:rustc-cfg=uefi_ca_bundle");
