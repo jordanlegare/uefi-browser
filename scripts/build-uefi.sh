@@ -25,6 +25,9 @@ BRIDGE_PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE="uefi_tf_psa_con
 
 bash "$ROOT/scripts/fetch-mbedtls.sh"
 
+# Add narrowly scoped, idempotent checkpoints around TLS 1.2/1.3 server-certificate processing.
+bash "$ROOT/scripts/patch-mbedtls-handshake.sh" "$SRC"
+
 # Remove the upstream MinGW formatter override: it bypasses the platform hooks
 # and adds native MinGW snprintf dependencies to the EFI image. This patch must
 # be idempotent because a failed build can be rerun against the same extracted
