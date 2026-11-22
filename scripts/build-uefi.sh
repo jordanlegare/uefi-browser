@@ -27,6 +27,8 @@ bash "$ROOT/scripts/fetch-mbedtls.sh"
 
 # Add narrowly scoped, idempotent checkpoints around TLS 1.2/1.3 server-certificate processing.
 bash "$ROOT/scripts/patch-mbedtls-handshake.sh" "$SRC"
+# Instrument the ECDSA -> PSA -> ECC verification path without changing verification policy.
+bash "$ROOT/scripts/patch-mbedtls-ecdsa.sh" "$SRC"
 
 # Remove the upstream MinGW formatter override: it bypasses the platform hooks
 # and adds native MinGW snprintf dependencies to the EFI image. This patch must
