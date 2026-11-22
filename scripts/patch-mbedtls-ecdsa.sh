@@ -214,29 +214,29 @@ patch_segment(
         ),
         (
             "    MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu1, &e, &s_inv));",
-            "    uefi_browser_tls_log(110, 0);\\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu1, &e, &s_inv));\\n"
+            "    uefi_browser_tls_log(110, 0);\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu1, &e, &s_inv));\n"
             "    uefi_browser_tls_log(111, ret);",
             "ECDSA u1 multiplication",
         ),
         (
             "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu1, pu1, &grp->N));",
-            "    uefi_browser_tls_log(112, 0);\\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu1, pu1, &grp->N));\\n"
+            "    uefi_browser_tls_log(112, 0);\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu1, pu1, &grp->N));\n"
             "    uefi_browser_tls_log(113, ret);",
             "ECDSA u1 modular reduction",
         ),
         (
             "    MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu2, r, &s_inv));",
-            "    uefi_browser_tls_log(114, 0);\\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu2, r, &s_inv));\\n"
+            "    uefi_browser_tls_log(114, 0);\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu2, r, &s_inv));\n"
             "    uefi_browser_tls_log(115, ret);",
             "ECDSA u2 multiplication",
         ),
         (
             "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu2, pu2, &grp->N));",
-            "    uefi_browser_tls_log(116, 0);\\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu2, pu2, &grp->N));\\n"
+            "    uefi_browser_tls_log(116, 0);\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu2, pu2, &grp->N));\n"
             "    uefi_browser_tls_log(117, ret);",
             "ECDSA u2 modular reduction",
         ),
