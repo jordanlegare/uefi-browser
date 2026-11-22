@@ -314,24 +314,39 @@ fn fetch_response(
         ));
     }
 
+    uefi::println!("Resolving {} and opening TCP port {}...", url.host, url.port);
     let mut connection = connect_firmware_url(network, url, 15_000)
-        .map_err(|error| format!("firmware network setup failed: {error:?}"))?;
+        .map_err(|error| format!("DNS/TCP connection failed: {error:?}"))?;
+    uefi::println!(
+        "TCP connected: {}:{}",
+        connection.peer.address,
+        connection.peer.port
+    );
 
     match url.scheme {
-        Scheme::Http => http::exchange_get(&mut connection.peer.stream, url, MAX_BODY_BYTES)
-            .map_err(|error| format!("HTTP transaction failed: {error:?}")),
+        Scheme::Http => {
+            uefi::println!("Sending HTTP request...");
+            let response = http::exchange_get(&mut connection.peer.stream, url, MAX_BODY_BYTES)
+                .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
+            uefi::println!("HTTP response received ({} bytes).", response.body.len());
+            Ok(response)
+        },
         Scheme::Https => {
             #[cfg(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle))]
             {
                 let ca_bundle = uefi_browser::ca_bundle::pem()
                     .ok_or_else(|| String::from("no embedded CA trust bundle"))?;
+                uefi::println!("Starting TLS handshake and X.509 verification...");
                 let mut tls = connection
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
                 tls.handshake()
-                    .map_err(|error| format!("TLS peer verification failed: {error:?}"))?;
-                http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
-                    .map_err(|error| format!("HTTPS transaction failed: {error:?}"))
+                    .map_err(|error| format!("TLS handshake / certificate verification failed: {error:?}"))?;
+                uefi::println!("TLS verified. Sending HTTPS request...");
+                let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
+                    .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
+                uefi::println!("HTTPS response received ({} bytes).", response.body.len());
+                Ok(response)
             }
 
             #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle)))]
