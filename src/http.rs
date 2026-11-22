@@ -83,7 +83,6 @@ pub fn build_get_request(url: &Url) -> Vec<u8> {
     request.into_bytes()
 }
 
-
 /// Send an HTTP GET over any byte stream and read the response until EOF.
 ///
 /// This works with a plain UEFI TCP4 stream or a Mbed TLS stream because both
@@ -387,8 +386,6 @@ mod tests {
         assert!(response.is_redirect());
         assert_eq!(response.location(), Some("/next"));
     }
-
-
 
     struct FakeStream {
         request: Vec<u8>,

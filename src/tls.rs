@@ -145,7 +145,6 @@ impl<'a, S: TlsStreamIo, R: SecureRandom> TlsConnection<'a, S, R> {
     }
 }
 
-
 impl<S: TlsStreamIo, R: SecureRandom> TlsStreamIo for TlsConnection<'_, S, R> {
     fn send(&mut self, bytes: &[u8]) -> Result<usize, ()> {
         self.write(bytes).map_err(|_| ())

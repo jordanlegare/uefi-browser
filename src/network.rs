@@ -104,7 +104,6 @@ where
     })
 }
 
-
 /// A firmware connection keeps the RNG alive for the later Mbed TLS handshake.
 #[cfg(target_os = "uefi")]
 pub struct FirmwareConnection {
@@ -139,8 +138,7 @@ pub fn connect_firmware_url(
     url: &Url,
     timeout_ms: u64,
 ) -> Result<FirmwareConnection, ConnectError> {
-    let dns_server =
-        crate::uefi_udp4::first_dns_server().ok_or(ConnectError::NoDnsServer)?;
+    let dns_server = crate::uefi_udp4::first_dns_server().ok_or(ConnectError::NoDnsServer)?;
     let mut random = crate::firmware_rng::UefiRandom::open()
         .map_err(|_| ConnectError::FirmwareRandomUnavailable)?;
     let mut dns_transport = crate::uefi_udp4::UefiUdp4Transport;
