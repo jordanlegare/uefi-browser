@@ -125,22 +125,57 @@ impl<'network> FirmwareConnection<'network> {
 /// Create an SNP/smoltcp stack, acquire DHCP, resolve DNS, and connect TCP.
 /// No UEFI IPv4 Config2, UDP4, or TCP4 protocol is required.
 #[cfg(target_os = "uefi")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FirmwareConnectFailure {
+    pub error: ConnectError,
+    pub diagnostics: crate::snp_network::SnpNetworkDiagnostics,
+}
+
+#[cfg(target_os = "uefi")]
 pub fn connect_firmware_url<'a>(
     network: &'a mut crate::snp_network::SnpNetwork,
     url: &Url,
     timeout_ms: u64,
-) -> Result<FirmwareConnection<'a>, ConnectError> {
+) -> Result<FirmwareConnection<'a>, FirmwareConnectFailure> {
     use crate::dns;
     use crate::snp_network::SnpTcpStream;
 
-    let mut random = crate::firmware_rng::UefiRandom::open()
-        .map_err(|_| ConnectError::FirmwareRandomUnavailable)?;
-    let dns_server = network.dns_server().ok_or(ConnectError::NoDnsServer)?;
-    let address = dns::resolve_a(network, &mut random, dns_server, &url.host, timeout_ms)
-        .map_err(ConnectError::Dns)?;
-    let socket = network
-        .connect_tcp(address, url.port, timeout_ms)
-        .map_err(ConnectError::FirmwareNetwork)?;
+    let mut random = match crate::firmware_rng::UefiRandom::open() {
+        Ok(random) => random,
+        Err(_) => {
+            return Err(FirmwareConnectFailure {
+                error: ConnectError::FirmwareRandomUnavailable,
+                diagnostics: network.diagnostics(),
+            });
+        }
+    };
+    let dns_server = match network.dns_server() {
+        Some(server) => server,
+        None => {
+            return Err(FirmwareConnectFailure {
+                error: ConnectError::NoDnsServer,
+                diagnostics: network.diagnostics(),
+            });
+        }
+    };
+    let address = match dns::resolve_a(network, &mut random, dns_server, &url.host, timeout_ms) {
+        Ok(address) => address,
+        Err(error) => {
+            return Err(FirmwareConnectFailure {
+                error: ConnectError::Dns(error),
+                diagnostics: network.diagnostics(),
+            });
+        }
+    };
+    let socket = match network.connect_tcp(address, url.port, timeout_ms) {
+        Ok(socket) => socket,
+        Err(error) => {
+            return Err(FirmwareConnectFailure {
+                error: ConnectError::FirmwareNetwork(error),
+                diagnostics: network.diagnostics(),
+            });
+        }
+    };
     let stream = SnpTcpStream::new(network, socket, timeout_ms);
 
     Ok(FirmwareConnection {

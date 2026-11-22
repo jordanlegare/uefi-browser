@@ -333,13 +333,13 @@ fn fetch_response(
         url.host,
         url.port
     );
-    let connection_result = connect_firmware_url(network, url, 15_000);
-    let mut connection = match connection_result {
+    let mut connection = match connect_firmware_url(network, url, 15_000) {
         Ok(connection) => connection,
-        Err(error) => {
-            let d = network.diagnostics();
+        Err(failure) => {
+            let d = failure.diagnostics;
             return Err(format!(
-                "DNS/TCP connection failed: {error:?}\nSNP TX: queued={} recycled={} failures={} queue-full={} last-status=0x{:x}\nSNP RX: frames={} errors={} last-status=0x{:x}\nUDP: sent={} received={} timeouts={}; TCP: attempts={} failures={} timeouts={}",
+                "DNS/TCP connection failed: {:?}\nSNP TX: queued={} recycled={} failures={} queue-full={} last-status=0x{:x}\nSNP RX: frames={} errors={} last-status=0x{:x}\nUDP: sent={} received={} timeouts={}; TCP: attempts={} failures={} timeouts={}",
+                failure.error,
                 d.tx_queued,
                 d.tx_recycled,
                 d.tx_failures,
