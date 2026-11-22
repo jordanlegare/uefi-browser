@@ -18,8 +18,8 @@ if [[ ! -d "$MINGW_INCLUDE" ]]; then
 fi
 
 # Mbed TLS 4.x and its TF-PSA-Crypto subproject have distinct user-config hooks.
-USER_CONFIG_DEFINE='-DMBEDTLS_USER_CONFIG_FILE=\\\"uefi_mbedtls_config.h\\\"'
-PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE=\\\"uefi_tf_psa_config.h\\\"'
+USER_CONFIG_DEFINE='-DMBEDTLS_USER_CONFIG_FILE=\"uefi_mbedtls_config.h\"'
+PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE=\"uefi_tf_psa_config.h\"'
 
 bash "$ROOT/scripts/fetch-mbedtls.sh"
 

@@ -174,6 +174,12 @@ The intended final image contains static Mbed TLS libraries and the UEFI-specifi
 
 The C bridge configures mandatory X.509 verification (MBEDTLS_SSL_VERIFY_REQUIRED), installs the supplied CA chain, configures the EFI_RNG-backed callback, sets the original URL hostname for SNI and identity checks, and installs stream BIO callbacks. The Rust TlsConnection provides those callbacks over the TCP4 stream.
 
+The UEFI port routes allocation to src/uefi_memory.rs using UEFI Boot Services AllocatePool/FreePool, and routes certificate time to src/firmware_time.rs through vendor/mbedtls-bridge/uefi_platform.c. The C-side Gregorian conversion implements the `mbedtls_platform_gmtime_r` hook; rejected or unavailable firmware time fails certificate validity checks closed.
+
+Mbed TLS 4.x separates the TLS/X.509 configuration from the TF-PSA-Crypto configuration. The build supplies both `MBEDTLS_USER_CONFIG_FILE=uefi_mbedtls_config.h` and `TF_PSA_CRYPTO_USER_CONFIG_FILE=uefi_tf_psa_config.h`. Both configuration headers expose the shared UEFI platform declarations and repeat the allocator/time settings so TF-PSA-Crypto does not fall back to host allocator or time defaults. The two configuration hooks are required because TF-PSA-Crypto consumes its own user-configuration file in Mbed TLS 4.x.
+
+scripts/build-uefi.sh fetches the pinned source, configures an x86-64 COFF static-library build, compiles the UEFI C bridge, and sets the link environment consumed by build.rs. The script is the full-image build entry point; its complete Mbed TLS build and final PE/COFF link must pass in CI before an EFI artifact can be considered produced.
+
 
 
 ### Trust bundle
@@ -247,7 +253,7 @@ dist/EFI/BOOT/BOOTX64.EFI
 
 build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UEFI_MBEDTLS_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
 
-**Verification boundary:** GitHub Actions has a portable Rust job and a separate Mbed TLS/static- EFI build job. The portable job passes on the current branch. The latest full-build attempt reaches Mbed TLS compilation but fails because the TF-PSA-Crypto configuration did not yet receive the UEFI platform settings; the separate configuration file and build flag in this branch address that failure, but the rerun is still required. No successful final PE/COFF EFI link or firmware network test is claimed yet. Run the complete build and test the resulting binary under network-enabled OVMF and on target firmware before treating it as release-ready.
+**Verification boundary:** GitHub Actions runs a portable Rust job and a separate Mbed TLS/static-EFI build job. The portable job passed on the preceding branch head. The latest full-build attempt failed during Mbed TLS/TF-PSA-Crypto compilation because the TF-PSA configuration did not receive the UEFI platform settings. This branch now supplies its own TF-PSA user configuration; the rerun is still required. No successful final PE/COFF EFI link or firmware network test is claimed yet. Run the complete build and test the resulting binary under network-enabled OVMF and on target firmware before treating it as release-ready.
 
 ## Firmware adapter details
 
@@ -328,6 +334,7 @@ The project is not yet release-verified. Do not use it to handle secrets or repl
 - [Hickory DNS protocol crate](https://docs.rs/hickory-proto/0.26.3/hickory_proto/)
 - [Hickory protocol feature flags](https://docs.rs/crate/hickory-proto/0.26.3/features)
 - [Mbed TLS upstream](https://github.com/Mbed-TLS/mbedtls)
+- [TF-PSA-Crypto configuration split in Mbed TLS 4.x](https://github.com/Mbed-TLS/TF-PSA-Crypto/blob/development/docs/psa-transition.md#compile-time-configuration)
 - [Mbed TLS 4.3.0 release](https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-4.3.0)
 - [UEFI 2.11 network protocols](https://uefi.org/specs/UEFI/2.11/29_Network_Protocols_ARP_and_DHCP.html)
 - [Rust UEFI crate](https://docs.rs/uefi/)
