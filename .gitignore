@@ -1,0 +1,6 @@
+/target/
+/dist/
+/build/
+/vendor/mbedtls-4.3.0/
+*.img
+*.qcow2
