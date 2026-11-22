@@ -235,7 +235,9 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         let last_detail = TLS_TRACE_DETAIL.load(Ordering::Relaxed);
         uefi::println!(
             "TLS callback trace: {} events; last stage={} detail={}",
-            count, last_stage, last_detail
+            count,
+            last_stage,
+            last_detail
         );
     }
 }
