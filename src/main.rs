@@ -41,30 +41,37 @@ fn main() -> Status {
     uefi::println!("|                         UEFI BROWSER                         |");
     uefi::println!("|               standalone x86_64 pre-OS browser               |");
     uefi::println!("+--------------------------------------------------------------+");
-    uefi::println!("Rust DNS: Hickory | Firmware networking: UDP4 + TCP4");
+    uefi::println!("Rust DNS: Hickory | IP stack: smoltcp over UEFI SNP");
     uefi::println!("TLS: embedded Mbed TLS | Rendering: UEFI text console");
     uefi::println!("");
-    uefi::println!("Initializing IPv4/DHCP and UDP4/TCP4 services...");
-    match uefi_browser::firmware_network::initialize() {
-        Ok(dns_server) => {
-            uefi::println!("IPv4 configured; DNS resolver: {}", dns_server);
-            uefi::println!("Synchronizing UTC clock from NTP...");
-            match uefi_browser::firmware_ntp::synchronize(dns_server) {
-                Ok(unix) => uefi::println!("NTP synchronized; UTC Unix time: {}", unix),
-                Err(error) => uefi::println!("NTP synchronization failed: {}", error),
+    uefi::println!("Initializing SNP Ethernet and smoltcp IPv4/DHCP...");
+    let mut network = match uefi_browser::firmware_rng::UefiRandom::open() {
+        Ok(mut random) => match uefi_browser::snp_network::SnpNetwork::new(&mut random) {
+            Ok(mut network) => match network.acquire_dhcp(60_000) {
+                Ok(dns_server) => {
+                    uefi::println!("smoltcp DHCP configured; DNS resolver: {}", dns_server);
+                    uefi::println!("Synchronizing UTC clock from NTP...");
+                    match uefi_browser::firmware_ntp::synchronize(&mut network, dns_server) {
+                        Ok(unix) => uefi::println!("NTP synchronized; UTC Unix time: {}", unix),
+                        Err(error) => uefi::println!("NTP synchronization failed: {}", error),
+                    }
+                    Some(network)
+                }
+                Err(error) => {
+                    uefi::println!("smoltcp DHCP initialization failed: {:?}", error);
+                    None
+                }
+            },
+            Err(error) => {
+                uefi::println!("SNP network initialization failed: {:?}", error);
+                None
             }
+        },
+        Err(_) => {
+            uefi::println!("Network unavailable: EFI_RNG_PROTOCOL could not seed smoltcp.");
+            None
         }
-        Err(uefi_browser::firmware_network::NetworkInitError::NoSimpleNetwork) => {
-            uefi::println!("Network unavailable: no EFI Simple Network adapter/driver was found.");
-            uefi::println!("Check firmware NIC support and enable the UEFI network driver.");
-        }
-        Err(uefi_browser::firmware_network::NetworkInitError::NoIp4Config2) => {
-            uefi::println!("Network unavailable: no EFI IPv4 Config2 stack was exposed.");
-            uefi::println!("UEFI NIC drivers were asked to connect, but no IPv4 stack appeared.");
-            uefi::println!("Enable/load the firmware IPv4 network stack; SNP alone is not enough.");
-        }
-        Err(error) => uefi::println!("Network initialization failed: {:?}", error),
-    }
+    };
     uefi::println!("");
 
     #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
@@ -92,12 +99,17 @@ fn main() -> Status {
         uefi::println!("CA roots: embedded.");
     }
 
+    let Some(network) = network.as_mut() else {
+        uefi::println!("No usable DHCP configuration; returning to firmware.");
+        return Status::SUCCESS;
+    };
+
     uefi::println!("");
     uefi::println!("Enter a hostname or URL. Bare hostnames default to HTTPS.");
     uefi::println!("Type 'help' for commands, or Ctrl+C to return to firmware.");
     uefi::println!("");
 
-    let Some(address) = read_line("Open address: ") else {
+    let Some(address) = read_line("Open address: ", network) else {
         return Status::SUCCESS;
     };
 
@@ -113,7 +125,7 @@ fn main() -> Status {
     history.push(first_url);
     let mut history_index = 0usize;
 
-    let mut page = match fetch_document(&history[history_index]) {
+    let mut page = match fetch_document(&history[history_index], network) {
         Ok(page) => page,
         Err(error) => {
             uefi::println!("Navigation failed: {error}");
@@ -124,7 +136,7 @@ fn main() -> Status {
     loop {
         render_page(&page);
         let prompt = format!("\n{} > ", page.url.as_string());
-        let Some(command) = read_line(&prompt) else {
+        let Some(command) = read_line(&prompt, network) else {
             break;
         };
         let command = command.trim();
@@ -207,7 +219,7 @@ fn main() -> Status {
             continue;
         };
 
-        match fetch_document(&target) {
+        match fetch_document(&target, network) {
             Ok(next_page) => {
                 if let Some(index) = target_index {
                     history_index = index;
@@ -228,11 +240,14 @@ fn main() -> Status {
     Status::SUCCESS
 }
 
-fn fetch_document(initial_url: &Url) -> Result<BrowserPage, String> {
+fn fetch_document(
+    initial_url: &Url,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Result<BrowserPage, String> {
     let mut current = initial_url.clone();
 
     for redirect_index in 0..=MAX_REDIRECTS {
-        let response = fetch_response(&current)?;
+        let response = fetch_response(&current, network)?;
         if response.is_redirect() {
             if redirect_index == MAX_REDIRECTS {
                 return Err(String::from("redirect limit exceeded"));
@@ -288,7 +303,10 @@ fn fetch_document(initial_url: &Url) -> Result<BrowserPage, String> {
     Err(String::from("redirect limit exceeded"))
 }
 
-fn fetch_response(url: &Url) -> Result<HttpResponse, String> {
+fn fetch_response(
+    url: &Url,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Result<HttpResponse, String> {
     #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle)))]
     if url.scheme == Scheme::Https {
         return Err(String::from(
@@ -296,7 +314,7 @@ fn fetch_response(url: &Url) -> Result<HttpResponse, String> {
         ));
     }
 
-    let mut connection = connect_firmware_url(url, 15_000)
+    let mut connection = connect_firmware_url(network, url, 15_000)
         .map_err(|error| format!("firmware network setup failed: {error:?}"))?;
 
     match url.scheme {
@@ -399,11 +417,12 @@ fn clear_screen() {
     let _ = system::with_stdout(|output| output.clear());
 }
 
-fn read_line(prompt: &str) -> Option<String> {
+fn read_line(prompt: &str, network: &mut uefi_browser::snp_network::SnpNetwork) -> Option<String> {
     uefi::print!("{prompt}");
     let mut line = String::new();
 
     loop {
+        network.poll();
         let key = system::with_stdin(|input| input.read_key().ok().flatten());
         match key {
             Some(Key::Printable(unit)) => {

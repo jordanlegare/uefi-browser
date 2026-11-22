@@ -41,6 +41,8 @@ pub trait Tcp4Connector {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnectError {
     Dns(DnsError),
+    #[cfg(target_os = "uefi")]
+    FirmwareNetwork(crate::snp_network::SnpNetworkError),
     Tcp(Tcp4Error),
     NoDnsServer,
     FirmwareRandomUnavailable,
@@ -103,51 +105,51 @@ where
     })
 }
 
-/// A firmware connection retains its TCP4 stream and original server name.
-/// TLS randomness is obtained independently through the TF-PSA EFI_RNG hook.
+/// A firmware connection owns a smoltcp TCP socket and the SNP device stack.
 #[cfg(target_os = "uefi")]
-pub struct FirmwareConnection {
-    pub peer: ConnectedPeer<crate::uefi_tcp4::Tcp4Stream>,
+pub struct FirmwareConnection<'a> {
+    pub peer: ConnectedPeer<crate::snp_network::SnpTcpStream<'a>>,
 }
 
 #[cfg(target_os = "uefi")]
-impl FirmwareConnection {
-    /// Start Mbed TLS over the retained TCP4 stream. TF-PSA obtains entropy
-    /// from EFI_RNG_PROTOCOL through mbedtls_platform_get_entropy().
-    pub fn start_tls(
-        &mut self,
+impl<'network> FirmwareConnection<'network> {
+    pub fn start_tls<'connection>(
+        &'connection mut self,
         ca_bundle_pem: &[u8],
-    ) -> Result<TlsConnection<'_, crate::uefi_tcp4::Tcp4Stream>, TlsError> {
+    ) -> Result<TlsConnection<'connection, crate::snp_network::SnpTcpStream<'network>>, TlsError>
+    {
         self.peer.start_tls(ca_bundle_pem)
     }
 }
 
-/// Complete the firmware DNS-to-TCP connection setup.
-///
-/// DNS server addresses are discovered from EFI IPv4 Config2 (normally
-/// provisioned by DHCP). Hickory creates/validates DNS packets, UEFI UDP4
-/// transports them, and UEFI TCP4 connects to the resolved A record. The
-/// original URL hostname remains on FirmwareConnection for TLS SNI and
-/// certificate hostname verification.
+/// Create an SNP/smoltcp stack, acquire DHCP, resolve DNS, and connect TCP.
+/// No UEFI IPv4 Config2, UDP4, or TCP4 protocol is required.
 #[cfg(target_os = "uefi")]
-pub fn connect_firmware_url(
+pub fn connect_firmware_url<'a>(
+    network: &'a mut crate::snp_network::SnpNetwork,
     url: &Url,
     timeout_ms: u64,
-) -> Result<FirmwareConnection, ConnectError> {
-    let dns_server = crate::uefi_udp4::first_dns_server().ok_or(ConnectError::NoDnsServer)?;
+) -> Result<FirmwareConnection<'a>, ConnectError> {
+    use crate::dns;
+    use crate::snp_network::SnpTcpStream;
+
     let mut random = crate::firmware_rng::UefiRandom::open()
         .map_err(|_| ConnectError::FirmwareRandomUnavailable)?;
-    let mut dns_transport = crate::uefi_udp4::UefiUdp4Transport;
-    let mut tcp4 = crate::uefi_tcp4::UefiTcp4Connector::new();
+    let dns_server = network.dns_server().ok_or(ConnectError::NoDnsServer)?;
+    let address = dns::resolve_a(network, &mut random, dns_server, &url.host, timeout_ms)
+        .map_err(ConnectError::Dns)?;
+    let socket = network
+        .connect_tcp(address, url.port, timeout_ms)
+        .map_err(ConnectError::FirmwareNetwork)?;
+    let stream = SnpTcpStream::new(network, socket, timeout_ms);
 
-    let peer = connect_url(
-        &mut dns_transport,
-        &mut tcp4,
-        &mut random,
-        dns_server,
-        url,
-        timeout_ms,
-    )?;
-
-    Ok(FirmwareConnection { peer })
+    Ok(FirmwareConnection {
+        peer: ConnectedPeer {
+            server_name: url.host.clone(),
+            address,
+            port: url.port,
+            scheme: url.scheme,
+            stream,
+        },
+    })
 }
