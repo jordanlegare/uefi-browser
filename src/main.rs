@@ -44,6 +44,19 @@ fn main() -> Status {
     uefi::println!("Rust DNS: Hickory | Firmware networking: UDP4 + TCP4");
     uefi::println!("TLS: embedded Mbed TLS | Rendering: UEFI text console");
     uefi::println!("");
+    uefi::println!("Initializing IPv4/DHCP and UDP4/TCP4 services...");
+    match uefi_browser::firmware_network::initialize() {
+        Ok(dns_server) => {
+            uefi::println!("IPv4 configured; DNS resolver: {}", dns_server);
+            uefi::println!("Synchronizing UTC clock from NTP...");
+            match uefi_browser::firmware_ntp::synchronize(dns_server) {
+                Ok(unix) => uefi::println!("NTP synchronized; UTC Unix time: {}", unix),
+                Err(error) => uefi::println!("NTP synchronization failed: {}", error),
+            }
+        }
+        Err(error) => uefi::println!("Network initialization failed: {:?}", error),
+    }
+    uefi::println!("");
 
     #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
     {

@@ -14,6 +14,10 @@ pub mod url;
 pub mod ca_bundle;
 
 #[cfg(target_os = "uefi")]
+pub mod firmware_network;
+#[cfg(target_os = "uefi")]
+pub mod firmware_ntp;
+#[cfg(target_os = "uefi")]
 pub mod firmware_rng;
 #[cfg(target_os = "uefi")]
 pub mod firmware_time;

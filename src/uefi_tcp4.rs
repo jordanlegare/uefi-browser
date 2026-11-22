@@ -595,3 +595,11 @@ fn firmware_error(status: Status) -> Tcp4Error {
         Tcp4Error::Firmware(status.0)
     }
 }
+
+
+/// Whether firmware exposes at least one TCP4 service-binding controller.
+pub fn service_binding_available() -> bool {
+    boot::find_handles::<Tcp4Binding>()
+        .map(|handles| !handles.is_empty())
+        .unwrap_or(false)
+}

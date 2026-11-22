@@ -664,3 +664,11 @@ pub fn discover_dns_servers() -> Vec<Ipv4Addr> {
 pub fn first_dns_server() -> Option<Ipv4Addr> {
     discover_dns_servers().into_iter().next()
 }
+
+
+/// Whether firmware exposes at least one UDP4 service-binding controller.
+pub fn service_binding_available() -> bool {
+    boot::find_handles::<Udp4Binding>()
+        .map(|handles| !handles.is_empty())
+        .unwrap_or(false)
+}
