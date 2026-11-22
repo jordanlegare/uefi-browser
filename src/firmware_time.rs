@@ -15,7 +15,11 @@ pub fn unix_time_utc() -> Option<i64> {
 }
 
 pub fn time_to_unix_utc(time: &Time) -> Option<i64> {
-    if time.is_valid().is_err() || time.year() < MIN_TRUSTED_YEAR || time.time_zone().is_none() {
+    if time.is_valid().is_err()
+        || time.year() < MIN_TRUSTED_YEAR
+        || time.time_zone().is_none()
+        || time.daylight() != Daylight::empty()
+    {
         return None;
     }
 
@@ -68,6 +72,7 @@ mod tests {
         minute: u8,
         second: u8,
         zone: Option<i16>,
+        daylight: Daylight,
     ) -> Time {
         Time::new(TimeParams {
             year,
@@ -78,32 +83,42 @@ mod tests {
             second,
             nanosecond: 0,
             time_zone: zone,
-            daylight: Daylight::empty(),
+            daylight,
         })
         .unwrap()
     }
 
     #[test]
     fn converts_known_utc_instant() {
-        let time = firmware_time(2026, 1, 1, 0, 0, 0, Some(0));
+        let time = firmware_time(2026, 1, 1, 0, 0, 0, Some(0), Daylight::empty());
         assert_eq!(time_to_unix_utc(&time), Some(1_767_225_600));
     }
 
     #[test]
     fn applies_timezone_offset() {
         let utc = firmware_time(2026, 1, 1, 0, 0, 0, Some(0));
-        let eastern_local = firmware_time(2025, 12, 31, 19, 0, 0, Some(-300));
+        let eastern_local = firmware_time(2025, 12, 31, 19, 0, 0, Some(-300), Daylight::empty());
         assert_eq!(time_to_unix_utc(&eastern_local), time_to_unix_utc(&utc));
+    }
+
+    #[test]
+    fn rejects_daylight_adjusted_local_time() {
+        assert_eq!(
+            time_to_unix_utc(&firmware_time(
+                2026, 7, 1, 12, 0, 0, Some(-300), Daylight::IN_DAYLIGHT
+            )),
+            None
+        );
     }
 
     #[test]
     fn rejects_unspecified_timezone_and_implausible_clock() {
         assert_eq!(
-            time_to_unix_utc(&firmware_time(2026, 1, 1, 0, 0, 0, None)),
+            time_to_unix_utc(&firmware_time(2026, 1, 1, 0, 0, 0, None, Daylight::empty())),
             None
         );
         assert_eq!(
-            time_to_unix_utc(&firmware_time(2001, 1, 1, 0, 0, 0, Some(0))),
+            time_to_unix_utc(&firmware_time(2001, 1, 1, 0, 0, 0, Some(0), Daylight::empty())),
             None
         );
     }

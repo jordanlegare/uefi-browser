@@ -245,10 +245,22 @@ impl UefiUdp4Transport {
             }
         };
 
-        let mut rng = UefiRandom::open().map_err(|_| DnsIoError::Network)?;
+        let mut rng = match UefiRandom::open() {
+            Ok(rng) => rng,
+            Err(_) => {
+                drop(protocol);
+                // SAFETY: child belongs to this service-binding instance.
+                let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
+                return Err(DnsIoError::Network);
+            }
+        };
         let mut random_port_bytes = [0u8; 2];
-        rng.fill_bytes(&mut random_port_bytes)
-            .map_err(|_| DnsIoError::Network)?;
+        if rng.fill_bytes(&mut random_port_bytes).is_err() {
+            drop(protocol);
+            // SAFETY: child belongs to this service-binding instance.
+            let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
+            return Err(DnsIoError::Network);
+        }
         let station_port = 49_152u16 + (u16::from_be_bytes(random_port_bytes) % 16_384);
 
         let remote = Ipv4Address(resolver.octets());
@@ -279,8 +291,24 @@ impl UefiUdp4Transport {
             return Err(map_status(status));
         }
 
-        let receive_events = create_completion_events()?;
-        let transmit_events = create_completion_events()?;
+        let receive_events = match create_completion_events() {
+            Ok(events) => events,
+            Err(error) => {
+                drop(protocol);
+                // SAFETY: child belongs to this service-binding instance.
+                let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
+                return Err(error);
+            }
+        };
+        let transmit_events = match create_completion_events() {
+            Ok(events) => events,
+            Err(error) => {
+                drop(protocol);
+                // SAFETY: child belongs to this service-binding instance.
+                let _ = unsafe { (binding.0.destroy_child)(&mut binding.0, child.as_ptr()) };
+                return Err(error);
+            }
+        };
 
         let mut receive_token = Udp4CompletionToken {
             event: receive_events.notify_ptr(),

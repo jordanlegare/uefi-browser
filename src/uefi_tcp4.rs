@@ -151,7 +151,14 @@ impl UefiTcp4Connector {
             return Err(firmware_error(status));
         }
 
-        let events = create_completion_events()?;
+        let events = match create_completion_events() {
+            Ok(events) => events,
+            Err(error) => {
+                drop(tcp);
+                binding.destroy_child(child);
+                return Err(error);
+            }
+        };
         let mut token = Tcp4ConnectionToken {
             completion_token: Tcp4CompletionToken {
                 event: events.notify_ptr(),
@@ -190,6 +197,7 @@ impl UefiTcp4Connector {
             } else {
                 timeout_ms
             },
+            peer_eof: false,
             closed: false,
         })
     }
@@ -235,6 +243,7 @@ pub struct Tcp4Stream {
     binding: Option<ScopedProtocol<Tcp4Binding>>,
     tcp: Option<ScopedProtocol<Tcp4>>,
     io_timeout_ms: u64,
+    peer_eof: bool,
     closed: bool,
 }
 
@@ -307,7 +316,7 @@ impl Tcp4Stream {
     }
 
     fn receive_chunk(&mut self, output: &mut [u8]) -> Result<usize, ()> {
-        if output.is_empty() {
+        if output.is_empty() || self.peer_eof {
             return Ok(0);
         }
         let capacity = core::cmp::min(output.len(), RX_BUFFER_SIZE);
@@ -366,7 +375,7 @@ impl Tcp4Stream {
             return Err(());
         }
         if received == 0 {
-            self.closed = true;
+            self.peer_eof = true;
             return Ok(0);
         }
         Ok(received)
@@ -384,12 +393,14 @@ impl Tcp4Stream {
                         event: events.notify_ptr(),
                         status: Status::NOT_READY,
                     },
-                    abort_on_close: Boolean::TRUE,
+                    abort_on_close: Boolean::FALSE,
                 };
                 // SAFETY: close token and completion events remain live through completion.
                 let status = unsafe { (tcp.0.close)(&mut tcp.0, &mut close) };
-                if status == Status::SUCCESS
-                    && close.completion_token.status == Status::NOT_READY
+                if status != Status::SUCCESS {
+                    // SAFETY: null configuration resets the open TCP instance.
+                    let _ = unsafe { (tcp.0.configure)(&mut tcp.0, ptr::null()) };
+                } else if close.completion_token.status == Status::NOT_READY
                     && wait_for_token(tcp, events.wait_event(), 1000).is_err()
                 {
                     // Configure(NULL) forcibly resets TCP state and completes

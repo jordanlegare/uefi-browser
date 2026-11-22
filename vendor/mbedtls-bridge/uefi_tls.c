@@ -121,7 +121,7 @@ void uefi_mbedtls_client_free(uefi_tls_session *session) {
     mbedtls_x509_crt_free(&session->roots);
     mbedtls_ssl_config_free(&session->config);
     mbedtls_ssl_free(&session->ssl);
-    free(session);
+    mbedtls_free(session);
 }
 
 /* Force the linker to include this translation unit and its Mbed TLS references. */
