@@ -6,7 +6,7 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use core::ffi::{c_char, CStr};
+use core::ffi::{CStr, c_char};
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 use core::sync::atomic::{AtomicI64, Ordering};
 
