@@ -19,7 +19,7 @@ def insert_declaration(path: Path) -> str:
         pos = text.find(marker)
         if pos < 0:
             raise SystemExit(f"{path}: include block not found; refusing patch")
-        text = text[:pos] + declaration + "\\n" + text[pos:]
+        text = text[:pos] + declaration + "\n" + text[pos:]
     return text
 
 # TLS 1.2: state 3 dispatches directly to mbedtls_ssl_parse_certificate().
