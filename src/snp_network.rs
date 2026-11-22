@@ -18,6 +18,29 @@ const DHCP_TIMEOUT_MS: u64 = 60_000;
 const TCP_RX_BUFFER: usize = 16 * 1024;
 const TCP_TX_BUFFER: usize = 16 * 1024;
 const UDP_BUFFER_SIZE: usize = 2048;
+const MAX_PENDING_TX_BUFFERS: usize = 16;
+const TX_SUBMIT_RETRIES: usize = 100;
+
+/// Counters collected from the SNP and smoltcp request path. The EFI status
+/// fields contain the raw UEFI status value from the last non-retryable error.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SnpNetworkDiagnostics {
+    pub tx_queued: u64,
+    pub tx_recycled: u64,
+    pub tx_failures: u64,
+    pub tx_queue_full: u64,
+    pub tx_recycle_errors: u64,
+    pub tx_last_status: usize,
+    pub rx_frames: u64,
+    pub rx_errors: u64,
+    pub rx_last_status: usize,
+    pub udp_datagrams_sent: u64,
+    pub udp_datagrams_received: u64,
+    pub udp_timeouts: u64,
+    pub tcp_connect_attempts: u64,
+    pub tcp_connect_failures: u64,
+    pub tcp_connect_timeouts: u64,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SnpNetworkError {
@@ -59,7 +82,7 @@ impl TxToken for SnpTxToken<'_> {
         if frame.len() < 60 {
             frame.resize(60, 0);
         }
-        let _ = self.0.snp.transmit(0, &mut frame, None, None, None);
+        self.0.queue_transmit(frame);
         result
     }
 }
@@ -67,6 +90,98 @@ impl TxToken for SnpTxToken<'_> {
 struct SnpDevice {
     snp: ScopedProtocol<SimpleNetwork>,
     mtu: usize,
+    // UEFI SNP Transmit is asynchronous. Every queued buffer must remain
+    // allocated and unchanged until GetStatus returns that exact pointer.
+    pending_tx: Vec<Vec<u8>>,
+    diagnostics: SnpNetworkDiagnostics,
+}
+
+impl SnpDevice {
+    fn reclaim_transmit_buffers(&mut self) {
+        loop {
+            match self.snp.get_recycled_transmit_buffer_status() {
+                Ok(Some(recycled)) => {
+                    let pointer = recycled.as_ptr();
+                    if let Some(index) = self
+                        .pending_tx
+                        .iter()
+                        .position(|frame| frame.as_ptr() == pointer as *const u8)
+                    {
+                        self.pending_tx.swap_remove(index);
+                        self.diagnostics.tx_recycled =
+                            self.diagnostics.tx_recycled.saturating_add(1);
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let status = error.status();
+                    if status != uefi::Status::NOT_READY {
+                        self.diagnostics.tx_recycle_errors =
+                            self.diagnostics.tx_recycle_errors.saturating_add(1);
+                        self.diagnostics.tx_last_status = status.0;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    fn queue_transmit(&mut self, mut frame: Vec<u8>) {
+        self.reclaim_transmit_buffers();
+        if self.pending_tx.len() >= MAX_PENDING_TX_BUFFERS {
+            self.diagnostics.tx_queue_full =
+                self.diagnostics.tx_queue_full.saturating_add(1);
+            return;
+        }
+
+        // EFI_NOT_READY means the driver's asynchronous transmit queue is
+        // temporarily full. Reap completed buffers and retry while retaining
+        // ownership of this frame. Other EFI errors mean the frame was not
+        // accepted and can be safely dropped.
+        for attempt in 0..TX_SUBMIT_RETRIES {
+            match self.snp.transmit(0, &mut frame, None, None, None) {
+                Ok(()) => {
+                    self.pending_tx.push(frame);
+                    self.diagnostics.tx_queued =
+                        self.diagnostics.tx_queued.saturating_add(1);
+                    return;
+                }
+                Err(error) => {
+                    let status = error.status();
+                    self.diagnostics.tx_failures =
+                        self.diagnostics.tx_failures.saturating_add(1);
+                    self.diagnostics.tx_last_status = status.0;
+                    if status != uefi::Status::NOT_READY || attempt + 1 == TX_SUBMIT_RETRIES {
+                        return;
+                    }
+                    self.reclaim_transmit_buffers();
+                    boot::stall(Duration::from_millis(1));
+                }
+            }
+        }
+
+        self.diagnostics.tx_queue_full =
+            self.diagnostics.tx_queue_full.saturating_add(1);
+    }
+}
+
+impl Drop for SnpDevice {
+    fn drop(&mut self) {
+        // Do not free packet memory while firmware may still be reading it.
+        // Wait briefly for normal completion; if a broken driver never
+        // recycles a buffer, intentionally leak only those few buffers rather
+        // than hand firmware a dangling pointer during application teardown.
+        for _ in 0..250 {
+            self.reclaim_transmit_buffers();
+            if self.pending_tx.is_empty() {
+                break;
+            }
+            boot::stall(Duration::from_millis(1));
+        }
+        for frame in self.pending_tx.drain(..) {
+            core::mem::forget(frame);
+        }
+    }
 }
 impl SnpDevice {
     fn open() -> Result<(Self, EthernetAddress), SnpNetworkError> {
@@ -137,7 +252,15 @@ impl SnpDevice {
                 continue;
             }
 
-            return Ok((Self { snp, mtu }, mac));
+            return Ok((
+                Self {
+                    snp,
+                    mtu,
+                    pending_tx: Vec::new(),
+                    diagnostics: SnpNetworkDiagnostics::default(),
+                },
+                mac,
+            ));
         }
         Err(last_error)
     }
@@ -152,6 +275,8 @@ impl Device for SnpDevice {
     where
         Self: 'a;
     fn receive(&mut self, _: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+        self.reclaim_transmit_buffers();
+
         let mut frame = vec![0u8; core::cmp::max(FRAME_BUFFER_SIZE, self.mtu + 64)];
         let mut header_size = 0usize;
         match self
@@ -160,12 +285,30 @@ impl Device for SnpDevice {
         {
             Ok(n) if n >= 14 && n <= frame.len() => {
                 frame.truncate(n);
+                self.diagnostics.rx_frames = self.diagnostics.rx_frames.saturating_add(1);
                 Some((SnpRxToken(frame), SnpTxToken(self)))
             }
-            _ => None,
+            Ok(_) => {
+                self.diagnostics.rx_errors = self.diagnostics.rx_errors.saturating_add(1);
+                None
+            }
+            Err(error) => {
+                let status = error.status();
+                if status != uefi::Status::NOT_READY {
+                    self.diagnostics.rx_errors = self.diagnostics.rx_errors.saturating_add(1);
+                    self.diagnostics.rx_last_status = status.0;
+                }
+                None
+            }
         }
     }
     fn transmit(&mut self, _: Instant) -> Option<Self::TxToken<'_>> {
+        self.reclaim_transmit_buffers();
+        if self.pending_tx.len() >= MAX_PENDING_TX_BUFFERS {
+            self.diagnostics.tx_queue_full =
+                self.diagnostics.tx_queue_full.saturating_add(1);
+            return None;
+        }
         Some(SnpTxToken(self))
     }
     fn capabilities(&self) -> DeviceCapabilities {
@@ -277,6 +420,11 @@ impl SnpNetwork {
         self.dns_server
     }
 
+    /// Snapshot packet and request counters for on-screen diagnostics.
+    pub fn diagnostics(&self) -> SnpNetworkDiagnostics {
+        self.device.diagnostics
+    }
+
     pub fn acquire_dhcp(&mut self, timeout_ms: u64) -> Result<Ipv4Addr, SnpNetworkError> {
         let timeout = if timeout_ms == 0 {
             DHCP_TIMEOUT_MS
@@ -310,6 +458,11 @@ impl SnpNetwork {
         port: u16,
         timeout_ms: u64,
     ) -> Result<SocketHandle, SnpNetworkError> {
+        self.device.diagnostics.tcp_connect_attempts = self
+            .device
+            .diagnostics
+            .tcp_connect_attempts
+            .saturating_add(1);
         let rx = tcp::SocketBuffer::new(vec![0u8; TCP_RX_BUFFER]);
         let tx = tcp::SocketBuffer::new(vec![0u8; TCP_TX_BUFFER]);
         let handle = self.sockets.add(tcp::Socket::new(rx, tx));
@@ -324,6 +477,11 @@ impl SnpNetwork {
         };
         if result.is_err() {
             let _ = self.sockets.remove(handle);
+            self.device.diagnostics.tcp_connect_failures = self
+                .device
+                .diagnostics
+                .tcp_connect_failures
+                .saturating_add(1);
             return Err(SnpNetworkError::TcpNetwork);
         }
         let timeout = if timeout_ms == 0 { 15_000 } else { timeout_ms };
@@ -335,11 +493,21 @@ impl SnpNetwork {
             }
             if !socket.is_active() {
                 let _ = self.sockets.remove(handle);
+                self.device.diagnostics.tcp_connect_failures = self
+                    .device
+                    .diagnostics
+                    .tcp_connect_failures
+                    .saturating_add(1);
                 return Err(SnpNetworkError::TcpNetwork);
             }
         }
         self.sockets.get_mut::<tcp::Socket>(handle).abort();
         let _ = self.sockets.remove(handle);
+        self.device.diagnostics.tcp_connect_timeouts = self
+            .device
+            .diagnostics
+            .tcp_connect_timeouts
+            .saturating_add(1);
         Err(SnpNetworkError::TcpConnectTimeout)
     }
 }
@@ -377,6 +545,11 @@ impl UdpDnsTransport for SnpNetwork {
             let _ = self.sockets.remove(handle);
             return Err(DnsIoError::Network);
         }
+        self.device.diagnostics.udp_datagrams_sent = self
+            .device
+            .diagnostics
+            .udp_datagrams_sent
+            .saturating_add(1);
         let timeout = if timeout_ms == 0 { 3_000 } else { timeout_ms };
         let mut answer = Err(DnsIoError::Timeout);
         for _ in 0..timeout {
@@ -401,6 +574,20 @@ impl UdpDnsTransport for SnpNetwork {
             }
         }
         let _ = self.sockets.remove(handle);
+        match answer {
+            Ok(_) => {
+                self.device.diagnostics.udp_datagrams_received = self
+                    .device
+                    .diagnostics
+                    .udp_datagrams_received
+                    .saturating_add(1);
+            }
+            Err(DnsIoError::Timeout) => {
+                self.device.diagnostics.udp_timeouts =
+                    self.device.diagnostics.udp_timeouts.saturating_add(1);
+            }
+            Err(_) => {}
+        }
         answer
     }
 }

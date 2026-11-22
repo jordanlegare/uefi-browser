@@ -333,8 +333,29 @@ fn fetch_response(
         url.host,
         url.port
     );
-    let mut connection = connect_firmware_url(network, url, 15_000)
-        .map_err(|error| format!("DNS/TCP connection failed: {error:?}"))?;
+    let mut connection = match connect_firmware_url(network, url, 15_000) {
+        Ok(connection) => connection,
+        Err(error) => {
+            let d = network.diagnostics();
+            return Err(format!(
+                "DNS/TCP connection failed: {error:?}\\nSNP TX: queued={} recycled={} failures={} queue-full={} last-status=0x{:x}\\nSNP RX: frames={} errors={} last-status=0x{:x}\\nUDP: sent={} received={} timeouts={}; TCP: attempts={} failures={} timeouts={}",
+                d.tx_queued,
+                d.tx_recycled,
+                d.tx_failures,
+                d.tx_queue_full,
+                d.tx_last_status,
+                d.rx_frames,
+                d.rx_errors,
+                d.rx_last_status,
+                d.udp_datagrams_sent,
+                d.udp_datagrams_received,
+                d.udp_timeouts,
+                d.tcp_connect_attempts,
+                d.tcp_connect_failures,
+                d.tcp_connect_timeouts,
+            ));
+        }
+    };
     uefi::println!(
         "TCP connected: {}:{}",
         connection.peer.address,
