@@ -267,6 +267,13 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             | 130
             | 131
             | 132
+            | 133
+            | 134
+            | 135
+            | 136
+            | 137
+            | 138
+            | 139
             | 140
             | 141
             | 142
@@ -462,6 +469,13 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             ),
             131 => format!("MPI division: remainder copied (limbs={})", detail),
             132 => format!("MPI division returned (result={})", detail),
+            133 => format!("MPI modulo: entered (dividend_limbs={})", detail),
+            134 => format!("MPI modulo: division returned (result={})", detail),
+            135 => "MPI modulo: entering negative-remainder correction".to_string(),
+            136 => "MPI modulo: negative-remainder correction returned".to_string(),
+            137 => "MPI modulo: entering positive-remainder correction".to_string(),
+            138 => "MPI modulo: positive-remainder correction returned".to_string(),
+            139 => format!("MPI modulo returned (result={})", detail),
             140 => "ECP: entering first scalar multiplication".to_string(),
             141 => format!(
                 "ECP: first scalar multiplication returned (result={})",
