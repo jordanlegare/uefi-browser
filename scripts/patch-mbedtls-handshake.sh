@@ -63,7 +63,7 @@ old_steps = """    MBEDTLS_SSL_PROC_CHK(mbedtls_ssl_tls13_fetch_handshake_msg(
 
     /* Parse the certificate chain sent by the peer. */
     MBEDTLS_SSL_PROC_CHK(mbedtls_ssl_tls13_parse_certificate(ssl, buf,
-                                                              buf + buf_len));
+                                                             buf + buf_len));
     /* Validate the certificate chain and set the verification results. */
     MBEDTLS_SSL_PROC_CHK(ssl_tls13_validate_certificate(ssl));
 
