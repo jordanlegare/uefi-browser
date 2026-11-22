@@ -10,14 +10,17 @@ use core::ptr;
 
 use uefi::boot::{self, EventType, ScopedProtocol, Tpl};
 use uefi::proto::unsafe_protocol;
-use uefi::{Boolean, Handle, Status, boot::{OpenProtocolAttributes, OpenProtocolParams}};
-use uefi_raw::protocol::driver::ServiceBindingProtocol;
-use uefi_raw::protocol::network::tcp4::{
-    Tcp4AccessPoint, Tcp4CloseToken, Tcp4CompletionToken, Tcp4ConfigData,
-    Tcp4ConnectionToken, Tcp4FragmentData, Tcp4IoToken, Tcp4Packet,
-    Tcp4Protocol, Tcp4ReceiveData, Tcp4TransmitData, Tcp4Option,
+use uefi::{
+    Boolean, Handle, Status,
+    boot::{OpenProtocolAttributes, OpenProtocolParams},
 };
 use uefi_raw::Ipv4Address;
+use uefi_raw::protocol::driver::ServiceBindingProtocol;
+use uefi_raw::protocol::network::tcp4::{
+    Tcp4AccessPoint, Tcp4CloseToken, Tcp4CompletionToken, Tcp4ConfigData, Tcp4ConnectionToken,
+    Tcp4FragmentData, Tcp4IoToken, Tcp4Option, Tcp4Packet, Tcp4Protocol, Tcp4ReceiveData,
+    Tcp4TransmitData,
+};
 
 use crate::network::{Tcp4Connector, Tcp4Error};
 use crate::tls::TlsStreamIo;
@@ -70,11 +73,15 @@ impl Default for UefiTcp4Connector {
 
 impl UefiTcp4Connector {
     pub const fn new() -> Self {
-        Self { io_timeout_ms: DEFAULT_IO_TIMEOUT_MS }
+        Self {
+            io_timeout_ms: DEFAULT_IO_TIMEOUT_MS,
+        }
     }
 
     pub const fn with_io_timeout_ms(timeout_ms: u64) -> Self {
-        Self { io_timeout_ms: timeout_ms }
+        Self {
+            io_timeout_ms: timeout_ms,
+        }
     }
 
     fn connect_on_handle(
@@ -177,7 +184,11 @@ impl UefiTcp4Connector {
             child,
             binding: Some(binding),
             tcp: Some(tcp),
-            io_timeout_ms: if timeout_ms == 0 { self.io_timeout_ms } else { timeout_ms },
+            io_timeout_ms: if timeout_ms == 0 {
+                self.io_timeout_ms
+            } else {
+                timeout_ms
+            },
             closed: false,
         })
     }
@@ -196,9 +207,13 @@ impl Tcp4Connector for UefiTcp4Connector {
             return Err(Tcp4Error::Unsupported);
         }
 
-        let handles = boot::find_handles::<Tcp4Binding>()
-            .map_err(|_| Tcp4Error::NoServiceBinding)?;
-        let timeout = if timeout_ms == 0 { self.io_timeout_ms } else { timeout_ms };
+        let handles =
+            boot::find_handles::<Tcp4Binding>().map_err(|_| Tcp4Error::NoServiceBinding)?;
+        let timeout = if timeout_ms == 0 {
+            self.io_timeout_ms
+        } else {
+            timeout_ms
+        };
 
         let mut last_error = Tcp4Error::NoServiceBinding;
         for handle in handles.iter().copied() {
@@ -286,7 +301,11 @@ impl Tcp4Stream {
 
         let completion = token.completion_token.status;
         let _ = boot::close_event(event);
-        if completion == Status::SUCCESS { Ok(()) } else { Err(()) }
+        if completion == Status::SUCCESS {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     fn receive_chunk(&mut self, output: &mut [u8]) -> Result<usize, ()> {
