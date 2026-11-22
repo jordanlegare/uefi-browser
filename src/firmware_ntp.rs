@@ -8,6 +8,7 @@
 use core::net::Ipv4Addr;
 use uefi::runtime::{self, Daylight, Time, TimeParams};
 
+use crate::dns::UdpDnsTransport;
 use crate::dns::resolve_a;
 use crate::firmware_rng::UefiRandom;
 use crate::uefi_udp4::UefiUdp4Transport;
@@ -36,7 +37,8 @@ pub fn synchronize(dns_server: Ipv4Addr) -> Result<i64, &'static str> {
     let mut request = [0u8; 48];
     request[0] = 0x23; // LI=0, VN=4, client mode.
     let mut nonce = [0u8; 8];
-    rng.fill_bytes(&mut nonce).map_err(|_| "firmware RNG failed")?;
+    rng.fill_bytes(&mut nonce)
+        .map_err(|_| "firmware RNG failed")?;
     request[40..48].copy_from_slice(&nonce);
 
     let mut response = [0u8; 512];
@@ -102,12 +104,10 @@ fn civil_from_days(days_since_epoch: i64) -> Option<(i64, i64, i64)> {
     let z = days_since_epoch.checked_add(719_468)?;
     let era = z.div_euclid(146_097);
     let day_of_era = z - era * 146_097;
-    let year_of_era = (day_of_era - day_of_era / 1_460
-        + day_of_era / 36_524
-        - day_of_era / 146_096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let year = year_of_era + era * 400;
-    let day_of_year = day_of_era
-        - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_prime = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
     let month = month_prime + if month_prime < 10 { 3 } else { -9 };

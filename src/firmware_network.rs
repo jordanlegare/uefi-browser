@@ -16,8 +16,7 @@ pub enum NetworkInitError {
 /// Ask each firmware IPv4 Config2 interface to acquire DHCP configuration,
 /// then verify that both transport service bindings and a DNS resolver exist.
 pub fn initialize() -> Result<Ipv4Addr, NetworkInitError> {
-    let handles = boot::find_handles::<Ip4Config2>()
-        .map_err(|_| NetworkInitError::NoIp4Config2)?;
+    let handles = boot::find_handles::<Ip4Config2>().map_err(|_| NetworkInitError::NoIp4Config2)?;
     if handles.is_empty() {
         return Err(NetworkInitError::NoIp4Config2);
     }
