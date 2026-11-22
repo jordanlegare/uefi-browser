@@ -25,14 +25,8 @@ const MAX_UNIX: i64 = 4_102_444_800; // 2100-01-01
 /// UEFI real-time clock to UTC. Returns the accepted Unix timestamp.
 pub fn synchronize(network: &mut SnpNetwork, dns_server: Ipv4Addr) -> Result<i64, &'static str> {
     let mut rng = UefiRandom::open().map_err(|_| "EFI_RNG_PROTOCOL unavailable")?;
-    let server = resolve_a(
-        network,
-        &mut rng,
-        dns_server,
-        NTP_HOST,
-        3_000,
-    )
-    .map_err(|_| "could not resolve NTP server")?;
+    let server = resolve_a(network, &mut rng, dns_server, NTP_HOST, 3_000)
+        .map_err(|_| "could not resolve NTP server")?;
 
     let mut request = [0u8; 48];
     request[0] = 0x23; // LI=0, VN=4, client mode.
