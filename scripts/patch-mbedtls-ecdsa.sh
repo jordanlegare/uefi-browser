@@ -7,11 +7,12 @@ TF="$SRC/tf-psa-crypto"
 python3 - "$TF/extras/pk_wrap.c" "$TF/core/psa_crypto.c" \
   "$TF/drivers/builtin/src/psa_crypto_ecp.c" \
   "$TF/drivers/builtin/src/ecdsa.c" \
-  "$TF/drivers/builtin/src/ecp.c" <<'PY'
+  "$TF/drivers/builtin/src/ecp.c" \
+  "$TF/drivers/builtin/src/bignum.c" <<'PY'
 from pathlib import Path
 import sys
 
-pk_wrap, psa_crypto, psa_ecp, ecdsa, ecp = map(Path, sys.argv[1:])
+pk_wrap, psa_crypto, psa_ecp, ecdsa, ecp, bignum = map(Path, sys.argv[1:])
 
 
 def insert_declaration(path: Path) -> str:
@@ -255,6 +256,99 @@ patch_segment(
             "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(&R.X, &R.X, &grp->N));\n"
             "    uefi_browser_tls_log(103, ret);",
             "ECDSA final coordinate reduction",
+        ),
+    ],
+)
+
+
+patch_segment(
+    bignum,
+    "int mbedtls_mpi_div_mpi(",
+    "/*\n * Division by int: A = Q * b + R\n */",
+    [
+        (
+            "    mbedtls_mpi_uint TP2[3];\n",
+            "    mbedtls_mpi_uint TP2[3];\n\n"
+            "    uefi_browser_tls_log(120, (int) A->n);\n",
+            "MPI division entry",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&X, A));\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&Y, B));",
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&X, A));\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&Y, B));\n"
+            "    uefi_browser_tls_log(121, (int) X.n);",
+            "MPI division operand copies",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(&Y, biL * (n - t)));",
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(&Y, biL * (n - t)));\n"
+            "    uefi_browser_tls_log(122, (int) (n - t));",
+            "MPI division divisor alignment",
+        ),
+        (
+            "    while (mbedtls_mpi_cmp_mpi(&X, &Y) >= 0) {\n"
+            "        Z.p[n - t]++;\n"
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &Y));\n"
+            "    }",
+            "    uefi_browser_tls_log(123, 0);\n"
+            "    while (mbedtls_mpi_cmp_mpi(&X, &Y) >= 0) {\n"
+            "        Z.p[n - t]++;\n"
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &Y));\n"
+            "    }\n"
+            "    uefi_browser_tls_log(124, (int) n);",
+            "MPI division initial subtract loop",
+        ),
+        (
+            "    for (i = n; i > t; i--) {\n",
+            "    for (i = n; i > t; i--) {\n"
+            "        uefi_browser_tls_log(125, (int) i);\n",
+            "MPI division quotient-limb iteration",
+        ),
+        (
+            "        Z.p[i - t - 1]++;\n"
+            "        do {\n",
+            "        Z.p[i - t - 1]++;\n"
+            "        uefi_browser_tls_log(126, (int) i);\n"
+            "        do {\n",
+            "MPI division quotient correction entry",
+        ),
+        (
+            "        } while (mbedtls_mpi_cmp_mpi(&T1, &T2) > 0);",
+            "        } while (mbedtls_mpi_cmp_mpi(&T1, &T2) > 0);\n"
+            "        uefi_browser_tls_log(127, (int) i);",
+            "MPI division quotient correction return",
+        ),
+        (
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &T1));",
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &T1));\n"
+            "        uefi_browser_tls_log(128, (int) i);",
+            "MPI division partial remainder subtraction",
+        ),
+        (
+            "            Z.p[i - t - 1]--;\n"
+            "        }\n"
+            "    }",
+            "            Z.p[i - t - 1]--;\n"
+            "        }\n"
+            "        uefi_browser_tls_log(129, (int) i);\n"
+            "    }\n"
+            "    uefi_browser_tls_log(130, (int) t);",
+            "MPI division quotient-limb completion",
+        ),
+        (
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_copy(R, &X));",
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_copy(R, &X));\n"
+            "        uefi_browser_tls_log(131, (int) R->n);",
+            "MPI division remainder copy",
+        ),
+        (
+            "    return ret;\n"
+            "}\n\n",
+            "    uefi_browser_tls_log(132, ret);\n"
+            "    return ret;\n"
+            "}\n\n",
+            "MPI division return",
         ),
     ],
 )
