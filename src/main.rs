@@ -232,6 +232,15 @@ struct BrowserPage {
 #[uefi::entry]
 fn main() -> Status {
     helpers::init().unwrap();
+
+    // UEFI arms a five-minute watchdog before launching a boot option.
+    // This is an interactive browser that intentionally remains in Boot
+    // Services, so disable that boot-manager watchdog rather than letting
+    // firmware reset the machine while the user is browsing.
+    if let Err(error) = uefi::boot::set_watchdog_timer(0, 0x1_0000, None) {
+        uefi::println!("Warning: unable to disable UEFI boot watchdog: {:?}", error);
+    }
+
     clear_screen();
 
     uefi::println!("+--------------------------------------------------------------+");
