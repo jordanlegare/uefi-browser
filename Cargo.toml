@@ -1,0 +1,25 @@
+[package]
+name = "uefi-browser"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+description = "Standalone x86_64 UEFI text browser"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "uefi-browser"
+path = "src/main.rs"
+
+[dependencies]
+uefi = { version = "0.41.0", default-features = false, features = ["alloc", "global_allocator", "panic_handler"] }
+hickory-proto = { version = "0.26.3", default-features = false }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

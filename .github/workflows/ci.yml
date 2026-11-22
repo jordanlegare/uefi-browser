@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-core:
+    name: Format, test DNS/URL/HTML core, and cross-check UEFI target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust and UEFI target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-uefi
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run portable-core tests
+        run: cargo test --lib
+      - name: Check UEFI compilation
+        run: cargo check --target x86_64-unknown-uefi
