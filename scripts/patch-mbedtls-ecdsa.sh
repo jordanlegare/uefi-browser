@@ -391,5 +391,126 @@ patch_segment(
     ],
 )
 
+
+patch_segment(
+    ecp,
+    "static int ecp_mul_restartable_internal(",
+    "/*\n * Restartable multiplication R = m * P\n */",
+    [
+        (
+            "        MBEDTLS_MPI_CHK(mbedtls_ecp_check_privkey(grp, m));\n"
+            "        MBEDTLS_MPI_CHK(mbedtls_ecp_check_pubkey(grp, P));",
+            "        MBEDTLS_MPI_CHK(mbedtls_ecp_check_privkey(grp, m));\n"
+            "        uefi_browser_tls_log(148, 0);\n"
+            "        MBEDTLS_MPI_CHK(mbedtls_ecp_check_pubkey(grp, P));\n"
+            "        uefi_browser_tls_log(149, ret);",
+            "ECP scalar input validation",
+        ),
+        (
+            "        MBEDTLS_MPI_CHK(ecp_mul_comb(grp, R, m, P, f_rng, p_rng, rs_ctx));",
+            "        uefi_browser_tls_log(150, (int) grp->pbits);\n"
+            "        MBEDTLS_MPI_CHK(ecp_mul_comb(grp, R, m, P, f_rng, p_rng, rs_ctx));\n"
+            "        uefi_browser_tls_log(151, ret);",
+            "ECP comb multiplication",
+        ),
+    ],
+)
+
+patch_segment(
+    ecp,
+    "static int ecp_mul_comb(",
+    "#endif /* MBEDTLS_ECP_SHORT_WEIERSTRASS_ENABLED */",
+    [
+        (
+            "    ECP_RS_ENTER(rsm);",
+            "    ECP_RS_ENTER(rsm);\n"
+            "    uefi_browser_tls_log(152, (int) grp->pbits);",
+            "ECP comb engine entry",
+        ),
+        (
+            "        MBEDTLS_MPI_CHK(ecp_precompute_comb(grp, T, P, w, d, rs_ctx));",
+            "        uefi_browser_tls_log(153, (int) T_size);\n"
+            "        MBEDTLS_MPI_CHK(ecp_precompute_comb(grp, T, P, w, d, rs_ctx));\n"
+            "        uefi_browser_tls_log(154, ret);",
+            "ECP precomputed table generation",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(ecp_mul_comb_after_precomp(grp, R, m,",
+            "    uefi_browser_tls_log(155, (int) T_size);\n"
+            "    MBEDTLS_MPI_CHK(ecp_mul_comb_after_precomp(grp, R, m,",
+            "ECP comb scalar evaluation entry",
+        ),
+    ],
+)
+
+patch_segment(
+    ecp,
+    "static int ecp_mul_comb_after_precomp(",
+    "/*\n * Pick window size based on curve size",
+    [
+        (
+            "    MBEDTLS_MPI_CHK(ecp_comb_recode_scalar(grp, m, k, d, w,\n"
+            "                                           &parity_trick));",
+            "    uefi_browser_tls_log(156, (int) d);\n"
+            "    MBEDTLS_MPI_CHK(ecp_comb_recode_scalar(grp, m, k, d, w,\n"
+            "                                           &parity_trick));\n"
+            "    uefi_browser_tls_log(157, ret);",
+            "ECP scalar recoding",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(ecp_mul_comb_core(grp, RR, T, T_size, k, d,\n"
+            "                                      f_rng, p_rng, rs_ctx));",
+            "    uefi_browser_tls_log(158, 0);\n"
+            "    MBEDTLS_MPI_CHK(ecp_mul_comb_core(grp, RR, T, T_size, k, d,\n"
+            "                                      f_rng, p_rng, rs_ctx));\n"
+            "    uefi_browser_tls_log(159, ret);",
+            "ECP comb core scalar multiplication",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(ecp_normalize_jac(grp, RR));",
+            "    uefi_browser_tls_log(160, 0);\n"
+            "    MBEDTLS_MPI_CHK(ecp_normalize_jac(grp, RR));\n"
+            "    uefi_browser_tls_log(161, ret);",
+            "ECP scalar result normalization",
+        ),
+    ],
+)
+
+patch_segment(
+    ecp,
+    "int mbedtls_ecp_muladd_restartable(",
+    "/*\n * Linear combination\n * NOT constant-time",
+    [
+        (
+            "    MBEDTLS_MPI_CHK(mbedtls_ecp_mul_shortcuts(grp, pmP, m, P, rs_ctx));",
+            "    uefi_browser_tls_log(140, 0);\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_ecp_mul_shortcuts(grp, pmP, m, P, rs_ctx));\n"
+            "    uefi_browser_tls_log(141, ret);",
+            "first ECP scalar multiplication",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(mbedtls_ecp_mul_shortcuts(grp, pR,  n, Q, rs_ctx));",
+            "    uefi_browser_tls_log(142, 0);\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_ecp_mul_shortcuts(grp, pR,  n, Q, rs_ctx));\n"
+            "    uefi_browser_tls_log(143, ret);",
+            "second ECP scalar multiplication",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(ecp_add_mixed(grp, pR, pmP, pR, tmp));",
+            "    uefi_browser_tls_log(144, 0);\n"
+            "    MBEDTLS_MPI_CHK(ecp_add_mixed(grp, pR, pmP, pR, tmp));\n"
+            "    uefi_browser_tls_log(145, ret);",
+            "ECP point addition",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(ecp_normalize_jac(grp, pR));",
+            "    uefi_browser_tls_log(146, 0);\n"
+            "    MBEDTLS_MPI_CHK(ecp_normalize_jac(grp, pR));\n"
+            "    uefi_browser_tls_log(147, ret);",
+            "ECP final point normalization",
+        ),
+    ],
+)
+
 print("Mbed TLS ECDSA/PSA/ECP checkpoints installed (or already present).")
 PY
