@@ -99,7 +99,8 @@ impl SnpNetwork {
         random.fill_bytes(&mut port).map_err(|_| SnpNetworkError::EntropyUnavailable)?;
         let mut config = Config::new(HardwareAddress::Ethernet(mac));
         config.random_seed = u64::from_le_bytes(seed);
-        let mut iface = Interface::new(config, &mut { &device }, Instant::from_millis(0));
+        let mut device = device;
+        let mut iface = Interface::new(config, &mut device, Instant::from_millis(0));
         let mut sockets = SocketSet::new(Vec::new());
         let dhcp_handle = sockets.add(dhcpv4::Socket::new());
         iface.update_ip_addrs(|addrs| addrs.clear());
