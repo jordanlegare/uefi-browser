@@ -17,6 +17,7 @@
 #define MBEDTLS_PLATFORM_MEMORY
 #define MBEDTLS_PLATFORM_CALLOC_MACRO uefi_mbedtls_calloc
 #define MBEDTLS_PLATFORM_FREE_MACRO uefi_mbedtls_free
+#define MBEDTLS_PLATFORM_PRINTF_MACRO uefi_mbedtls_printf
 
 #define MBEDTLS_HAVE_TIME
 #define MBEDTLS_HAVE_TIME_DATE

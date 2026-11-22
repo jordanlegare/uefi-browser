@@ -12,6 +12,17 @@
 
 extern int64_t uefi_browser_time_unix(void);
 
+/*
+ * Mbed TLS self-test and optional diagnostic code may call mbedtls_printf.
+ * A UEFI application has no C stdio stream, so intentionally discard this
+ * output rather than pulling printf or a host CRT into the EFI image.
+ */
+int uefi_mbedtls_printf(const char *format, ...)
+{
+    (void)format;
+    return 0;
+}
+
 int64_t uefi_mbedtls_time(int64_t *timer)
 {
     const int64_t now = uefi_browser_time_unix();

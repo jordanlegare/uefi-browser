@@ -21,6 +21,7 @@
 #define MBEDTLS_PLATFORM_MEMORY
 #define MBEDTLS_PLATFORM_CALLOC_MACRO uefi_mbedtls_calloc
 #define MBEDTLS_PLATFORM_FREE_MACRO uefi_mbedtls_free
+#define MBEDTLS_PLATFORM_PRINTF_MACRO uefi_mbedtls_printf
 
 /* X.509 validity checks use the UEFI Runtime Services clock. */
 #define MBEDTLS_HAVE_TIME
