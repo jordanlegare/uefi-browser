@@ -11,6 +11,8 @@
 #include "platform_alt.h"
 #include "mbedtls/platform.h"
 #include <psa/crypto.h>
+#include <mbedtls/platform_time.h>
+#include <mbedtls/platform_util.h>
 
 extern int64_t uefi_browser_time_unix(void);
 extern int uefi_browser_fill_random(unsigned char *output, size_t output_size);
@@ -52,6 +54,39 @@ int uefi_mbedtls_printf(const char *format, ...)
 {
     (void)format;
     return 0;
+}
+
+/*
+ * Mbed TLS asks for a monotonically nondecreasing millisecond clock. UEFI's
+ * Runtime Services clock has one-second resolution, so use its UTC epoch
+ * milliseconds and clamp backwards adjustments. Stream TLS does not use
+ * DTLS retransmission timers; this hook avoids host GetSystemTimeAsFileTime.
+ */
+mbedtls_ms_time_t mbedtls_ms_time(void)
+{
+    static mbedtls_ms_time_t last = 0;
+    const int64_t seconds = uefi_browser_time_unix();
+    if (seconds < 0 || seconds > INT64_MAX / 1000) {
+        return last;
+    }
+
+    const mbedtls_ms_time_t candidate = (mbedtls_ms_time_t)(seconds * 1000);
+    if (candidate > last) {
+        last = candidate;
+    }
+    return last;
+}
+
+/*
+ * Volatile stores ensure the compiler cannot elide this secret wipe. This is
+ * the TF-PSA-Crypto zeroization alternative for platforms without Win32 APIs.
+ */
+void mbedtls_platform_zeroize(void *buffer, size_t length)
+{
+    volatile unsigned char *cursor = (volatile unsigned char *)buffer;
+    while (length-- > 0) {
+        *cursor++ = 0;
+    }
 }
 
 int64_t uefi_mbedtls_time(int64_t *timer)

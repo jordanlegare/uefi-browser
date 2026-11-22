@@ -141,7 +141,8 @@ The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits
 | src/uefi_memory.rs | UEFI Boot Services pool allocator hooks for Mbed TLS |
 | src/ca_bundle.rs | Optional build-time embedded PEM trust bundle |
 | vendor/mbedtls-bridge/uefi_tls.c | Mbed TLS client setup, BIO callbacks, handshake and mandatory X.509 verification |
-| vendor/mbedtls-bridge/uefi_platform.c | EFI_RNG entropy provider plus freestanding time/gmtime hooks backed by UEFI services |
+| vendor/mbedtls-bridge/uefi_platform.c | EFI_RNG entropy provider, UEFI time/gmtime hooks, monotonic-time adapter, and volatile zeroization |
+| vendor/mbedtls-bridge/uefi_crt.c | Minimal freestanding C string primitives required by Mbed TLS without a host CRT |
 | vendor/mbedtls-bridge/include/ | Mbed TLS and TF-PSA-Crypto UEFI configurations plus freestanding platform headers |
 | scripts/fetch-mbedtls.sh | Downloads and checksum-verifies the pinned Mbed TLS source archive |
 | scripts/build-uefi.sh | Builds static Mbed TLS libraries and the UEFI C bridge, then invokes the Rust EFI build |

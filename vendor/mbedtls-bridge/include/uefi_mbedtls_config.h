@@ -11,9 +11,12 @@
 #include <stdint.h>
 #include "platform_alt.h"
 
-/* UEFI supplies transport and memory; do not compile POSIX networking/timers. */
+/* UEFI supplies networking and time; do not compile OS sockets, timers,
+ * filesystem parsers, or debug output that pulls a host CRT into the image. */
 #undef MBEDTLS_NET_C
 #undef MBEDTLS_TIMING_C
+#undef MBEDTLS_FS_IO
+#undef MBEDTLS_DEBUG_C
 
 /* Platform allocator/time hooks are configured only in uefi_tf_psa_config.h. */
 #define MBEDTLS_PLATFORM_C

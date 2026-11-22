@@ -31,7 +31,7 @@ command -v clang >/dev/null
 command -v llvm-ar >/dev/null
 rustup target add "$TARGET"
 
-C_FLAGS="-ffreestanding -fno-builtin -fshort-wchar -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE $USER_CONFIG_DEFINE $PSA_USER_CONFIG_DEFINE"
+C_FLAGS="-ffreestanding -fno-builtin -fshort-wchar -DEFIX64 -DMBEDTLS_TEST_SW_INET_PTON -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE $USER_CONFIG_DEFINE $PSA_USER_CONFIG_DEFINE"
 
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_SYSTEM_NAME=Generic \
@@ -56,6 +56,8 @@ COMMON_CFLAGS=(
   -ffreestanding
   -fno-builtin
   -fshort-wchar
+  -DEFIX64
+  -DMBEDTLS_TEST_SW_INET_PTON
   "-I$PLATFORM_INCLUDE"
   "-I$SRC/include"
   "-I$SRC/tf-psa-crypto/include"
@@ -72,10 +74,14 @@ clang "${COMMON_CFLAGS[@]}" \
 clang "${COMMON_CFLAGS[@]}" \
   -c "$ROOT/vendor/mbedtls-bridge/uefi_platform.c" \
   -o "$BRIDGE_BUILD/uefi_platform.obj"
+clang "${COMMON_CFLAGS[@]}" \
+  -c "$ROOT/vendor/mbedtls-bridge/uefi_crt.c" \
+  -o "$BRIDGE_BUILD/uefi_crt.obj"
 
 llvm-ar rcs "$BRIDGE_BUILD/libuefi_mbedtls_bridge.a" \
   "$BRIDGE_BUILD/uefi_tls.obj" \
-  "$BRIDGE_BUILD/uefi_platform.obj"
+  "$BRIDGE_BUILD/uefi_platform.obj" \
+  "$BRIDGE_BUILD/uefi_crt.obj"
 
 export UEFI_MBEDTLS_LIB_DIR="$PREFIX/lib"
 export UEFI_MBEDTLS_BRIDGE_DIR="$BRIDGE_BUILD"
