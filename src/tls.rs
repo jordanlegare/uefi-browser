@@ -7,6 +7,21 @@ use alloc::ffi::CString;
 use core::ffi::{c_int, c_void};
 use core::marker::PhantomData;
 
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+unsafe extern "C" {
+    fn uefi_browser_tls_log(stage: i32, detail: i32);
+}
+
+#[inline]
+fn tls_log(stage: i32, detail: i32) {
+    #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+    unsafe {
+        uefi_browser_tls_log(stage, detail);
+    }
+    #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked)))]
+    let _ = (stage, detail);
+}
+
 pub trait TlsStreamIo {
     /// Write some bytes to the established TCP stream. Implementations block
     /// or poll until progress, EOF, or a bounded timeout.
@@ -168,11 +183,14 @@ unsafe extern "C" fn send_callback<S: TlsStreamIo>(
     let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else {
         return -1;
     };
+    tls_log(34, length as i32);
     let bytes = unsafe { core::slice::from_raw_parts(data, length) };
-    match stream.send(bytes) {
+    let result = match stream.send(bytes) {
         Ok(written) if written <= c_int::MAX as usize => written as c_int,
         _ => -1,
-    }
+    };
+    tls_log(35, result);
+    result
 }
 
 unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
@@ -189,9 +207,12 @@ unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
     let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else {
         return -1;
     };
+    tls_log(36, capacity as i32);
     let buffer = unsafe { core::slice::from_raw_parts_mut(output, capacity) };
-    match stream.receive(buffer) {
+    let result = match stream.receive(buffer) {
         Ok(read) if read <= c_int::MAX as usize => read as c_int,
         _ => -1,
-    }
+    };
+    tls_log(37, result);
+    result
 }
