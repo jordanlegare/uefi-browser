@@ -69,8 +69,7 @@ old_steps = """    MBEDTLS_SSL_PROC_CHK(mbedtls_ssl_tls13_fetch_handshake_msg(
 
     MBEDTLS_SSL_PROC_CHK(mbedtls_ssl_add_hs_msg_to_checksum(
                              ssl, MBEDTLS_SSL_HS_CERTIFICATE, buf, buf_len));"""
-new_steps = """    uefi_browser_tls_log(59, 0);
-    ret = mbedtls_ssl_tls13_fetch_handshake_msg(
+new_steps = """    ret = mbedtls_ssl_tls13_fetch_handshake_msg(
               ssl, MBEDTLS_SSL_HS_CERTIFICATE, &buf, &buf_len);
     uefi_browser_tls_log(60, ret);
     if (ret != 0) {
@@ -104,6 +103,24 @@ if old_steps in text:
     text = text.replace(old_steps, new_steps, 1)
 elif new_steps not in text:
     raise SystemExit(f"{tls13_generic}: expected TLS 1.3 certificate processing sequence not found")
+
+# Put the first checkpoint before Mbed TLS's initial debug callback. A second
+# checkpoint immediately after it distinguishes callback stalls from later work.
+entry = """int mbedtls_ssl_tls13_process_certificate(mbedtls_ssl_context *ssl)
+{
+    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
+    uefi_browser_tls_log(59, 0);
+    MBEDTLS_SSL_DEBUG_MSG(2, (\\"=> parse certificate\\"));
+    uefi_browser_tls_log(67, 0);"""
+old_entry = """int mbedtls_ssl_tls13_process_certificate(mbedtls_ssl_context *ssl)
+{
+    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
+    MBEDTLS_SSL_DEBUG_MSG(2, (\\"=> parse certificate\\"));"""
+if old_entry in text:
+    text = text.replace(old_entry, entry, 1)
+elif entry not in text:
+    raise SystemExit(f"{tls13_generic}: expected TLS 1.3 certificate function entry not found")
+
 tls13_generic.write_text(text)
 
 print("Mbed TLS server-certificate checkpoints installed (or already present).")
