@@ -213,6 +213,29 @@ src/url.rs accepts http:// and https://, defaults a bare hostname to HTTPS, appl
 
 src/document.rs extracts a page title, visible text, and numbered anchor links. It skips comments and common non-visible elements such as scripts, styles, templates, noscript, and SVG, and decodes a limited set of named and numeric entities. It is a lightweight text extractor, not a complete HTML5 tree builder. CSS layout, JavaScript, DOM mutation, form submission, cookies, media, and modern web application behaviour are not implemented.
 
+## Important: compile for the UEFI target
+
+The `uefi` crate is intentionally declared under Cargo's target-specific dependency section:
+
+```toml
+[target.'cfg(target_os = "uefi")'.dependencies]
+uefi = { version = "0.41.0", ... }
+```
+
+Therefore, a plain `cargo build` or `cargo check` on Linux compiles for Linux. It does **not** activate `target_os = "uefi"`. That is why a host build reports unresolved `uefi` imports, hides `connect_firmware_url` and `ca_bundle` behind their UEFI cfg gates, and then reports that the UEFI binary's allocator and panic handler are missing. These are cascading target-selection errors; do not fix them by adding another copy of the `uefi` dependency.
+
+Install and explicitly select the UEFI target:
+
+```sh
+rustup update stable
+rustup target add x86_64-unknown-uefi
+cargo check --target x86_64-unknown-uefi
+```
+
+That last command checks Rust code for the firmware target. It is not the complete, statically linked browser image. To build the actual `.efi` application, including Mbed TLS 4.3.0 and the embedded CA bundle, run the full build procedure below.
+
+Do not run the generated `.efi` file as a Linux executable. Boot it through UEFI firmware, an EFI shell, or a configured OVMF virtual machine.
+
 ## Build prerequisites
 
 The complete build requires:
