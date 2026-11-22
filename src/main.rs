@@ -44,7 +44,7 @@ fn main() -> Status {
     uefi::println!("Rust DNS: Hickory | Firmware networking: UDP4 + TCP4");
     uefi::println!("TLS: embedded Mbed TLS | Rendering: UEFI text console");
     uefi::println!("");
-    uefi::println!("Initializing IPv4/DHCP and UDP4/TCP4 services...");
+    uefi::println!("Connecting UEFI NIC drivers and initializing IPv4/DHCP...");
     match uefi_browser::firmware_network::initialize() {
         Ok(dns_server) => {
             uefi::println!("IPv4 configured; DNS resolver: {}", dns_server);
@@ -53,6 +53,15 @@ fn main() -> Status {
                 Ok(unix) => uefi::println!("NTP synchronized; UTC Unix time: {}", unix),
                 Err(error) => uefi::println!("NTP synchronization failed: {}", error),
             }
+        }
+        Err(uefi_browser::firmware_network::NetworkInitError::NoSimpleNetwork) => {
+            uefi::println!("Network unavailable: no EFI Simple Network adapter/driver was found.");
+            uefi::println!("Check firmware NIC support and enable the UEFI network driver.");
+        }
+        Err(uefi_browser::firmware_network::NetworkInitError::NoIp4Config2) => {
+            uefi::println!("Network unavailable: no EFI IPv4 Config2 stack was exposed.");
+            uefi::println!("UEFI NIC drivers were asked to connect, but no IPv4 stack appeared.");
+            uefi::println!("Enable/load the firmware IPv4 network stack; SNP alone is not enough.");
         }
         Err(error) => uefi::println!("Network initialization failed: {:?}", error),
     }
@@ -114,7 +123,7 @@ fn main() -> Status {
 
     loop {
         render_page(&page);
-        let prompt = format!("\n{} > ", page.url.as_string());
+        let prompt = format!("\\n{} > ", page.url.as_string());
         let Some(command) = read_line(&prompt) else {
             break;
         };
@@ -215,7 +224,7 @@ fn main() -> Status {
         }
     }
 
-    uefi::println!("\nLeaving UEFI Browser and returning to firmware.");
+    uefi::println!("\\nLeaving UEFI Browser and returning to firmware.");
     Status::SUCCESS
 }
 
@@ -260,7 +269,7 @@ fn fetch_document(initial_url: &Url) -> Result<BrowserPage, String> {
             Document {
                 title: current.host.clone(),
                 text: format!(
-                    "This text browser does not render Content-Type: {content_type}\n{} bytes received.",
+                    "This text browser does not render Content-Type: {content_type}\\n{} bytes received.",
                     response.body.len()
                 ),
                 links: Vec::new(),
@@ -400,16 +409,16 @@ fn read_line(prompt: &str) -> Option<String> {
             Some(Key::Printable(unit)) => {
                 let character: char = unit.into();
                 match character {
-                    '\r' | '\n' => {
+                    '\\r' | '\\n' => {
                         uefi::println!("");
                         return Some(line);
                     }
-                    '\u{8}' | '\u{7f}' => {
+                    '\\u{8}' | '\\u{7f}' => {
                         if line.pop().is_some() {
-                            uefi::print!("\u{8} \u{8}");
+                            uefi::print!("\\u{8} \\u{8}");
                         }
                     }
-                    '\u{3}' => {
+                    '\\u{3}' => {
                         uefi::println!("");
                         return None;
                     }
