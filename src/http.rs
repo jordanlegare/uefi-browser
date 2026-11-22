@@ -128,9 +128,62 @@ pub fn exchange_get<S: TlsStreamIo>(
             return Err(HttpError::BodyTooLarge);
         }
         response.extend_from_slice(&buffer[..count]);
+        if response_is_complete(&response, max_body)? {
+            break;
+        }
     }
 
     parse_response(&response, max_body)
+}
+
+/// Return true once a length-delimited or chunked HTTP response is complete.
+/// Close-delimited responses still require transport EOF.
+fn response_is_complete(input: &[u8], max_body: usize) -> Result<bool, HttpError> {
+    let Some(header_end) = find_bytes(input, b"\r\n\r\n") else {
+        if input.len() > HEADER_LIMIT {
+            return Err(HttpError::HeaderTooLarge);
+        }
+        return Ok(false);
+    };
+    if header_end > HEADER_LIMIT {
+        return Err(HttpError::HeaderTooLarge);
+    }
+
+    let headers =
+        core::str::from_utf8(&input[..header_end]).map_err(|_| HttpError::InvalidHeader)?;
+    let mut content_length = None;
+    let mut chunked = false;
+    for line in headers.split("\r\n").skip(1) {
+        let (name, value) = line.split_once(':').ok_or(HttpError::InvalidHeader)?;
+        if name.eq_ignore_ascii_case("content-length") {
+            let length = value
+                .trim()
+                .parse::<usize>()
+                .map_err(|_| HttpError::InvalidContentLength)?;
+            if content_length.is_some_and(|previous| previous != length) {
+                return Err(HttpError::ConflictingContentLength);
+            }
+            content_length = Some(length);
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            chunked = value
+                .split(',')
+                .any(|coding| coding.trim().eq_ignore_ascii_case("chunked"));
+        }
+    }
+
+    if chunked || content_length.is_some() {
+        match parse_response(input, max_body) {
+            Ok(_) => Ok(true),
+            Err(
+                HttpError::IncompleteBody
+                | HttpError::InvalidChunkSize
+                | HttpError::InvalidChunkTerminator,
+            ) => Ok(false),
+            Err(error) => Err(error),
+        }
+    } else {
+        Ok(false)
+    }
 }
 
 fn host_header(url: &Url) -> String {
@@ -353,6 +406,29 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::url::Url;
+
+    #[test]
+    fn detects_complete_content_length_response_without_waiting_for_eof() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
+        assert!(response_is_complete(response, 1024).unwrap());
+        assert!(
+            !response_is_complete(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhell", 1024)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn detects_complete_chunked_response_without_waiting_for_eof() {
+        let response =
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+        assert!(response_is_complete(response, 1024).unwrap());
+    }
+
+    #[test]
+    fn close_delimited_response_waits_for_transport_eof() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nhello";
+        assert!(!response_is_complete(response, 1024).unwrap());
+    }
 
     #[test]
     fn builds_http11_request_with_correct_host_and_target() {
