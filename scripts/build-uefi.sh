@@ -12,7 +12,7 @@ BRIDGE_BUILD="$ROOT/build/uefi-mbedtls-bridge"
 PLATFORM_INCLUDE="$ROOT/vendor/mbedtls-bridge/include"
 USER_CONFIG_DEFINE='-DMBEDTLS_USER_CONFIG_FILE=\"uefi_mbedtls_config.h\"'
 
-"$ROOT/scripts/fetch-mbedtls.sh"
+bash "$ROOT/scripts/fetch-mbedtls.sh"
 
 command -v cmake >/dev/null
 command -v ninja >/dev/null
