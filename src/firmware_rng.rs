@@ -85,12 +85,16 @@ pub unsafe extern "C" fn uefi_browser_fill_random(output: *mut u8, output_size: 
     // SAFETY: The C caller supplies a writable buffer of output_size bytes.
     let buffer = unsafe { core::slice::from_raw_parts_mut(output, output_size) };
     #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-    unsafe { uefi_browser_tls_log(20, output_size as i32) };
+    unsafe {
+        uefi_browser_tls_log(20, output_size as i32)
+    };
     let mut random = match UefiRandom::open() {
         Ok(random) => random,
         Err(_) => {
             #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-            unsafe { uefi_browser_tls_log(21, -1) };
+            unsafe {
+                uefi_browser_tls_log(21, -1)
+            };
             return -1;
         }
     };
@@ -100,6 +104,8 @@ pub unsafe extern "C" fn uefi_browser_fill_random(output: *mut u8, output_size: 
         Err(_) => -1,
     };
     #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-    unsafe { uefi_browser_tls_log(21, result) };
+    unsafe {
+        uefi_browser_tls_log(21, result)
+    };
     result
 }
