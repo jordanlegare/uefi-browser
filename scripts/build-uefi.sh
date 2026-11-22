@@ -26,13 +26,38 @@ BRIDGE_PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE="uefi_tf_psa_con
 bash "$ROOT/scripts/fetch-mbedtls.sh"
 
 # Remove the upstream MinGW formatter override: it bypasses the platform hooks
-# and adds __mingw_snprintf/__mingw_vsnprintf dependencies to the EFI image.
+# and adds native MinGW snprintf dependencies to the EFI image. This patch must
+# be idempotent because a failed build can be rerun against the same extracted
+# (and already-patched) source directory.
 DEBUG_SOURCE="$SRC/library/debug.c"
-if [[ "$(grep -c '^#if defined(__MINGW32__)$' "$DEBUG_SOURCE")" -ne 1 ]]; then
+MINGW_MARKER_COUNT="$(grep -Fc 'Temporary hack: on MingW' "$DEBUG_SOURCE" || true)"
+MINGW_GUARD_COUNT="$(grep -Fxc '#if defined(__MINGW32__)' "$DEBUG_SOURCE" || true)"
+MINGW_OVERRIDE_COUNT="$(grep -Ec '^#(undef|define) mbedtls_(v)?snprintf([[:space:]]|$)' "$DEBUG_SOURCE" || true)"
+
+if [[ "$MINGW_MARKER_COUNT" -eq 1 && "$MINGW_GUARD_COUNT" -eq 1 && "$MINGW_OVERRIDE_COUNT" -eq 4 ]]; then
+  # Verify all four expected directives before removing the bounded block.
+  for directive in \
+    '#undef mbedtls_snprintf' \
+    '#define mbedtls_snprintf snprintf' \
+    '#undef mbedtls_vsnprintf' \
+    '#define mbedtls_vsnprintf vsnprintf'; do
+    if [[ "$(grep -Fxc "$directive" "$DEBUG_SOURCE" || true)" -ne 1 ]]; then
+      echo "Unexpected Mbed TLS debug.c MinGW formatter directives; refusing an unsafe patch." >&2
+      exit 1
+    fi
+  done
+
+  sed -i '/^\/\* Temporary hack: on MingW, do not honor the platform.h configuration$/,/^#endif$/d' "$DEBUG_SOURCE"
+  if grep -Eq '__MINGW32__|^#(undef|define) mbedtls_(v)?snprintf([[:space:]]|$)' "$DEBUG_SOURCE"; then
+    echo "Mbed TLS debug.c MinGW formatter override remains after patching." >&2
+    exit 1
+  fi
+elif [[ "$MINGW_MARKER_COUNT" -eq 0 && "$MINGW_GUARD_COUNT" -eq 0 && "$MINGW_OVERRIDE_COUNT" -eq 0 ]]; then
+  echo "Mbed TLS debug.c MinGW formatter override is already absent; skipping patch."
+else
   echo "Unexpected Mbed TLS debug.c MinGW formatter block; refusing an unsafe patch." >&2
   exit 1
 fi
-sed -i '/^#if defined(__MINGW32__)$/,/^#endif$/d' "$DEBUG_SOURCE"
 
 command -v cmake >/dev/null
 command -v ninja >/dev/null
