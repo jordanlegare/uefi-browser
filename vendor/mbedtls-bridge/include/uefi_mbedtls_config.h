@@ -15,19 +15,13 @@
 #undef MBEDTLS_NET_C
 #undef MBEDTLS_TIMING_C
 
-/* Use the UEFI Boot Services allocator, never the host C runtime allocator. */
+/* Platform allocator/time hooks are configured only in uefi_tf_psa_config.h. */
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_NO_STD_FUNCTIONS
 #define MBEDTLS_PLATFORM_MEMORY
-#define MBEDTLS_PLATFORM_CALLOC_MACRO uefi_mbedtls_calloc
-#define MBEDTLS_PLATFORM_FREE_MACRO uefi_mbedtls_free
-#define MBEDTLS_PLATFORM_PRINTF_MACRO uefi_mbedtls_printf
 
-/* X.509 validity checks use the UEFI Runtime Services clock. */
+/* X.509 validity checks use the clock configured by TF-PSA-Crypto. */
 #define MBEDTLS_HAVE_TIME
 #define MBEDTLS_HAVE_TIME_DATE
-#define MBEDTLS_PLATFORM_TIME_TYPE_MACRO int64_t
-#define MBEDTLS_PLATFORM_TIME_MACRO uefi_mbedtls_time
-#define MBEDTLS_PLATFORM_GMTIME_R_ALT
 
 #endif
