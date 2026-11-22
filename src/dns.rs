@@ -78,7 +78,9 @@ pub fn resolve_a<T: UdpDnsTransport, R: SecureRandom>(
 
     for attempt in 0..DNS_ATTEMPTS {
         let mut id_bytes = [0u8; 2];
-        random.fill_bytes(&mut id_bytes).map_err(|_| DnsError::EntropyUnavailable)?;
+        random
+            .fill_bytes(&mut id_bytes)
+            .map_err(|_| DnsError::EntropyUnavailable)?;
         let transaction_id = u16::from_be_bytes(id_bytes);
 
         let query = build_a_query(hostname, transaction_id)?;
@@ -87,7 +89,11 @@ pub fn resolve_a<T: UdpDnsTransport, R: SecureRandom>(
             DNS_PORT,
             &query,
             &mut response,
-            if timeout_ms == 0 { DEFAULT_TIMEOUT_MS } else { timeout_ms },
+            if timeout_ms == 0 {
+                DEFAULT_TIMEOUT_MS
+            } else {
+                timeout_ms
+            },
         ) {
             Ok(length) => {
                 if length > response.len() {
@@ -169,9 +175,9 @@ fn absolute_name(hostname: &str) -> Result<String, DnsError> {
     let hostname = hostname.trim().trim_end_matches('.');
     if hostname.is_empty()
         || hostname.len() > 253
-        || hostname.bytes().any(|byte| {
-            byte.is_ascii_whitespace() || byte == b'/' || byte == b'\\' || byte == 0
-        })
+        || hostname
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || byte == b'/' || byte == b'\\' || byte == 0)
     {
         return Err(DnsError::InvalidName);
     }
@@ -198,13 +204,15 @@ fn absolute_name(hostname: &str) -> Result<String, DnsError> {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
-    use hickory_proto::rr::{rdata::A, Record};
+    use hickory_proto::rr::{Record, rdata::A};
 
     struct FixedRandom(u16);
 
     impl SecureRandom for FixedRandom {
         fn fill_bytes(&mut self, output: &mut [u8]) -> Result<(), ()> {
-            if output.len() != 2 { return Err(()); }
+            if output.len() != 2 {
+                return Err(());
+            }
             output.copy_from_slice(&self.0.to_be_bytes());
             Ok(())
         }
@@ -273,7 +281,11 @@ mod tests {
 
     #[test]
     fn resolver_uses_hickory_and_firmware_rng_on_port_53() {
-        let mut udp = FakeUdp { packet: response(0x7A31), calls: 0, last_port: 0 };
+        let mut udp = FakeUdp {
+            packet: response(0x7A31),
+            calls: 0,
+            last_port: 0,
+        };
         let mut random = FixedRandom(0x7A31);
         let address = resolve_a(
             &mut udp,
@@ -281,7 +293,8 @@ mod tests {
             Ipv4Addr::new(192, 0, 2, 53),
             "example.org",
             1000,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(address, Ipv4Addr::new(93, 184, 216, 34));
         assert_eq!(udp.calls, 1);
@@ -291,11 +304,17 @@ mod tests {
     #[test]
     fn rejects_invalid_hostnames_and_truncated_packets() {
         assert_eq!(build_a_query("", 1), Err(DnsError::InvalidName));
-        assert_eq!(build_a_query("invalid..example", 1), Err(DnsError::InvalidName));
+        assert_eq!(
+            build_a_query("invalid..example", 1),
+            Err(DnsError::InvalidName)
+        );
 
         let mut truncated = Message::new(7, MessageType::Response, OpCode::Query);
         truncated.metadata.truncation = true;
-        truncated.add_query(Query::new(Name::from_ascii("example.org.").unwrap(), RecordType::A));
+        truncated.add_query(Query::new(
+            Name::from_ascii("example.org.").unwrap(),
+            RecordType::A,
+        ));
         assert_eq!(
             parse_a_response(&truncated.to_vec().unwrap(), 7, "example.org"),
             Err(DnsError::Truncated)

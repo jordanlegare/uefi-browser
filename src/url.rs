@@ -62,7 +62,10 @@ impl Url {
         let authority = &rest[..authority_end];
         let suffix = &rest[authority_end..];
 
-        if authority.is_empty() || authority.contains('@') || authority.bytes().any(|b| b.is_ascii_whitespace()) {
+        if authority.is_empty()
+            || authority.contains('@')
+            || authority.bytes().any(|b| b.is_ascii_whitespace())
+        {
             return Err(UrlError::InvalidAuthority);
         }
 
@@ -75,7 +78,12 @@ impl Url {
             suffix.to_string()
         };
 
-        Ok(Self { scheme, host, port, path_and_query })
+        Ok(Self {
+            scheme,
+            host,
+            port,
+            path_and_query,
+        })
     }
 
     pub fn origin(&self) -> String {
@@ -123,9 +131,10 @@ impl Url {
             format!("{}{}{}", self.origin(), path, reference)
         } else {
             let path = self.path_and_query.split('?').next().unwrap_or("/");
-            let directory = path.rsplit_once('/').map(|(head, _)| {
-                if head.is_empty() { "/" } else { head }
-            }).unwrap_or("/");
+            let directory = path
+                .rsplit_once('/')
+                .map(|(head, _)| if head.is_empty() { "/" } else { head })
+                .unwrap_or("/");
             let joined = if directory.ends_with('/') {
                 format!("{directory}{reference}")
             } else {
@@ -151,7 +160,9 @@ fn parse_authority(authority: &str, scheme: Scheme) -> Result<(String, u16), Url
     let (host, port) = match authority.rsplit_once(':') {
         Some((host, port)) if !host.contains(':') => {
             let port = port.parse::<u16>().map_err(|_| UrlError::InvalidPort)?;
-            if port == 0 { return Err(UrlError::InvalidPort); }
+            if port == 0 {
+                return Err(UrlError::InvalidPort);
+            }
             (host, port)
         }
         _ => (authority, default_port),
@@ -165,24 +176,33 @@ fn parse_authority(authority: &str, scheme: Scheme) -> Result<(String, u16), Url
 }
 
 fn normalize_path(input: &str) -> String {
-    let (path, query) = input.split_once('?').map(|(a, b)| (a, Some(b))).unwrap_or((input, None));
+    let (path, query) = input
+        .split_once('?')
+        .map(|(a, b)| (a, Some(b)))
+        .unwrap_or((input, None));
     let trailing = path.ends_with('/');
     let mut parts: Vec<&str> = Vec::new();
 
     for part in path.split('/') {
         match part {
             "" | "." => {}
-            ".." => { parts.pop(); }
+            ".." => {
+                parts.pop();
+            }
             value => parts.push(value),
         }
     }
 
     let mut output = String::from("/");
     for (index, part) in parts.iter().enumerate() {
-        if index > 0 { output.push('/'); }
+        if index > 0 {
+            output.push('/');
+        }
         output.push_str(part);
     }
-    if trailing && !output.ends_with('/') { output.push('/'); }
+    if trailing && !output.ends_with('/') {
+        output.push('/');
+    }
     if let Some(query) = query {
         output.push('?');
         output.push_str(query);
@@ -213,14 +233,29 @@ mod tests {
     #[test]
     fn resolves_relative_and_root_relative_references() {
         let base = Url::parse("https://example.org/a/b/page.html").unwrap();
-        assert_eq!(base.resolve("../next").unwrap().as_string(), "https://example.org/a/next");
-        assert_eq!(base.resolve("/index.html").unwrap().as_string(), "https://example.org/index.html");
-        assert_eq!(base.resolve("//cdn.example.org/x").unwrap().as_string(), "https://cdn.example.org/x");
+        assert_eq!(
+            base.resolve("../next").unwrap().as_string(),
+            "https://example.org/a/next"
+        );
+        assert_eq!(
+            base.resolve("/index.html").unwrap().as_string(),
+            "https://example.org/index.html"
+        );
+        assert_eq!(
+            base.resolve("//cdn.example.org/x").unwrap().as_string(),
+            "https://cdn.example.org/x"
+        );
     }
 
     #[test]
     fn rejects_unsupported_schemes_and_userinfo() {
-        assert_eq!(Url::parse("ftp://example.org").unwrap_err(), UrlError::UnsupportedScheme);
-        assert_eq!(Url::parse("https://user@example.org").unwrap_err(), UrlError::InvalidAuthority);
+        assert_eq!(
+            Url::parse("ftp://example.org").unwrap_err(),
+            UrlError::UnsupportedScheme
+        );
+        assert_eq!(
+            Url::parse("https://user@example.org").unwrap_err(),
+            UrlError::InvalidAuthority
+        );
     }
 }

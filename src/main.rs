@@ -1,7 +1,7 @@
 #![no_main]
 #![no_std]
 
-use uefi::{helpers, system, Status};
+use uefi::{Status, helpers, system};
 
 #[uefi::entry]
 fn main() -> Status {
@@ -17,7 +17,7 @@ fn main() -> Status {
     uefi::println!("TLS boundary: Mbed TLS static-link integration source added.");
     uefi::println!("");
     uefi::println!("NETWORK TRANSPORT NOT READY");
-    uefi::println!("The TCP4/DNS4 adapter and Mbed TLS firmware callbacks are");
+    uefi::println!("The UDP4/TCP4 adapters and Mbed TLS firmware callbacks are");
     uefi::println!("not connected to the navigation loop in this milestone.");
     uefi::println!("");
     uefi::println!("Returning to firmware.");

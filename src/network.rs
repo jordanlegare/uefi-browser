@@ -64,12 +64,7 @@ impl<S: TlsStreamIo> ConnectedPeer<S> {
         if self.scheme != Scheme::Https {
             return Err(TlsError::NotHttps);
         }
-        TlsConnection::new(
-            &self.server_name,
-            ca_bundle_pem,
-            &mut self.stream,
-            random,
-        )
+        TlsConnection::new(&self.server_name, ca_bundle_pem, &mut self.stream, random)
     }
 }
 
@@ -88,14 +83,8 @@ where
     C: Tcp4Connector,
     R: SecureRandom,
 {
-    let address = dns::resolve_a(
-        dns_transport,
-        random,
-        dns_server,
-        &url.host,
-        timeout_ms,
-    )
-    .map_err(ConnectError::Dns)?;
+    let address = dns::resolve_a(dns_transport, random, dns_server, &url.host, timeout_ms)
+        .map_err(ConnectError::Dns)?;
 
     let stream = tcp4
         .connect_tcp4(address, url.port, timeout_ms)
