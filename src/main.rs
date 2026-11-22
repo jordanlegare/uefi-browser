@@ -333,7 +333,8 @@ fn fetch_response(
         url.host,
         url.port
     );
-    let mut connection = match connect_firmware_url(network, url, 15_000) {
+    let connection_result = connect_firmware_url(network, url, 15_000);
+    let mut connection = match connection_result {
         Ok(connection) => connection,
         Err(error) => {
             let d = network.diagnostics();
