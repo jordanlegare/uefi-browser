@@ -354,6 +354,50 @@ patch_segment(
 )
 
 patch_segment(
+    bignum,
+    "int mbedtls_mpi_mod_mpi(",
+    "/*\\n * Modulo: r = A mod b\\n */",
+    [
+        (
+            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\\n\\n    if (mbedtls_mpi_cmp_int(B, 0) < 0) {",
+            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\\n\\n"
+            "    uefi_browser_tls_log(133, (int) A->n);\\n"
+            "    if (mbedtls_mpi_cmp_int(B, 0) < 0) {",
+            "MPI modulo entry",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));",
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));\\n"
+            "    uefi_browser_tls_log(134, ret);",
+            "MPI modulo division return",
+        ),
+        (
+            "    while (mbedtls_mpi_cmp_int(R, 0) < 0) {",
+            "    uefi_browser_tls_log(135, 0);\\n"
+            "    while (mbedtls_mpi_cmp_int(R, 0) < 0) {",
+            "MPI modulo negative-remainder correction entry",
+        ),
+        (
+            "    }\\n\\n    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
+            "    }\\n"
+            "    uefi_browser_tls_log(136, 0);\\n\\n"
+            "    uefi_browser_tls_log(137, 0);\\n"
+            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
+            "MPI modulo negative correction completion and positive correction entry",
+        ),
+        (
+            "    }\\n\\ncleanup:\\n\\n    return ret;",
+            "    }\\n"
+            "    uefi_browser_tls_log(138, 0);\\n\\n"
+            "cleanup:\\n"
+            "    uefi_browser_tls_log(139, ret);\\n\\n"
+            "    return ret;",
+            "MPI modulo correction completion and return",
+        ),
+    ],
+)
+
+patch_segment(
     ecp,
     "int mbedtls_ecp_muladd_restartable(",
     "/*\n * Linear combination\n * NOT constant-time\n */",
