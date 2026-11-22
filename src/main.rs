@@ -157,6 +157,15 @@ fn tls_debug_report() -> String {
 static TLS_HANDSHAKE_START_UNIX: AtomicI64 = AtomicI64::new(-1);
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_HANDSHAKE_ACTIVE: AtomicBool = AtomicBool::new(false);
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_TRACE_COUNT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_TRACE_STAGE: AtomicI64 = AtomicI64::new(0);
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_TRACE_DETAIL: AtomicI64 = AtomicI64::new(0);
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 fn tls_handshake_elapsed_seconds() -> Option<i64> {
     let start = TLS_HANDSHAKE_START_UNIX.load(Ordering::Relaxed);
     let now = uefi_browser::firmware_time::uefi_browser_time_unix();
@@ -167,10 +176,24 @@ fn tls_handshake_elapsed_seconds() -> Option<i64> {
 #[unsafe(no_mangle)]
 pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
     if stage == 11 {
+        TLS_TRACE_COUNT.store(0, Ordering::Relaxed);
+        TLS_TRACE_STAGE.store(0, Ordering::Relaxed);
+        TLS_TRACE_DETAIL.store(0, Ordering::Relaxed);
         TLS_HANDSHAKE_START_UNIX.store(
             uefi_browser::firmware_time::uefi_browser_time_unix(),
             Ordering::Relaxed,
         );
+        TLS_HANDSHAKE_ACTIVE.store(true, Ordering::Release);
+    } else if stage == 12 {
+        // Stage 12 is called only after mbedtls_ssl_handshake() has returned.
+        TLS_HANDSHAKE_ACTIVE.store(false, Ordering::Release);
+    } else if TLS_HANDSHAKE_ACTIVE.load(Ordering::Acquire) {
+        // These callbacks execute synchronously underneath Mbed TLS. Record
+        // only the latest event; never call firmware console or clock APIs.
+        TLS_TRACE_STAGE.store(stage as i64, Ordering::Relaxed);
+        TLS_TRACE_DETAIL.store(detail as i64, Ordering::Relaxed);
+        TLS_TRACE_COUNT.fetch_add(1, Ordering::Relaxed);
+        return;
     }
 
     let message = match stage {
@@ -204,6 +227,16 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         uefi::println!("{} (elapsed={}s detail={})", message, elapsed, detail);
     } else {
         uefi::println!("{} (elapsed=unknown detail={})", message, detail);
+    }
+
+    if stage == 12 {
+        let count = TLS_TRACE_COUNT.load(Ordering::Relaxed);
+        let last_stage = TLS_TRACE_STAGE.load(Ordering::Relaxed);
+        let last_detail = TLS_TRACE_DETAIL.load(Ordering::Relaxed);
+        uefi::println!(
+            "TLS callback trace: {} events; last stage={} detail={}",
+            count, last_stage, last_detail
+        );
     }
 }
 
