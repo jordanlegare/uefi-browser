@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET="x86_64-unknown-uefi"
-COFF_TARGET="x86_64-pc-win32-coff"
+COFF_TARGET="x86_64-w64-windows-gnu"
 VERSION="4.3.0"
 SRC="$ROOT/vendor/mbedtls-$VERSION"
 BUILD="$ROOT/build/mbedtls-$VERSION"
