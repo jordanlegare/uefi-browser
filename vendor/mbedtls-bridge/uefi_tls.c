@@ -47,9 +47,17 @@ static int bio_recv(void *ctx, unsigned char *data, size_t length) {
 static void uefi_mbedtls_debug(void *ctx, int level, const char *file,
                                int line, const char *message) {
     (void)ctx;
+
+    /*
+     * These markers use the independent TLS stage logger, not the Mbed TLS
+     * debug callback. They prove whether Mbed TLS entered this callback and
+     * whether the Rust debug-log callback returned to C.
+     */
+    uefi_browser_tls_log(42, level);
     if (level <= 3) {
         uefi_browser_tls_debug_log(level, file, line, message);
     }
+    uefi_browser_tls_log(43, level);
 }
 
 /*
