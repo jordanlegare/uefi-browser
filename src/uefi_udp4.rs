@@ -25,7 +25,7 @@ use uefi_raw::protocol::network::ip4_config2::Ip4Config2DataType;
 use uefi_raw::time::Time;
 use uefi_raw::{Guid, Ipv4Address};
 
-use crate::dns::{DNS_PORT, DnsIoError, UdpDnsTransport};
+use crate::dns::{DnsIoError, UdpDnsTransport};
 use crate::entropy::SecureRandom;
 use crate::firmware_rng::UefiRandom;
 
@@ -663,4 +663,11 @@ pub fn discover_dns_servers() -> Vec<Ipv4Addr> {
 
 pub fn first_dns_server() -> Option<Ipv4Addr> {
     discover_dns_servers().into_iter().next()
+}
+
+/// Whether firmware exposes at least one UDP4 service-binding controller.
+pub fn service_binding_available() -> bool {
+    boot::find_handles::<Udp4Binding>()
+        .map(|handles| !handles.is_empty())
+        .unwrap_or(false)
 }

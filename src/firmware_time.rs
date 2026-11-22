@@ -3,7 +3,7 @@
 //! UEFI_TIME is accepted only when it is fully valid and includes a specified
 //! timezone. An unknown timezone is not silently treated as UTC.
 
-use uefi::runtime::{self, Daylight, Time, TimeParams};
+use uefi::runtime::{self, Daylight, Time};
 
 const MIN_TRUSTED_YEAR: u16 = 2020;
 
@@ -63,6 +63,7 @@ pub extern "C" fn uefi_browser_time_unix() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uefi::runtime::TimeParams;
 
     fn firmware_time(
         year: u16,
@@ -96,7 +97,7 @@ mod tests {
 
     #[test]
     fn applies_timezone_offset() {
-        let utc = firmware_time(2026, 1, 1, 0, 0, 0, Some(0));
+        let utc = firmware_time(2026, 1, 1, 0, 0, 0, Some(0), Daylight::empty());
         let eastern_local = firmware_time(2025, 12, 31, 19, 0, 0, Some(-300), Daylight::empty());
         assert_eq!(time_to_unix_utc(&eastern_local), time_to_unix_utc(&utc));
     }

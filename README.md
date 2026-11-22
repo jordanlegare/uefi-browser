@@ -133,6 +133,8 @@ The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits
 | src/dns.rs | Hickory DNS A-query construction, bounded UDP exchange contract and response validation |
 | src/entropy.rs | Secure-random provider interface used by DNS; TLS uses PSA Crypto's EFI_RNG entropy driver |
 | src/firmware_rng.rs | EFI_RNG_PROTOCOL-backed DNS RNG and C-ABI entropy provider for TF-PSA-Crypto |
+| src/firmware_network.rs | DHCP/IPv4 bring-up through IPv4 Config2 and UDP4/TCP4 service-binding checks |
+| src/firmware_ntp.rs | SNTP time bootstrap over UDP4 and UEFI Runtime Services SetTime |
 | src/firmware_time.rs | Runtime Services UTC conversion with fail-closed validity and DST policy |
 | src/network.rs | DNS-to-TCP orchestration, firmware composition helper and retained-hostname Mbed TLS handoff |
 | src/uefi_udp4.rs | UDP4 service-binding child, DNS datagrams, source filtering and DNS-server discovery |
@@ -213,6 +215,29 @@ src/url.rs accepts http:// and https://, defaults a bare hostname to HTTPS, appl
 
 src/document.rs extracts a page title, visible text, and numbered anchor links. It skips comments and common non-visible elements such as scripts, styles, templates, noscript, and SVG, and decodes a limited set of named and numeric entities. It is a lightweight text extractor, not a complete HTML5 tree builder. CSS layout, JavaScript, DOM mutation, form submission, cookies, media, and modern web application behaviour are not implemented.
 
+## Important: compile for the UEFI target
+
+The `uefi` crate is intentionally declared under Cargo's target-specific dependency section:
+
+```toml
+[target.'cfg(target_os = "uefi")'.dependencies]
+uefi = { version = "0.41.0", ... }
+```
+
+Therefore, a plain `cargo build` or `cargo check` on Linux compiles for Linux. It does **not** activate `target_os = "uefi"`. That is why a host build reports unresolved `uefi` imports, hides `connect_firmware_url` and `ca_bundle` behind their UEFI cfg gates, and then reports that the UEFI binary's allocator and panic handler are missing. These are cascading target-selection errors; do not fix them by adding another copy of the `uefi` dependency.
+
+Install and explicitly select the UEFI target:
+
+```sh
+rustup update stable
+rustup target add x86_64-unknown-uefi
+cargo check --target x86_64-unknown-uefi
+```
+
+That last command checks Rust code for the firmware target. It is not the complete, statically linked browser image. To build the actual `.efi` application, including Mbed TLS 4.3.0 and the embedded CA bundle, run the full build procedure below.
+
+Do not run the generated `.efi` file as a Linux executable. Boot it through UEFI firmware, an EFI shell, or a configured OVMF virtual machine.
+
 ## Build prerequisites
 
 The complete build requires:
@@ -222,7 +247,7 @@ The complete build requires:
 - Clang/LLVM capable of emitting x86-64 COFF objects and llvm-ar.
 - curl, sha256sum and tar to obtain the pinned Mbed TLS source and trust bundle.
 - UEFI firmware exposing UDP4, TCP4, EFI_RNG_PROTOCOL, IPv4 Config2 DNS data and Runtime Services time.
-- A firmware network stack that has already initialized the NIC and configured IPv4.
+- Firmware network drivers exposing IPv4 Config2, UDP4 and TCP4 service bindings; the application requests DHCP through IPv4 Config2 IfUp.
 
 Install the Rust target:
 
@@ -274,6 +299,14 @@ Transmit and receive use bounded 16 KiB fragments. The TlsStreamIo send method r
 
 Each TCP4 completion token uses an EVT_NOTIFY_SIGNAL event at TPL_CALLBACK. The callback signals a separate plain wait event because CheckEvent must not be called on the notify event itself.
 
+### Firmware network startup and NTP clock bootstrap
+
+At application startup, src/firmware_network.rs calls EFI IPv4 Config2 IfUp on discovered interfaces. If an interface has no station address, IfUp requests DHCP and waits up to the UEFI crate's 30-second timeout. Startup then verifies that UDP4 and TCP4 service-binding protocols are present and that DHCP supplied a DNS resolver. UDP4 and TCP4 child protocols are created on demand by the existing transport adapters; the browser does not install NIC drivers or implement Ethernet/IP itself.
+
+src/firmware_ntp.rs resolves time.cloudflare.com using the DHCP-provided resolver and Hickory, then sends an SNTP client request over UDP4 port 123. It checks the server response mode, version, leap indicator, stratum, packet length, and echoed originate timestamp before accepting the transmit timestamp. The timestamp is converted to a UTC EFI_TIME and written with Runtime Services SetTime. GetTime is read back and checked before the browser reports synchronization. The NTP query runs only after IPv4/DHCP and both transport service bindings have been verified.
+
+**Security limitation:** ordinary NTP is unauthenticated. The nonce and packet checks prevent unrelated or malformed replies from being accepted, but do not prevent an on-path attacker from forging a response. This is a best-effort clock bootstrap, not a cryptographic time authority. Certificate verification remains mandatory and no TLS date-check bypass is introduced. Authenticated Network Time Security (NTS) is a future hardening item; it itself requires an initially trustworthy TLS time or a separately provisioned trust mechanism.
+
 ### Firmware randomness and time
 
 src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the TF-PSA-Crypto C-ABI entropy callback. The TLS stack uses the `MBEDTLS_PSA_DRIVER_GET_ENTROPY` path, not the removed Mbed TLS 3.x `mbedtls_ssl_conf_rng` hook. Each PSA entropy request opens the firmware protocol for the duration of its read; failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
@@ -320,6 +353,7 @@ Copying a binary to this path does not guarantee network access. Firmware must h
 - [x] Implement concrete UEFI UDP4 transport with source filtering and receive-buffer recycling.
 - [x] Implement concrete UEFI TCP4 active connect, partial I/O, timeouts, cancellation and cleanup.
 - [x] Implement EFI_RNG_PROTOCOL and UEFI UTC clock adapters with fail-closed policy.
+- [x] Add DHCP/IPv4 startup, verify UDP4/TCP4 service bindings, and bootstrap the UEFI clock with validated SNTP before TLS initialization.
 - [x] Connect Hickory DNS -> UDP4 -> TCP4 -> Mbed TLS while retaining the server hostname for SNI.
 - [x] Add Mbed TLS 4.3.0 source pin and archive checksum verification.
 - [x] Add UEFI allocator, platform time/gmtime hooks, and static COFF build/link scaffolding for Mbed TLS.
