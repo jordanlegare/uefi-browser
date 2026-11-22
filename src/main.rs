@@ -215,6 +215,37 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             | 75
             | 76
             | 77
+            | 78
+            | 79
+            | 80
+            | 81
+            | 82
+            | 83
+            | 84
+            | 85
+            | 86
+            | 87
+            | 88
+            | 89
+            | 90
+            | 91
+            | 92
+            | 93
+            | 94
+            | 95
+            | 96
+            | 97
+            | 98
+            | 99
+            | 100
+            | 101
+            | 102
+            | 103
+            | 104
+            | 105
+            | 106
+            | 107
+            | 108
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
@@ -267,6 +298,37 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 "X.509: public-key signature verification returned (result={})",
                 detail
             ),
+            78 => format!("PK ECDSA adapter entered (curve_bits={})", detail),
+            79 => format!("PK ECDSA: PSA public-key import returned (status={})", detail),
+            80 => format!("PK ECDSA: DER-to-raw signature conversion returned (result={})", detail),
+            81 => format!("PK ECDSA: entering psa_verify_hash (signature_bytes={})", detail),
+            82 => format!("PK ECDSA: psa_verify_hash returned (status={})", detail),
+            83 => "PK ECDSA: entering PSA key destruction".to_string(),
+            84 => format!("PK ECDSA: PSA key destruction returned (status={})", detail),
+            85 => format!("PSA: verify_internal entered (input_is_message={})", detail),
+            86 => format!("PSA: dispatching verify_hash to crypto driver (algorithm={})", detail),
+            87 => format!("PSA: verify_hash driver returned (status={})", detail),
+            88 => format!("PSA: built-in ECDSA verification selected (curve_bits={})", detail),
+            89 => format!("PSA: built-in ECDSA verification returned (status={})", detail),
+            90 => format!("PSA ECDSA: entering key representation loader (key_bits={})", detail),
+            91 => format!("PSA ECDSA: key representation loader returned (status={})", detail),
+            92 => "PSA ECDSA: entering public-point loader".to_string(),
+            93 => format!("PSA ECDSA: public-point loader returned (status={})", detail),
+            94 => format!("PSA ECDSA: entering ECDSA arithmetic (curve_bits={})", detail),
+            95 => format!("PSA ECDSA: ECDSA arithmetic returned (status={})", detail),
+            96 => format!("ECDSA: verification arithmetic entered (curve_bits={})", detail),
+            97 => format!("ECDSA: hashed-message reduction returned (result={})", detail),
+            98 => "ECDSA: entering modular inverse".to_string(),
+            99 => format!("ECDSA: modular inverse returned (result={})", detail),
+            100 => "ECDSA: entering EC point linear combination".to_string(),
+            101 => format!("ECDSA: EC point linear combination returned (result={})", detail),
+            102 => "ECDSA: entering final x-coordinate reduction".to_string(),
+            103 => format!("ECDSA: final x-coordinate reduction returned (result={})", detail),
+            104 => format!("ECP: entering point linear-combination engine (curve_bits={})", detail),
+            105 => format!("ECP: first scalar multiplication returned (result={})", detail),
+            106 => format!("ECP: second scalar multiplication returned (result={})", detail),
+            107 => format!("ECP: point addition returned (result={})", detail),
+            108 => format!("ECP: projective point normalization returned (result={})", detail),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
                 detail
