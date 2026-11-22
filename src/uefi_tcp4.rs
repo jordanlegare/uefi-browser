@@ -5,8 +5,10 @@
 //! released. TCP send/receive operations are bounded and actively poll the
 //! firmware stack while waiting.
 
+use core::ffi::c_void;
 use core::net::Ipv4Addr;
 use core::ptr;
+use core::ptr::NonNull;
 
 use uefi::boot::{self, EventType, ScopedProtocol, Tpl};
 use uefi::proto::unsafe_protocol;
@@ -148,33 +150,30 @@ impl UefiTcp4Connector {
             return Err(firmware_error(status));
         }
 
-        let event = create_completion_event()?;
+        let events = create_completion_events()?;
         let mut token = Tcp4ConnectionToken {
             completion_token: Tcp4CompletionToken {
-                event: event.as_ptr(),
+                event: events.notify_ptr(),
                 status: Status::NOT_READY,
             },
         };
 
-        // SAFETY: token and event remain alive until completion/cancellation drains.
+        // SAFETY: token and both completion events remain alive until completion/cancellation drains.
         let status = unsafe { (tcp.0.connect)(&mut tcp.0, &mut token) };
         if status != Status::SUCCESS {
-            let _ = boot::close_event(event);
             drop(tcp);
             binding.destroy_child(child);
             return Err(firmware_error(status));
         }
 
-        if let Err(error) = wait_for_token(&mut tcp, &event, timeout_ms) {
-            cancel_connect_and_drain(&mut tcp, &mut token);
-            let _ = boot::close_event(event);
+        if let Err(error) = wait_for_token(&mut tcp, events.wait_event(), timeout_ms) {
+            cancel_connect_and_drain(&mut tcp, &mut token, events.wait_event());
             drop(tcp);
             binding.destroy_child(child);
             return Err(error);
         }
 
         let completion_status = token.completion_token.status;
-        let _ = boot::close_event(event);
         if completion_status != Status::SUCCESS {
             drop(tcp);
             binding.destroy_child(child);
@@ -251,7 +250,7 @@ impl Tcp4Stream {
             return Err(());
         }
 
-        let event = create_completion_event().map_err(|_| ())?;
+        let events = create_completion_events().map_err(|_| ())?;
         let mut packet = TxPacket {
             header: Tcp4TransmitData {
                 push: Boolean::TRUE,
@@ -268,7 +267,7 @@ impl Tcp4Stream {
 
         let mut token = Tcp4IoToken {
             completion_token: Tcp4CompletionToken {
-                event: event.as_ptr(),
+                event: events.notify_ptr(),
                 status: Status::NOT_READY,
             },
             packet: Tcp4Packet {
@@ -283,25 +282,22 @@ impl Tcp4Stream {
         };
 
         if call_status != Status::SUCCESS {
-            let _ = boot::close_event(event);
             return Err(());
         }
 
         let wait = {
             let timeout = self.io_timeout_ms;
             let tcp = self.protocol()?;
-            wait_for_token(tcp, &event, timeout)
+            wait_for_token(tcp, events.wait_event(), timeout)
         };
 
         if wait.is_err() {
             let tcp = self.protocol()?;
             cancel_io_and_drain(tcp, &mut token);
-            let _ = boot::close_event(event);
             return Err(());
         }
 
         let completion = token.completion_token.status;
-        let _ = boot::close_event(event);
         if completion == Status::SUCCESS {
             Ok(())
         } else {
@@ -318,7 +314,7 @@ impl Tcp4Stream {
             return Err(());
         }
 
-        let event = create_completion_event().map_err(|_| ())?;
+        let events = create_completion_events().map_err(|_| ())?;
         let mut packet = RxPacket {
             header: Tcp4ReceiveData {
                 urgent: Boolean::FALSE,
@@ -334,7 +330,7 @@ impl Tcp4Stream {
 
         let mut token = Tcp4IoToken {
             completion_token: Tcp4CompletionToken {
-                event: event.as_ptr(),
+                event: events.notify_ptr(),
                 status: Status::NOT_READY,
             },
             packet: Tcp4Packet {
@@ -349,19 +345,17 @@ impl Tcp4Stream {
         };
 
         if call_status != Status::SUCCESS {
-            let _ = boot::close_event(event);
             return Err(());
         }
 
         let wait = {
             let timeout = self.io_timeout_ms;
             let tcp = self.protocol()?;
-            wait_for_token(tcp, &event, timeout)
+            wait_for_token(tcp, events.wait_event(), timeout)
         };
         if wait.is_err() {
             let tcp = self.protocol()?;
             cancel_io_and_drain(tcp, &mut token);
-            let _ = boot::close_event(event);
             return Err(());
         }
 
@@ -385,30 +379,32 @@ impl Tcp4Stream {
         }
 
         if let Some(tcp) = self.tcp.as_mut() {
-            let event = create_completion_event();
-            if let Ok(event) = event {
+            if let Ok(events) = create_completion_events() {
                 let mut close = Tcp4CloseToken {
                     completion_token: Tcp4CompletionToken {
-                        event: event.as_ptr(),
+                        event: events.notify_ptr(),
                         status: Status::NOT_READY,
                     },
                     abort_on_close: Boolean::TRUE,
                 };
-                // SAFETY: close token and event remain live through completion.
+                // SAFETY: close token and completion events remain live through completion.
                 let status = unsafe { (tcp.0.close)(&mut tcp.0, &mut close) };
-                if status == Status::SUCCESS && close.completion_token.status == Status::NOT_READY {
-                    let _ = wait_for_token(tcp, &event, 1000);
-                }
-                if close.completion_token.status == Status::NOT_READY {
-                    // SAFETY: cancel(NULL) aborts every queued operation on this instance.
-                    let _ = unsafe { (tcp.0.cancel)(&mut tcp.0, ptr::null_mut()) };
-                    while !boot::check_event(&event).unwrap_or(false) {
-                        // SAFETY: protocol remains open.
+                if status == Status::SUCCESS
+                    && close.completion_token.status == Status::NOT_READY
+                    && wait_for_token(tcp, events.wait_event(), 1000).is_err()
+                {
+                    // Configure(NULL) forcibly resets TCP state and completes
+                    // the outstanding close request with EFI_ABORTED.
+                    // SAFETY: null configuration resets the open TCP instance.
+                    let _ = unsafe { (tcp.0.configure)(&mut tcp.0, ptr::null()) };
+                    while close.completion_token.status == Status::NOT_READY
+                        && !boot::check_event(events.wait_event()).unwrap_or(false)
+                    {
+                        // SAFETY: protocol remains open while the close token drains.
                         let _ = unsafe { (tcp.0.poll)(&mut tcp.0) };
                         let _ = boot::stall(1000);
                     }
                 }
-                let _ = boot::close_event(event);
             } else {
                 // SAFETY: null configuration brutally resets the TCP instance.
                 let _ = unsafe { (tcp.0.configure)(&mut tcp.0, ptr::null()) };
@@ -416,6 +412,7 @@ impl Tcp4Stream {
         }
         self.closed = true;
     }
+
 }
 
 impl TlsStreamIo for Tcp4Stream {
@@ -458,10 +455,71 @@ struct RxPacket {
     fragment: Tcp4FragmentData,
 }
 
-fn create_completion_event() -> Result<uefi::Event, Tcp4Error> {
-    // Event type 0 is a plain waitable event with no callback.
-    unsafe { boot::create_event(EventType::empty(), Tpl::APPLICATION, None, None) }
-        .map_err(|_| Tcp4Error::Firmware(0))
+/// A protocol-compliant notify event plus a separate plain wait event.
+/// UEFI CheckEvent rejects EVT_NOTIFY_SIGNAL events, so the callback signals
+/// the plain event that this application polls.
+struct CompletionEvents {
+    notify: Option<uefi::Event>,
+    wait: Option<uefi::Event>,
+}
+
+impl CompletionEvents {
+    fn notify_ptr(&self) -> uefi_raw::Event {
+        self.notify.as_ref().expect("notify event is live").as_ptr()
+    }
+
+    fn wait_event(&self) -> &uefi::Event {
+        self.wait.as_ref().expect("wait event is live")
+    }
+}
+
+impl Drop for CompletionEvents {
+    fn drop(&mut self) {
+        if let Some(event) = self.notify.take() {
+            let _ = boot::close_event(event);
+        }
+        if let Some(event) = self.wait.take() {
+            let _ = boot::close_event(event);
+        }
+    }
+}
+
+fn create_completion_events() -> Result<CompletionEvents, Tcp4Error> {
+    let wait = unsafe { boot::create_event(EventType::empty(), Tpl::APPLICATION, None, None) }
+        .map_err(|_| Tcp4Error::Firmware(0))?;
+    let context = NonNull::new(wait.as_ptr()).ok_or(Tcp4Error::Firmware(0))?;
+    let notify = match unsafe {
+        boot::create_event(
+            EventType::NOTIFY_SIGNAL,
+            Tpl::CALLBACK,
+            Some(signal_completion_event),
+            Some(context),
+        )
+    } {
+        Ok(event) => event,
+        Err(_) => {
+            let _ = boot::close_event(wait);
+            return Err(Tcp4Error::Firmware(0));
+        }
+    };
+
+    Ok(CompletionEvents {
+        notify: Some(notify),
+        wait: Some(wait),
+    })
+}
+
+unsafe extern "efiapi" fn signal_completion_event(
+    _event: uefi::Event,
+    context: Option<NonNull<c_void>>,
+) {
+    let Some(context) = context else {
+        return;
+    };
+    // SAFETY: The context is the live plain event allocated with the notify event.
+    if let Some(event) = unsafe { uefi::Event::from_ptr(context.as_ptr()) } {
+        let _ = boot::signal_event(&event);
+    }
 }
 
 fn wait_for_token(
@@ -490,25 +548,29 @@ fn wait_for_token(
     }
 }
 
-fn cancel_connect_and_drain(tcp: &mut ScopedProtocol<Tcp4>, token: &mut Tcp4ConnectionToken) {
+fn cancel_connect_and_drain(
+    tcp: &mut ScopedProtocol<Tcp4>,
+    token: &mut Tcp4ConnectionToken,
+    wait_event: &uefi::Event,
+) {
     // SAFETY: token is live and was submitted to this protocol.
     let _ = unsafe { (tcp.0.cancel)(&mut tcp.0, &mut token.completion_token) };
-    drain_event(tcp, token.completion_token.event);
+    drain_event(tcp, wait_event);
 }
 
-fn cancel_io_and_drain(tcp: &mut ScopedProtocol<Tcp4>, token: &mut Tcp4IoToken) {
+fn cancel_io_and_drain(
+    tcp: &mut ScopedProtocol<Tcp4>,
+    token: &mut Tcp4IoToken,
+    wait_event: &uefi::Event,
+) {
     // SAFETY: token is live and was submitted to this protocol.
     let _ = unsafe { (tcp.0.cancel)(&mut tcp.0, &mut token.completion_token) };
-    drain_event(tcp, token.completion_token.event);
+    drain_event(tcp, wait_event);
 }
 
-fn drain_event(tcp: &mut ScopedProtocol<Tcp4>, raw_event: uefi_raw::Event) {
-    // SAFETY: raw_event is owned by the still-live operation token.
-    let Some(event) = (unsafe { uefi::Event::from_ptr(raw_event) }) else {
-        return;
-    };
+fn drain_event(tcp: &mut ScopedProtocol<Tcp4>, event: &uefi::Event) {
     loop {
-        if boot::check_event(&event).unwrap_or(false) {
+        if boot::check_event(event).unwrap_or(false) {
             return;
         }
         // SAFETY: TCP protocol remains open until the token drains.
