@@ -296,12 +296,17 @@ fn skip_informational_responses(mut input: &[u8]) -> Result<&[u8], HttpError> {
         }
         let headers =
             core::str::from_utf8(&input[..header_end]).map_err(|_| HttpError::InvalidHeader)?;
-        let status_line = headers.split("\r\n").next().ok_or(HttpError::InvalidStatusLine)?;
+        let status_line = headers
+            .split("\r\n")
+            .next()
+            .ok_or(HttpError::InvalidStatusLine)?;
         let (_, status, _) = parse_status_line(status_line)?;
         if !(100..200).contains(&status) || status == 101 {
             return Ok(input);
         }
-        let next = header_end.checked_add(4).ok_or(HttpError::NoFinalResponse)?;
+        let next = header_end
+            .checked_add(4)
+            .ok_or(HttpError::NoFinalResponse)?;
         if next >= input.len() {
             return Err(HttpError::NoFinalResponse);
         }
