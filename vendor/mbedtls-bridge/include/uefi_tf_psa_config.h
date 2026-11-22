@@ -2,15 +2,17 @@
  * TF-PSA-Crypto 1.x platform configuration for the Mbed TLS 4.x build.
  *
  * TF-PSA-Crypto deliberately has a separate configuration namespace from
- * Mbed TLS. Keep these platform hooks here as well as in
- * uefi_mbedtls_config.h so the TF-PSA config checks and platform sources use
- * the exact same UEFI allocator and time implementation.
+ * Mbed TLS. EFI_RNG_PROTOCOL is the only entropy provider; the built-in
+ * Unix/Windows collector is explicitly disabled.
  */
 #ifndef UEFI_TF_PSA_CONFIG_H
 #define UEFI_TF_PSA_CONFIG_H
 
 #include <stdint.h>
 #include "platform_alt.h"
+
+#undef MBEDTLS_PSA_BUILTIN_GET_ENTROPY
+#define MBEDTLS_PSA_DRIVER_GET_ENTROPY
 
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_NO_STD_FUNCTIONS

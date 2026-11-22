@@ -62,3 +62,31 @@ impl SecureRandom for UefiRandom {
         self.fill(output).map_err(|_| ())
     }
 }
+
+
+/// C ABI entropy callback used by TF-PSA-Crypto's Mbed TLS 4.x RNG.
+///
+/// Each request opens EFI_RNG_PROTOCOL for the duration of the read. This
+/// keeps protocol lifetime scoped to the call and ensures that missing or
+/// failing firmware RNG access propagates as an error (there is no fallback).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uefi_browser_fill_random(output: *mut u8, output_size: usize) -> i32 {
+    if output_size == 0 {
+        return 0;
+    }
+    if output.is_null() {
+        return -1;
+    }
+
+    // SAFETY: The C caller supplies a writable buffer of output_size bytes.
+    let buffer = unsafe { core::slice::from_raw_parts_mut(output, output_size) };
+    let mut random = match UefiRandom::open() {
+        Ok(random) => random,
+        Err(_) => return -1,
+    };
+
+    match random.fill(buffer) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}

@@ -9,8 +9,39 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "platform_alt.h"
+#include "mbedtls/platform.h"
+#include <psa/crypto.h>
 
 extern int64_t uefi_browser_time_unix(void);
+extern int uefi_browser_fill_random(unsigned char *output, size_t output_size);
+
+/*
+ * TF-PSA-Crypto's Mbed TLS 4.x entropy-driver hook. EFI_RNG_PROTOCOL is the
+ * sole source; report full entropy only after a successful firmware read.
+ */
+int mbedtls_platform_get_entropy(psa_driver_get_entropy_flags_t flags,
+                                 size_t *estimate_bits,
+                                 unsigned char *output, size_t output_size)
+{
+    if (flags != 0) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+    if (estimate_bits == NULL || (output == NULL && output_size != 0) ||
+        output_size > SIZE_MAX / 8) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (output_size == 0) {
+        *estimate_bits = 0;
+        return 0;
+    }
+    if (uefi_browser_fill_random(output, output_size) != 0) {
+        *estimate_bits = 0;
+        return PSA_ERROR_HARDWARE_FAILURE;
+    }
+
+    *estimate_bits = output_size * 8;
+    return 0;
+}
 
 /*
  * Mbed TLS self-test and optional diagnostic code may call mbedtls_printf.

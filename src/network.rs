@@ -61,15 +61,14 @@ impl<S: TlsStreamIo> ConnectedPeer<S> {
     ///
     /// The original URL hostname, not the numeric address, is passed to
     /// Mbed TLS. This is essential for SNI and certificate hostname checks.
-    pub fn start_tls<'a, R: SecureRandom>(
+    pub fn start_tls<'a>(
         &'a mut self,
         ca_bundle_pem: &[u8],
-        random: &'a mut R,
-    ) -> Result<TlsConnection<'a, S, R>, TlsError> {
+    ) -> Result<TlsConnection<'a, S>, TlsError> {
         if self.scheme != Scheme::Https {
             return Err(TlsError::NotHttps);
         }
-        TlsConnection::new(&self.server_name, ca_bundle_pem, &mut self.stream, random)
+        TlsConnection::new(&self.server_name, ca_bundle_pem, &mut self.stream)
     }
 }
 
@@ -104,25 +103,22 @@ where
     })
 }
 
-/// A firmware connection keeps the RNG alive for the later Mbed TLS handshake.
+/// A firmware connection retains its TCP4 stream and original server name.
+/// TLS randomness is obtained independently through the TF-PSA EFI_RNG hook.
 #[cfg(target_os = "uefi")]
 pub struct FirmwareConnection {
     pub peer: ConnectedPeer<crate::uefi_tcp4::Tcp4Stream>,
-    random: crate::firmware_rng::UefiRandom,
 }
 
 #[cfg(target_os = "uefi")]
 impl FirmwareConnection {
-    /// Start the Mbed TLS session using the preserved hostname, connected TCP4
-    /// stream, firmware RNG, and caller-supplied embedded CA bundle.
+    /// Start Mbed TLS over the retained TCP4 stream. TF-PSA obtains entropy
+    /// from EFI_RNG_PROTOCOL through mbedtls_platform_get_entropy().
     pub fn start_tls(
         &mut self,
         ca_bundle_pem: &[u8],
-    ) -> Result<
-        TlsConnection<'_, crate::uefi_tcp4::Tcp4Stream, crate::firmware_rng::UefiRandom>,
-        TlsError,
-    > {
-        self.peer.start_tls(ca_bundle_pem, &mut self.random)
+    ) -> Result<TlsConnection<'_, crate::uefi_tcp4::Tcp4Stream>, TlsError> {
+        self.peer.start_tls(ca_bundle_pem)
     }
 }
 
@@ -153,5 +149,5 @@ pub fn connect_firmware_url(
         timeout_ms,
     )?;
 
-    Ok(FirmwareConnection { peer, random })
+    Ok(FirmwareConnection { peer })
 }

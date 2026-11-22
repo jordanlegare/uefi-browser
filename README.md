@@ -131,17 +131,17 @@ The UEFI UDP4/TCP4 adapters are concrete source implementations, not just traits
 | src/document.rs | Basic HTML visible-text and anchor extraction |
 | src/http.rs | HTTP/1.1 GET builder, response parsing, chunked decoding and stream exchange |
 | src/dns.rs | Hickory DNS A-query construction, bounded UDP exchange contract and response validation |
-| src/entropy.rs | Secure-random provider interface shared by DNS and TLS |
-| src/firmware_rng.rs | EFI_RNG_PROTOCOL-backed secure random source |
+| src/entropy.rs | Secure-random provider interface used by DNS; TLS uses PSA Crypto's EFI_RNG entropy driver |
+| src/firmware_rng.rs | EFI_RNG_PROTOCOL-backed DNS RNG and C-ABI entropy provider for TF-PSA-Crypto |
 | src/firmware_time.rs | Runtime Services UTC conversion with fail-closed validity and DST policy |
 | src/network.rs | DNS-to-TCP orchestration, firmware composition helper and retained-hostname Mbed TLS handoff |
 | src/uefi_udp4.rs | UDP4 service-binding child, DNS datagrams, source filtering and DNS-server discovery |
 | src/uefi_tcp4.rs | TCP4 service-binding child, bounded connect/transmit/receive, cancellation and cleanup |
-| src/tls.rs | Rust Mbed TLS FFI boundary and TCP BIO callback adapter |
+| src/tls.rs | Rust Mbed TLS FFI boundary and TCP BIO callback adapter; PSA Crypto supplies TLS randomness |
 | src/uefi_memory.rs | UEFI Boot Services pool allocator hooks for Mbed TLS |
 | src/ca_bundle.rs | Optional build-time embedded PEM trust bundle |
 | vendor/mbedtls-bridge/uefi_tls.c | Mbed TLS client setup, BIO callbacks, handshake and mandatory X.509 verification |
-| vendor/mbedtls-bridge/uefi_platform.c | Freestanding time and gmtime hooks backed by UEFI Runtime Services |
+| vendor/mbedtls-bridge/uefi_platform.c | EFI_RNG entropy provider plus freestanding time/gmtime hooks backed by UEFI services |
 | vendor/mbedtls-bridge/include/ | Mbed TLS and TF-PSA-Crypto UEFI configurations plus freestanding platform headers |
 | scripts/fetch-mbedtls.sh | Downloads and checksum-verifies the pinned Mbed TLS source archive |
 | scripts/build-uefi.sh | Builds static Mbed TLS libraries and the UEFI C bridge, then invokes the Rust EFI build |
@@ -172,7 +172,7 @@ SHA-256: 1c87cba094cb40f097ebe0eba440a74939b71dab4e1d0d566bc90749ff381d18
 
 The intended final image contains static Mbed TLS libraries and the UEFI-specific C bridge. It must not require a DLL, shared object, firmware TLS protocol, or operating-system crypto service at runtime.
 
-The C bridge configures mandatory X.509 verification (MBEDTLS_SSL_VERIFY_REQUIRED), installs the supplied CA chain, configures the EFI_RNG-backed callback, sets the original URL hostname for SNI and identity checks, and installs stream BIO callbacks. The Rust TlsConnection provides those callbacks over the TCP4 stream.
+The C bridge configures mandatory X.509 verification (MBEDTLS_SSL_VERIFY_REQUIRED), installs the supplied CA chain, initializes PSA Crypto before TLS setup, sets the original URL hostname for SNI and identity checks, and installs stream BIO callbacks. The Rust TlsConnection provides the BIO callbacks over the TCP4 stream. Mbed TLS 4.3 no longer uses the legacy `mbedtls_ssl_conf_rng` API: TF-PSA-Crypto's `MBEDTLS_PSA_DRIVER_GET_ENTROPY` hook calls a Rust C-ABI function that opens EFI_RNG_PROTOCOL and fills the requested buffer. Only successful firmware reads report full entropy; there is no libc or OS random source.
 
 The UEFI port routes allocation to src/uefi_memory.rs using UEFI Boot Services AllocatePool/FreePool, and routes certificate time to src/firmware_time.rs through vendor/mbedtls-bridge/uefi_platform.c. The C-side Gregorian conversion implements the `mbedtls_platform_gmtime_r` hook; rejected or unavailable firmware time fails certificate validity checks closed.
 
@@ -201,7 +201,7 @@ The repository does not commit a periodically refreshed CA bundle by default. HT
 2. Hostname verification against the URL hostname and SNI during the handshake.
 3. Chain validation against the CA bundle embedded in the image.
 4. Validity-time checks using trustworthy UTC from UEFI Runtime Services. Invalid clock, unspecified timezone, daylight-adjustment flags, or an implausibly old clock cause HTTPS to fail closed.
-5. Cryptographically secure random bytes from EFI_RNG_PROTOCOL. No timestamp, counter, or predictable pseudo-random fallback.
+5. PSA Crypto entropy is sourced only from EFI_RNG_PROTOCOL through `mbedtls_platform_get_entropy`. A failed read aborts initialization; no timestamp, counter, host random device, or predictable pseudo-random fallback is allowed.
 6. No HTTPS-to-HTTP redirect downgrade and no certificate-error bypass.
 7. Bounded network operations and correct release of TCP and TLS resources.
 8. A maintained Mbed TLS release with security fixes.
@@ -275,7 +275,7 @@ Each TCP4 completion token uses an EVT_NOTIFY_SIGNAL event at TPL_CALLBACK. The 
 
 ### Firmware randomness and time
 
-src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. Failure to locate or read the RNG is propagated; there is no clock, counter, or weak PRNG fallback.
+src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the TF-PSA-Crypto C-ABI entropy callback. The TLS stack uses the `MBEDTLS_PSA_DRIVER_GET_ENTROPY` path, not the removed Mbed TLS 3.x `mbedtls_ssl_conf_rng` hook. Failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
 
 src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The Mbed TLS user configuration and C platform bridge route certificate-time operations through these hooks. The C build/link still needs independent verification.
 
