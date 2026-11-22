@@ -99,12 +99,17 @@ fn main() -> Status {
         uefi::println!("CA roots: embedded.");
     }
 
+    let Some(network) = network.as_mut() else {
+        uefi::println!("No usable DHCP configuration; returning to firmware.");
+        return Status::SUCCESS;
+    };
+
     uefi::println!("");
     uefi::println!("Enter a hostname or URL. Bare hostnames default to HTTPS.");
     uefi::println!("Type 'help' for commands, or Ctrl+C to return to firmware.");
     uefi::println!("");
 
-    let Some(address) = read_line("Open address: ") else {
+    let Some(address) = read_line("Open address: ", network) else {
         return Status::SUCCESS;
     };
 
@@ -120,11 +125,6 @@ fn main() -> Status {
     history.push(first_url);
     let mut history_index = 0usize;
 
-    let Some(network) = network.as_mut() else {
-        uefi::println!("No usable DHCP configuration; returning to firmware.");
-        return Status::SUCCESS;
-    };
-
     let mut page = match fetch_document(&history[history_index], network) {
         Ok(page) => page,
         Err(error) => {
@@ -136,7 +136,7 @@ fn main() -> Status {
     loop {
         render_page(&page);
         let prompt = format!("\n{} > ", page.url.as_string());
-        let Some(command) = read_line(&prompt) else {
+        let Some(command) = read_line(&prompt, network) else {
             break;
         };
         let command = command.trim();
@@ -417,11 +417,15 @@ fn clear_screen() {
     let _ = system::with_stdout(|output| output.clear());
 }
 
-fn read_line(prompt: &str) -> Option<String> {
+fn read_line(
+    prompt: &str,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Option<String> {
     uefi::print!("{prompt}");
     let mut line = String::new();
 
     loop {
+        network.poll();
         let key = system::with_stdin(|input| input.read_key().ok().flatten());
         match key {
             Some(Key::Printable(unit)) => {

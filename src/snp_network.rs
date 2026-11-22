@@ -223,6 +223,12 @@ impl SnpNetwork {
         self.now_ms = self.now_ms.saturating_add(1);
         self.process_dhcp_event();
     }
+    /// Poll the Ethernet/IP stack once. Call this periodically while the
+    /// application is waiting for user input so DHCP leases can renew.
+    pub fn poll(&mut self) {
+        self.poll_once();
+    }
+
     fn wait_step(&mut self) {
         self.poll_once();
         boot::stall(Duration::from_millis(1));
