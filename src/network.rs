@@ -41,6 +41,7 @@ pub trait Tcp4Connector {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnectError {
     Dns(DnsError),
+    #[cfg(target_os = "uefi")]
     FirmwareNetwork(crate::snp_network::SnpNetworkError),
     Tcp(Tcp4Error),
     NoDnsServer,
