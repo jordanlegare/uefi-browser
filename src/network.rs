@@ -18,6 +18,9 @@ pub enum Tcp4Error {
     Timeout,
     Network,
     ConnectionRefused,
+    NoServiceBinding,
+    Firmware(usize),
+    ConnectionClosed,
     Unsupported,
 }
 
