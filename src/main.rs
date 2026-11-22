@@ -417,10 +417,7 @@ fn clear_screen() {
     let _ = system::with_stdout(|output| output.clear());
 }
 
-fn read_line(
-    prompt: &str,
-    network: &mut uefi_browser::snp_network::SnpNetwork,
-) -> Option<String> {
+fn read_line(prompt: &str, network: &mut uefi_browser::snp_network::SnpNetwork) -> Option<String> {
     uefi::print!("{prompt}");
     let mut line = String::new();
 
