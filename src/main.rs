@@ -6,9 +6,13 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+use core::cell::UnsafeCell;
 use core::ffi::{CStr, c_char};
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-use core::sync::atomic::{AtomicI64, Ordering};
+use core::hint::spin_loop;
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+use core::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 
 use uefi::proto::console::text::Key;
 use uefi::{Status, helpers, system};
@@ -25,6 +29,128 @@ const MAX_INPUT_BYTES: usize = 2048;
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 unsafe extern "C" {
     fn uefi_mbedtls_link_anchor() -> i32;
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+const TLS_DEBUG_CAPACITY: usize = 12;
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+const TLS_DEBUG_SOURCE_BYTES: usize = 32;
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+const TLS_DEBUG_MESSAGE_BYTES: usize = 176;
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+#[derive(Clone, Copy)]
+struct TlsDebugEntry {
+    level: i32,
+    line: i32,
+    source_len: u8,
+    message_len: u16,
+    source: [u8; TLS_DEBUG_SOURCE_BYTES],
+    message: [u8; TLS_DEBUG_MESSAGE_BYTES],
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+impl TlsDebugEntry {
+    const EMPTY: Self = Self {
+        level: 0,
+        line: 0,
+        source_len: 0,
+        message_len: 0,
+        source: [0; TLS_DEBUG_SOURCE_BYTES],
+        message: [0; TLS_DEBUG_MESSAGE_BYTES],
+    };
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+struct TlsDebugRing {
+    locked: AtomicBool,
+    next: AtomicUsize,
+    entries: UnsafeCell<[TlsDebugEntry; TLS_DEBUG_CAPACITY]>,
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+// Access to entries is serialized by locked; callbacks and report rendering
+// run synchronously on the single UEFI application thread.
+unsafe impl Sync for TlsDebugRing {}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_DEBUG_RING: TlsDebugRing = TlsDebugRing {
+    locked: AtomicBool::new(false),
+    next: AtomicUsize::new(0),
+    entries: UnsafeCell::new([TlsDebugEntry::EMPTY; TLS_DEBUG_CAPACITY]),
+};
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+fn tls_debug_lock() {
+    while TLS_DEBUG_RING
+        .locked
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        spin_loop();
+    }
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+fn tls_debug_unlock() {
+    TLS_DEBUG_RING.locked.store(false, Ordering::Release);
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+fn tls_debug_reset() {
+    tls_debug_lock();
+    TLS_DEBUG_RING.next.store(0, Ordering::Relaxed);
+    unsafe {
+        *TLS_DEBUG_RING.entries.get() = [TlsDebugEntry::EMPTY; TLS_DEBUG_CAPACITY];
+    }
+    tls_debug_unlock();
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+fn tls_debug_record(level: i32, source: &[u8], line: i32, message: &[u8]) {
+    let source = &source[source.len().saturating_sub(TLS_DEBUG_SOURCE_BYTES)..];
+    let message = &message[..message.len().min(TLS_DEBUG_MESSAGE_BYTES)];
+
+    tls_debug_lock();
+    let sequence = TLS_DEBUG_RING.next.load(Ordering::Relaxed);
+    let entries = unsafe { &mut *TLS_DEBUG_RING.entries.get() };
+    let entry = &mut entries[sequence % TLS_DEBUG_CAPACITY];
+    *entry = TlsDebugEntry::EMPTY;
+    entry.level = level;
+    entry.line = line;
+    entry.source_len = source.len() as u8;
+    entry.message_len = message.len() as u16;
+    entry.source[..source.len()].copy_from_slice(source);
+    entry.message[..message.len()].copy_from_slice(message);
+    TLS_DEBUG_RING.next.store(sequence + 1, Ordering::Relaxed);
+    tls_debug_unlock();
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+fn tls_debug_report() -> String {
+    let mut snapshot = [TlsDebugEntry::EMPTY; TLS_DEBUG_CAPACITY];
+    tls_debug_lock();
+    let next = TLS_DEBUG_RING.next.load(Ordering::Relaxed);
+    let count = next.min(TLS_DEBUG_CAPACITY);
+    let entries = unsafe { &*TLS_DEBUG_RING.entries.get() };
+    let first = next.saturating_sub(count);
+    for (offset, sequence) in (first..next).enumerate() {
+        snapshot[offset] = entries[sequence % TLS_DEBUG_CAPACITY];
+    }
+    tls_debug_unlock();
+
+    let mut report = format!("TLS diagnostic tail: {} recent Mbed TLS messages", count);
+    for entry in snapshot.iter().take(count) {
+        let source =
+            core::str::from_utf8(&entry.source[..entry.source_len as usize]).unwrap_or("?");
+        let message = core::str::from_utf8(&entry.message[..entry.message_len as usize])
+            .unwrap_or("<non-UTF-8>");
+        report.push_str(&format!(
+            "\n  L{} {}:{} {}",
+            entry.level, source, entry.line, message
+        ));
+    }
+    report
 }
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
@@ -94,29 +220,12 @@ pub extern "C" fn uefi_browser_tls_debug_log(
     }
 
     let message_bytes = unsafe { CStr::from_ptr(message) }.to_bytes();
-    let message_bytes = &message_bytes[..message_bytes.len().min(240)];
-    let message = core::str::from_utf8(message_bytes).unwrap_or("<non-UTF-8 debug text>");
-
-    let source = if file.is_null() {
-        "?"
+    let source_bytes = if file.is_null() {
+        &b"?"[..]
     } else {
-        let bytes = unsafe { CStr::from_ptr(file) }.to_bytes();
-        let bytes = &bytes[..bytes.len().min(80)];
-        core::str::from_utf8(bytes).unwrap_or("?")
+        unsafe { CStr::from_ptr(file) }.to_bytes()
     };
-
-    if let Some(elapsed) = tls_handshake_elapsed_seconds() {
-        uefi::println!(
-            "TLS MbedTLS +{}s L{} {}:{} {}",
-            elapsed,
-            level,
-            source,
-            line,
-            message
-        );
-    } else {
-        uefi::println!("TLS MbedTLS L{} {}:{} {}", level, source, line, message);
-    }
+    tls_debug_record(level, source_bytes, line, message_bytes);
 }
 
 struct BrowserPage {
@@ -130,7 +239,15 @@ struct BrowserPage {
 #[uefi::entry]
 fn main() -> Status {
     helpers::init().unwrap();
+
     clear_screen();
+
+    // UEFI arms a five-minute watchdog before launching a boot option.
+    // This interactive browser intentionally remains in Boot Services.
+    match uefi::boot::set_watchdog_timer(0, 0x1_0000, None) {
+        Ok(()) => uefi::println!("UEFI boot watchdog disabled for interactive session."),
+        Err(error) => uefi::println!("Warning: unable to disable UEFI boot watchdog: {:?}", error),
+    }
 
     uefi::println!("+--------------------------------------------------------------+");
     uefi::println!("|                         UEFI BROWSER                         |");
@@ -480,9 +597,16 @@ fn fetch_response(
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
                 uefi::println!("TLS session initialized; beginning handshake.");
-                tls.handshake().map_err(|error| {
-                    format!("TLS handshake / certificate verification failed: {error:?}")
-                })?;
+                tls_debug_reset();
+                if let Err(error) = tls.handshake() {
+                    // Attach the RAM-buffered tail to the navigation error.
+                    // The browser redraws its page after navigation attempts,
+                    // so embedding it here preserves the report on screen.
+                    let diagnostics = tls_debug_report();
+                    return Err(format!(
+                        "TLS handshake / certificate verification failed: {error:?}\n{diagnostics}"
+                    ));
+                }
                 uefi::println!("TLS verified. Sending HTTPS request...");
                 let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
