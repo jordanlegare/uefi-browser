@@ -7,10 +7,10 @@
 
 use alloc::vec::Vec;
 use core::net::Ipv4Addr;
+use uefi::Handle;
 use uefi::boot;
 use uefi::proto::network::ip4config2::Ip4Config2;
 use uefi::proto::network::snp::SimpleNetwork;
-use uefi::Handle;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NetworkInitError {
