@@ -10,6 +10,7 @@ use uefi::runtime::{self, Daylight, Time, TimeParams};
 
 use crate::dns::UdpDnsTransport;
 use crate::dns::resolve_a;
+use crate::entropy::SecureRandom;
 use crate::firmware_rng::UefiRandom;
 use crate::uefi_udp4::UefiUdp4Transport;
 

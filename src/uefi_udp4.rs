@@ -25,7 +25,7 @@ use uefi_raw::protocol::network::ip4_config2::Ip4Config2DataType;
 use uefi_raw::time::Time;
 use uefi_raw::{Guid, Ipv4Address};
 
-use crate::dns::{DNS_PORT, DnsIoError, UdpDnsTransport};
+use crate::dns::{DnsIoError, UdpDnsTransport};
 use crate::entropy::SecureRandom;
 use crate::firmware_rng::UefiRandom;
 
