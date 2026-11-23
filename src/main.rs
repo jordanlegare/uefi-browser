@@ -487,12 +487,21 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             166 => format!("MPI modulo: entering division (A_limbs={})", detail),
             167 => format!("MPI modulo: division returned (R_limbs={})", detail),
             168 => "MPI modulo: negative-remainder correction completed".to_string(),
-            169 => format!("MPI modulo: positive-remainder correction entry (cmp={})", detail),
+            169 => format!(
+                "MPI modulo: positive-remainder correction entry (cmp={})",
+                detail
+            ),
             170 => "MPI modulo: positive-remainder correction completed".to_string(),
             171 => format!("MPI division: entered (A_limbs={})", detail),
             172 => format!("MPI division: aligned divisor (limb_shift={})", detail),
-            173 => format!("MPI division: leading quotient digit completed (X_limbs={})", detail),
-            174 => format!("MPI division: entering quotient-digit loop (limb_span={})", detail),
+            173 => format!(
+                "MPI division: leading quotient digit completed (X_limbs={})",
+                detail
+            ),
+            174 => format!(
+                "MPI division: entering quotient-digit loop (limb_span={})",
+                detail
+            ),
             175 => "MPI division: quotient-digit loop completed".to_string(),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
