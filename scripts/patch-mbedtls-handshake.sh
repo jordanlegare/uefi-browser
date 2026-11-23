@@ -237,10 +237,13 @@ if helper_marker not in text:
 # of this patcher. Detect it by its function signature, not by comparing the
 # entire body: the body intentionally evolves as diagnostics improve.
 helper_signature = "static void uefi_x509_parent_trace("
-helper_start = text.find(helper_signature)
+helper_prefix_signature = "static void uefi_x509_buf_hex("
+helper_start = text.find(helper_prefix_signature)
+if helper_start < 0:
+    helper_start = text.find(helper_signature)
 if helper_start >= 0:
-    # Replace the complete existing helper block. This also collapses
-    # duplicate definitions left by a previous non-idempotent patch run.
+    # Replace the complete existing helper block, including the SKI/AKI
+    # formatter when present. This keeps repeated patch runs idempotent.
     helper_end = text.find(helper_marker, helper_start)
     if helper_end < 0:
         raise SystemExit(f"{x509}: existing parent-trace helper has no end marker")
