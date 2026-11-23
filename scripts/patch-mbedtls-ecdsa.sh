@@ -90,8 +90,8 @@ def patch_segment(path: Path, start: str, end: str, replacements) -> None:
             loop_pos = segment.find("for (;;) {")
             segment = (
                 segment[:loop_pos]
-                + "    uefi_browser_tls_log(176, (int) R->n);\\n"
-                + "    uefi_browser_tls_log(177, (int) B->n);\\n"
+                + "    uefi_browser_tls_log(176, (int) R->n);\n"
+                + "    uefi_browser_tls_log(177, (int) B->n);\n"
                 + segment[loop_pos:]
             )
         elif (
