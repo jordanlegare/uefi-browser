@@ -10,6 +10,7 @@ python3 - "$TF/extras/pk_wrap.c" "$TF/core/psa_crypto.c" \
   "$TF/drivers/builtin/src/ecp.c" \
   "$TF/drivers/builtin/src/bignum.c" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 pk_wrap, psa_crypto, psa_ecp, ecdsa, ecp, bignum = map(Path, sys.argv[1:])
@@ -36,10 +37,30 @@ def patch_segment(path: Path, start: str, end: str, replacements) -> None:
 
     segment = text[start_pos:end_pos]
     for old, new, description in replacements:
+        # Check the patched form first: the original text is often still a
+        # substring of the replacement, so checking old first duplicates logs.
+        if new in segment:
+            continue
+        # PR-era MPI modulo instrumentation used a for-loop with explicit
+        # comparison/subtraction checkpoints instead of the original while.
+        if (
+            description == "MPI modulo negative correction completion and positive correction entry"
+            and "uefi_browser_tls_log(136, 0);" in segment
+            and "uefi_browser_tls_log(137, 0);" in segment
+            and "for (;;) {" in segment
+        ):
+            continue
         if old in segment:
             segment = segment.replace(old, new, 1)
-        elif new not in segment:
+        else:
             raise SystemExit(f"{path}: expected {description} not found; refusing patch")
+
+    # Clean up duplicate adjacent checkpoints left by earlier non-idempotent
+    # runs of this patcher. Do not alter any arithmetic statements.
+    if start == "int mbedtls_mpi_mod_mpi(":
+        for stage in (134, 135):
+            line = rf"(?m)^(\s*uefi_browser_tls_log\({stage}, [^\n]*\);\n)(?:\s*uefi_browser_tls_log\({stage}, [^\n]*\);\n)+"
+            segment = re.sub(line, r"\1", segment)
 
     text = text[:start_pos] + segment + text[end_pos:]
     path.write_text(text)
