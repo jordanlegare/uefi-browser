@@ -82,6 +82,20 @@ def patch_segment(path: Path, start: str, end: str, replacements) -> None:
                 )
         elif (
             start == "int mbedtls_mpi_mod_mpi("
+            and description == "MPI remainder and modulus limb counts"
+            and "for (;;) {" in segment
+        ):
+            # Older builds may have rewritten the correction loop as for (;;).
+            # Place the limb-size report immediately before that loop.
+            loop_pos = segment.find("for (;;) {")
+            segment = (
+                segment[:loop_pos]
+                + "    uefi_browser_tls_log(176, (int) R->n);\\n"
+                + "    uefi_browser_tls_log(177, (int) B->n);\\n"
+                + segment[loop_pos:]
+            )
+        elif (
+            start == "int mbedtls_mpi_mod_mpi("
             and description == "MPI modulo positive correction completion"
             and "for (;;) {" in segment
         ):
