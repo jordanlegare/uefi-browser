@@ -399,7 +399,9 @@ fn fetch_response(
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
                 if let Err(error) = tls.handshake() {
-                    return Err(format!("TLS handshake / certificate verification failed: {error:?}"));
+                    return Err(format!(
+                        "TLS handshake / certificate verification failed: {error:?}"
+                    ));
                 }
                 let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
