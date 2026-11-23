@@ -441,10 +441,6 @@ patch_segment(
     ],
 )
 
-print("Mbed TLS ECDSA/PSA/ECP checkpoints installed (or already present).")
-PY
-
-
 # Keep the underlying MPI arithmetic intact, but remove the temporary
 # division/modulo trace calls from the vendored Mbed TLS source. This also
 # cleans vendor trees that were patched by earlier diagnostic builds.
@@ -455,3 +451,6 @@ mpi_source = re.sub(
     mpi_source,
 )
 bignum.write_text(mpi_source)
+
+print("Mbed TLS ECDSA/PSA/ECP checkpoints installed (or already present).")
+PY
