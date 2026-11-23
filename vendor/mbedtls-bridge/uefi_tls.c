@@ -124,11 +124,43 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
 
     /*
      * For each verified chain certificate, find trust-store certificates
-     * whose subject DN matches its issuer DN. Report their SKIs and whether
-     * the child AKI matches, without modifying verification state.
+     * whose subject DN matches its issuer DN. Also find an identical-subject
+     * certificate in the trust store: this reveals whether the chain
+     * certificate (for example GTS Root R4) is already available as a
+     * potential trust anchor, and whether that stored certificate is
+     * self-issued or cross-signed.
      */
     int issuer_dn_candidates = 0;
     int aki_matches = 0;
+    int same_subject_candidates = 0;
+    if (crt != NULL && session != NULL) {
+        for (mbedtls_x509_crt *candidate = &session->roots;
+             candidate != NULL && candidate->raw.p != NULL;
+             candidate = candidate->next) {
+            char candidate_subject[256];
+            char candidate_issuer[256];
+            char candidate_ski[96];
+            char candidate_aki[96];
+            (void)mbedtls_x509_dn_gets(candidate_subject, sizeof(candidate_subject),
+                                       &candidate->subject);
+            if (strcmp(subject, candidate_subject) != 0) {
+                continue;
+            }
+            same_subject_candidates++;
+            (void)mbedtls_x509_dn_gets(candidate_issuer, sizeof(candidate_issuer),
+                                       &candidate->issuer);
+            uefi_format_key_id(candidate_ski, sizeof(candidate_ski),
+                               &candidate->subject_key_id);
+            uefi_format_key_id(candidate_aki, sizeof(candidate_aki),
+                               &candidate->authority_key_id.keyIdentifier);
+            (void)mbedtls_snprintf(
+                message, sizeof(message),
+                "same-subject trust cert subject=%s issuer=%s SKI=%s AKI=%s self-issued=%s",
+                candidate_subject, candidate_issuer, candidate_ski, candidate_aki,
+                strcmp(candidate_subject, candidate_issuer) == 0 ? "yes" : "no");
+            uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
+        }
+    }
     if (crt != NULL && session != NULL) {
         for (mbedtls_x509_crt *root = &session->roots;
              root != NULL && root->raw.p != NULL; root = root->next) {
@@ -162,8 +194,8 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
 
     (void)mbedtls_snprintf(
         message, sizeof(message),
-        "issuer lookup: DN candidates=%d AKI/SKI matches=%d",
-        issuer_dn_candidates, aki_matches);
+        "issuer lookup: DN candidates=%d AKI/SKI matches=%d same-subject trust certs=%d",
+        issuer_dn_candidates, aki_matches, same_subject_candidates);
     uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
 
     /*
