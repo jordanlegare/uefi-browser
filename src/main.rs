@@ -114,6 +114,19 @@ fn tls_debug_record(level: i32, source: &[u8], line: i32, message: &[u8]) {
     tls_debug_lock();
     let sequence = TLS_DEBUG_RING.next.load(Ordering::Relaxed);
     let entries = unsafe { &mut *TLS_DEBUG_RING.entries.get() };
+    if sequence > 0 {
+        let previous = &entries[(sequence - 1) % TLS_DEBUG_CAPACITY];
+        let same_as_previous = previous.level == level
+            && previous.line == line
+            && previous.source_len as usize == source.len()
+            && previous.message_len as usize == message.len()
+            && &previous.source[..source.len()] == source
+            && &previous.message[..message.len()] == message;
+        if same_as_previous {
+            tls_debug_unlock();
+            return;
+        }
+    }
     let entry = &mut entries[sequence % TLS_DEBUG_CAPACITY];
     *entry = TlsDebugEntry::EMPTY;
     entry.level = level;
@@ -151,6 +164,30 @@ fn tls_debug_report() -> String {
         ));
     }
     report
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_CA_BUNDLE_BYTES: AtomicI64 = AtomicI64::new(-1);
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_CA_PARSE_RESULT: AtomicI64 = AtomicI64::new(-1);
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+static TLS_CA_CERTIFICATE_COUNT: AtomicI64 = AtomicI64::new(-1);
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+fn tls_init_reset() {
+    TLS_CA_BUNDLE_BYTES.store(-1, Ordering::Relaxed);
+    TLS_CA_PARSE_RESULT.store(-1, Ordering::Relaxed);
+    TLS_CA_CERTIFICATE_COUNT.store(-1, Ordering::Relaxed);
+}
+
+#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+fn tls_init_report() -> String {
+    format!(
+        "TLS initialization summary: CA bundle bytes={}, parse result={}, parsed certificates={}",
+        TLS_CA_BUNDLE_BYTES.load(Ordering::Relaxed),
+        TLS_CA_PARSE_RESULT.load(Ordering::Relaxed),
+        TLS_CA_CERTIFICATE_COUNT.load(Ordering::Relaxed),
+    )
 }
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
@@ -295,6 +332,12 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
+        match stage {
+            176 => TLS_CA_BUNDLE_BYTES.store(detail as i64, Ordering::Relaxed),
+            177 => TLS_CA_PARSE_RESULT.store(detail as i64, Ordering::Relaxed),
+            178 => TLS_CA_CERTIFICATE_COUNT.store(detail as i64, Ordering::Relaxed),
+            _ => {}
+        }
         let message = match stage {
             42 => format!(
                 "X.509: verification flags after handshake failure=0x{:08x}",
@@ -528,11 +571,6 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             _ => unreachable!(),
         };
         uefi::println!("{}", message);
-        if stage == 51 {
-            // Debug callbacks only append to the RAM ring while Mbed TLS runs.
-            // Render their tail after each step has returned.
-            uefi::println!("{}", tls_debug_report());
-        }
         return;
     } else if TLS_HANDSHAKE_ACTIVE.load(Ordering::Acquire) {
         // These callbacks execute synchronously underneath Mbed TLS. Record
@@ -997,18 +1035,25 @@ fn fetch_response(
                 // Use a shorter per-I/O timeout for TLS so a peer that accepts
                 // TCP but never sends a ServerHello cannot freeze the UI.
                 connection.peer.stream.set_io_timeout_ms(5_000);
-                let mut tls = connection
-                    .start_tls(ca_bundle)
-                    .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
-                uefi::println!("TLS session initialized; beginning handshake.");
+                // Reset both diagnostic stores before client_new(): CA parsing
+                // happens during TLS session construction, before handshake().
                 tls_debug_reset();
+                tls_init_reset();
+                let mut tls = connection.start_tls(ca_bundle).map_err(|error| {
+                    format!(
+                        "TLS initialization failed: {error:?}\n{}",
+                        tls_init_report()
+                    )
+                })?;
+                uefi::println!("TLS session initialized; beginning handshake.");
                 if let Err(error) = tls.handshake() {
                     // Attach the RAM-buffered tail to the navigation error.
                     // The browser redraws its page after navigation attempts,
                     // so embedding it here preserves the report on screen.
                     let diagnostics = tls_debug_report();
+                    let initialization = tls_init_report();
                     return Err(format!(
-                        "TLS handshake / certificate verification failed: {error:?}\n{diagnostics}"
+                        "TLS handshake / certificate verification failed: {error:?}\n{initialization}\n{diagnostics}"
                     ));
                 }
                 uefi::println!("TLS verified. Sending HTTPS request...");
