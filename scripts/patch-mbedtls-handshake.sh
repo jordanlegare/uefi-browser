@@ -122,6 +122,211 @@ tls13_generic.write_text(text)
 # issuer/signature search, hashing, and public-key verification.
 text = insert_declaration(x509)
 
+# Trace trusted-parent selection without changing the verifier's decisions.
+# These messages are emitted only for candidates whose subject DN exactly
+# matches the child's issuer DN, keeping the firmware trace bounded.
+debug_decl = "extern void uefi_browser_tls_debug_log(int level, const char *file, int line, const char *message);"
+if debug_decl not in text:
+    marker = "extern void uefi_browser_tls_log(int stage, int detail);"
+    if marker not in text:
+        raise SystemExit(f"{x509}: X.509 diagnostic declaration point not found")
+    text = text.replace(marker, marker + "\\n" + debug_decl, 1)
+
+parent_trace_helper = """static void uefi_x509_parent_trace(
+    const mbedtls_x509_crt *child,
+    const mbedtls_x509_crt *parent,
+    int top,
+    unsigned path_cnt,
+    const char *phase,
+    int parent_check_ret,
+    int key_usage_ret,
+    int path_ok,
+    int signature_ret,
+    int time_ok)
+{
+    char child_subject[256];
+    char child_issuer[256];
+    char parent_subject[256];
+    char parent_issuer[256];
+    char message[1200];
+
+    (void) mbedtls_x509_dn_gets(child_subject, sizeof(child_subject), &child->subject);
+    (void) mbedtls_x509_dn_gets(child_issuer, sizeof(child_issuer), &child->issuer);
+    (void) mbedtls_x509_dn_gets(parent_subject, sizeof(parent_subject), &parent->subject);
+    (void) mbedtls_x509_dn_gets(parent_issuer, sizeof(parent_issuer), &parent->issuer);
+
+    (void) mbedtls_snprintf(
+        message, sizeof(message),
+        "phase=%s top=%d path=%u child-subject=%s child-issuer=%s "
+        "parent-subject=%s parent-issuer=%s parent-check=%d "
+        "ca=%d key-usage=0x%04lx keyCertSign-check=%d max-pathlen=%d "
+        "path-ok=%d signature-ret=%d time-ok=%d",
+        phase, top, path_cnt, child_subject, child_issuer,
+        parent_subject, parent_issuer, parent_check_ret,
+        parent->ca_istrue, (unsigned long) parent->key_usage,
+        key_usage_ret, parent->max_pathlen, path_ok,
+        signature_ret, time_ok);
+    uefi_browser_tls_debug_log(1, "x509-parent", (int) path_cnt, message);
+}
+
+"""
+helper_marker = "static int x509_crt_find_parent_in("
+if parent_trace_helper not in text:
+    if helper_marker not in text:
+        raise SystemExit(f"{x509}: parent-search function marker not found")
+    text = text.replace(helper_marker, parent_trace_helper + helper_marker, 1)
+
+old_parent_loop = """    for (parent = candidates; parent != NULL; parent = parent->next) {
+        /* basic parenting skills (name, CA bit, key usage) */
+        if (x509_crt_check_parent(child, parent, top) != 0) {
+            continue;
+        }
+
+        /* +1 because stored max_pathlen is 1 higher that the actual value */
+        if (parent->max_pathlen > 0 &&
+            (size_t) parent->max_pathlen < 1 + path_cnt - self_cnt) {
+            continue;
+        }
+
+        /* Signature */
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+check_signature:
+#endif
+        ret = x509_crt_check_signature(child, parent, rs_ctx);
+
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+        if (rs_ctx != NULL && ret == MBEDTLS_ERR_ECP_IN_PROGRESS) {
+            /* save state */
+            rs_ctx->parent = parent;
+            rs_ctx->fallback_parent = fallback_parent;
+            rs_ctx->fallback_signature_is_good = fallback_signature_is_good;
+
+            return ret;
+        }
+#else
+        (void) ret;
+#endif
+
+        signature_is_good = ret == 0;
+        if (top && !signature_is_good) {
+            continue;
+        }
+
+#if defined(MBEDTLS_HAVE_TIME_DATE)
+        /* optional time check */
+        if (mbedtls_x509_time_cmp(&parent->valid_to, now) < 0 ||    /* past */
+            mbedtls_x509_time_cmp(&parent->valid_from, now) > 0) {  /* future */
+            if (fallback_parent == NULL) {
+                fallback_parent = parent;
+                fallback_signature_is_good = signature_is_good;
+            }
+
+            continue;
+        }
+#else
+        ((void) now);
+#endif
+
+        *r_parent = parent;
+        *r_signature_is_good = signature_is_good;
+
+        break;
+    }"""
+new_parent_loop = """    for (parent = candidates; parent != NULL; parent = parent->next) {
+        int issuer_dn_match = x509_name_cmp(&child->issuer, &parent->subject) == 0;
+        int parent_check_ret = x509_crt_check_parent(child, parent, top);
+        int key_usage_ret = mbedtls_x509_crt_check_key_usage(
+            parent, MBEDTLS_X509_KU_KEY_CERT_SIGN);
+        int path_ok = !(parent->max_pathlen > 0 &&
+                        (size_t) parent->max_pathlen < 1 + path_cnt - self_cnt);
+
+        if (issuer_dn_match) {
+            uefi_x509_parent_trace(child, parent, top, path_cnt, "candidate",
+                                   parent_check_ret, key_usage_ret, path_ok,
+                                   -999, -1);
+        }
+        if (parent_check_ret != 0) {
+            continue;
+        }
+
+        /* +1 because stored max_pathlen is 1 higher that the actual value */
+        if (!path_ok) {
+            if (issuer_dn_match) {
+                uefi_x509_parent_trace(child, parent, top, path_cnt, "path-length-reject",
+                                       parent_check_ret, key_usage_ret, path_ok,
+                                       -999, -1);
+            }
+            continue;
+        }
+
+        /* Signature */
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+check_signature:
+#endif
+        ret = x509_crt_check_signature(child, parent, rs_ctx);
+        if (issuer_dn_match && ret != MBEDTLS_ERR_ECP_IN_PROGRESS) {
+            uefi_x509_parent_trace(child, parent, top, path_cnt, "signature",
+                                   parent_check_ret, key_usage_ret, path_ok,
+                                   ret, -1);
+        }
+
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+        if (rs_ctx != NULL && ret == MBEDTLS_ERR_ECP_IN_PROGRESS) {
+            /* save state */
+            rs_ctx->parent = parent;
+            rs_ctx->fallback_parent = fallback_parent;
+            rs_ctx->fallback_signature_is_good = fallback_signature_is_good;
+
+            return ret;
+        }
+#else
+        (void) ret;
+#endif
+
+        signature_is_good = ret == 0;
+        if (top && !signature_is_good) {
+            continue;
+        }
+
+#if defined(MBEDTLS_HAVE_TIME_DATE)
+        /* optional time check */
+        {
+            int parent_time_ok =
+                mbedtls_x509_time_cmp(&parent->valid_to, now) >= 0 &&
+                mbedtls_x509_time_cmp(&parent->valid_from, now) <= 0;
+            if (issuer_dn_match) {
+                uefi_x509_parent_trace(child, parent, top, path_cnt, "time",
+                                       parent_check_ret, key_usage_ret, path_ok,
+                                       ret, parent_time_ok);
+            }
+            if (!parent_time_ok) {
+                if (fallback_parent == NULL) {
+                    fallback_parent = parent;
+                    fallback_signature_is_good = signature_is_good;
+                }
+
+                continue;
+            }
+        }
+#else
+        ((void) now);
+#endif
+
+        if (issuer_dn_match) {
+            uefi_x509_parent_trace(child, parent, top, path_cnt, "selected",
+                                   parent_check_ret, key_usage_ret, path_ok,
+                                   ret, 1);
+        }
+        *r_parent = parent;
+        *r_signature_is_good = signature_is_good;
+
+        break;
+    }"""
+if old_parent_loop in text:
+    text = text.replace(old_parent_loop, new_parent_loop, 1)
+elif new_parent_loop not in text:
+    raise SystemExit(f"{x509}: expected trusted-parent search loop not found; refusing patch")
+
 old_time = """#if defined(MBEDTLS_HAVE_TIME_DATE)
     if (mbedtls_x509_time_gmtime(mbedtls_time(NULL), &now) != 0) {
         return MBEDTLS_ERR_X509_FATAL_ERROR;
