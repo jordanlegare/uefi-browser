@@ -142,6 +142,12 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
             tls_log(51, state);
 
             if result != 0 {
+                let verification = unsafe { uefi_mbedtls_verify_result(self.raw) };
+                if verification != 0 {
+                    // The handshake failed before the normal post-handshake
+                    // verification check; capture the verifier's flags now.
+                    tls_log(42, verification as i32);
+                }
                 tls_log(52, result);
                 tls_log(12, result);
                 return Err(TlsError::Handshake(result));
