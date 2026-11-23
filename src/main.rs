@@ -32,11 +32,11 @@ unsafe extern "C" {
 }
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-const TLS_DEBUG_CAPACITY: usize = 12;
+const TLS_DEBUG_CAPACITY: usize = 24;
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 const TLS_DEBUG_SOURCE_BYTES: usize = 32;
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-const TLS_DEBUG_MESSAGE_BYTES: usize = 176;
+const TLS_DEBUG_MESSAGE_BYTES: usize = 768;
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 #[derive(Clone, Copy)]
@@ -572,6 +572,15 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
         58 => "TLS 1.3 server-certificate processor returned",
         _ => "TLS diagnostic",
     };
+    if stage == 11 {
+        let firmware_utc_unix = TLS_HANDSHAKE_START_UNIX.load(Ordering::Relaxed);
+        uefi::println!(
+            "TLS handshake: entering Mbed TLS; firmware UTC Unix timestamp={}",
+            firmware_utc_unix
+        );
+        return;
+    }
+
     if let Some(elapsed) = tls_handshake_elapsed_seconds() {
         uefi::println!("{} (elapsed={}s detail={})", message, elapsed, detail);
     } else {

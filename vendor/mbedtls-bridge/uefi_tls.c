@@ -66,10 +66,41 @@ static void uefi_mbedtls_debug(void *ctx, int level, const char *file,
  */
 static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
                                         int depth, uint32_t *flags) {
+    char subject[256];
+    char issuer[256];
+    char message[768];
+    uint32_t cert_flags = flags != NULL ? *flags : UINT32_MAX;
+
     (void)ctx;
-    (void)crt;
+    subject[0] = '\0';
+    issuer[0] = '\0';
+
+    if (crt != NULL) {
+        (void)mbedtls_x509_dn_gets(subject, sizeof(subject), &crt->subject);
+        (void)mbedtls_x509_dn_gets(issuer, sizeof(issuer), &crt->issuer);
+        (void)mbedtls_snprintf(
+            message, sizeof(message),
+            "depth=%d flags=0x%08lx subject=%s issuer=%s "
+            "not_before=%04d-%02d-%02dT%02d:%02d:%02dZ "
+            "not_after=%04d-%02d-%02dT%02d:%02d:%02dZ",
+            depth, (unsigned long)cert_flags, subject, issuer,
+            crt->valid_from.year, crt->valid_from.mon, crt->valid_from.day,
+            crt->valid_from.hour, crt->valid_from.min, crt->valid_from.sec,
+            crt->valid_to.year, crt->valid_to.mon, crt->valid_to.day,
+            crt->valid_to.hour, crt->valid_to.min, crt->valid_to.sec);
+    } else {
+        (void)mbedtls_snprintf(message, sizeof(message),
+                               "depth=%d flags=0x%08lx certificate=NULL",
+                               depth, (unsigned long)cert_flags);
+    }
+
+    /*
+     * The Rust callback only copies this line into its RAM diagnostic ring.
+     * Never call UEFI console or runtime services from the verifier callback.
+     */
+    uefi_browser_tls_debug_log(1, "x509-verify", depth, message);
     uefi_browser_tls_log(40, depth);
-    uefi_browser_tls_log(41, flags != NULL ? (int)*flags : -1);
+    uefi_browser_tls_log(41, (int)cert_flags);
     return 0;
 }
 
