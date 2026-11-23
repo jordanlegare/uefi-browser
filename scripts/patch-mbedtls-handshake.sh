@@ -148,7 +148,37 @@ parent_trace_helper = """static void uefi_x509_parent_trace(
     char child_issuer[256];
     char parent_subject[256];
     char parent_issuer[256];
-    char message[1200];
+    char message[1400];
+    const char *decision = "TRACE_ONLY";
+
+    /*
+     * Translate the low-level verifier result into a short, readable verdict.
+     * In particular, distinguish an ECP restart from a real signature failure.
+     */
+    if (strcmp(phase, "candidate") == 0) {
+        if (parent_check_ret != 0) {
+            decision = "REJECTED_PARENT_CONSTRAINTS";
+        } else if (!path_ok) {
+            decision = "REJECTED_PATH_LENGTH";
+        } else {
+            decision = "CANDIDATE_PASSED_BASIC_CHECKS";
+        }
+    } else if (strcmp(phase, "signature") == 0) {
+        if (signature_ret == MBEDTLS_ERR_ECP_IN_PROGRESS) {
+            decision = "ECDSA_CHECK_STILL_RUNNING";
+        } else if (signature_ret == 0) {
+            decision = "SIGNATURE_VALID";
+        } else {
+            decision = "SIGNATURE_FAILED";
+        }
+    } else if (strcmp(phase, "time") == 0) {
+        decision = time_ok ? "CERTIFICATE_TIME_VALID" :
+                             "CERTIFICATE_EXPIRED_OR_NOT_YET_VALID";
+    } else if (strcmp(phase, "path-length-reject") == 0) {
+        decision = "REJECTED_PATH_LENGTH";
+    } else if (strcmp(phase, "selected") == 0) {
+        decision = top ? "TRUSTED_PARENT_SELECTED" : "PEER_CHAIN_PARENT_SELECTED";
+    }
 
     (void) mbedtls_x509_dn_gets(child_subject, sizeof(child_subject), &child->subject);
     (void) mbedtls_x509_dn_gets(child_issuer, sizeof(child_issuer), &child->issuer);
@@ -157,15 +187,15 @@ parent_trace_helper = """static void uefi_x509_parent_trace(
 
     (void) mbedtls_snprintf(
         message, sizeof(message),
-        "phase=%s top=%d path=%u child-subject=%s child-issuer=%s "
+        "verdict=%s phase=%s search=%s path=%u child-issuer=%s "
         "parent-subject=%s parent-issuer=%s parent-check=%d "
         "ca=%d key-usage=0x%04lx keyCertSign-check=%d max-pathlen=%d "
         "path-ok=%d signature-ret=%d time-ok=%d",
-        phase, top, path_cnt, child_subject, child_issuer,
-        parent_subject, parent_issuer, parent_check_ret,
-        parent->ca_istrue, (unsigned long) parent->key_usage,
-        key_usage_ret, parent->max_pathlen, path_ok,
-        signature_ret, time_ok);
+        decision, phase, top ? "TRUST_STORE" : "PEER_CHAIN",
+        path_cnt, child_issuer, parent_subject, parent_issuer,
+        parent_check_ret, parent->ca_istrue,
+        (unsigned long) parent->key_usage, key_usage_ret,
+        parent->max_pathlen, path_ok, signature_ret, time_ok);
     uefi_browser_tls_debug_log(1, "x509-parent", (int) path_cnt, message);
 }
 
