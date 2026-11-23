@@ -140,9 +140,24 @@ int uefi_mbedtls_client_new(
         uefi_browser_tls_log(2, 0);
     }
 
-    uefi_browser_tls_log(3, (int)ca_pem_len);
+    /* Report the exact trust input before parsing it. */
+    uefi_browser_tls_log(176, (int)ca_pem_len);
     ret = mbedtls_x509_crt_parse(&session->roots, ca_pem, ca_pem_len);
-    if (ret != 0) { uefi_browser_tls_log(4, ret); goto fail; }
+    uefi_browser_tls_log(177, ret);
+
+    /* Count successfully linked certificates, not PEM blocks or parse attempts. */
+    int parsed_certificates = 0;
+    for (mbedtls_x509_crt *cert = &session->roots;
+         cert != NULL && cert->raw.p != NULL;
+         cert = cert->next) {
+        parsed_certificates++;
+    }
+    uefi_browser_tls_log(178, parsed_certificates);
+
+    if (ret != 0) {
+        uefi_browser_tls_log(4, ret);
+        goto fail;
+    }
     uefi_browser_tls_log(4, ret);
 
     uefi_browser_tls_log(5, 0);
