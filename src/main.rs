@@ -296,6 +296,10 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             | 159
             | 160
             | 161
+            | 162
+            | 163
+            | 164
+            | 165
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
@@ -543,6 +547,10 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 detail
             ),
             66 => format!("TLS 1.3: transcript update returned (result={})", detail),
+            162 => format!("MPI modulo: positive-remainder loop entered (limbs={})", detail),
+            163 => format!("MPI modulo: positive-remainder comparison returned (cmp={})", detail),
+            164 => "MPI modulo: entering positive-remainder subtraction".to_string(),
+            165 => format!("MPI modulo: positive-remainder subtraction returned (result={})", detail),
             _ => unreachable!(),
         };
         uefi::println!("{}", message);
