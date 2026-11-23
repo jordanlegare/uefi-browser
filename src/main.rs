@@ -399,17 +399,10 @@ fn fetch_response(
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
                 if let Err(error) = tls.handshake() {
-                    // Attach the RAM-buffered tail to the navigation error.
-                    // The browser redraws its page after navigation attempts,
-                    // so embedding it here preserves the report on screen.
-                    let diagnostics = tls_debug_report();
-                    return Err(format!(
-                        "TLS handshake / certificate verification failed: {error:?}\n{diagnostics}"
-                    ));
+                    return Err(format!("TLS handshake / certificate verification failed: {error:?}"));
                 }
                 let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
-                uefi::println!("HTTPS response received ({} bytes).", response.body.len());
                 Ok(response)
             }
 
