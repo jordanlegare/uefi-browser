@@ -176,11 +176,14 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
                                &candidate->subject_key_id);
             uefi_format_key_id(candidate_aki, sizeof(candidate_aki),
                                &candidate->authority_key_id.keyIdentifier);
+            int same_subject_key_match = uefi_public_keys_equal(&crt->pk, &candidate->pk);
             (void)mbedtls_snprintf(
                 message, sizeof(message),
-                "same-subject trust cert subject=%s issuer=%s SKI=%s AKI=%s self-issued=%s",
+                "same-subject trust cert subject=%s issuer=%s SKI=%s AKI=%s self-issued=%s presented-key-match=%s",
                 candidate_subject, candidate_issuer, candidate_ski, candidate_aki,
-                strcmp(candidate_subject, candidate_issuer) == 0 ? "yes" : "no");
+                strcmp(candidate_subject, candidate_issuer) == 0 ? "yes" : "no",
+                same_subject_key_match < 0 ? "error" :
+                    (same_subject_key_match ? "yes" : "no"));
             uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
         }
     }
@@ -210,7 +213,7 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
 
             (void)mbedtls_snprintf(
                 message, sizeof(message),
-                "issuer candidate subject=%s SKI=%s child-AKI=%s aki-match=%s public-key-match=%s",
+                "issuer candidate subject=%s SKI=%s child-AKI=%s aki-match=%s child-vs-issuer-key-match=%s",
                 root_subject, root_ski, aki,
                 aki_match ? "yes" : "no",
                 public_key_match < 0 ? "error" : (public_key_match ? "yes" : "no"));
