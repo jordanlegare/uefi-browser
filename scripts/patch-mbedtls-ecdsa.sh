@@ -283,161 +283,6 @@ patch_segment(
 
 
 patch_segment(
-    bignum,
-    "int mbedtls_mpi_div_mpi(",
-    "/*\n * Division by int: A = Q * b + R\n */",
-    [
-        (
-            "    mbedtls_mpi_uint TP2[3];\n",
-            "    mbedtls_mpi_uint TP2[3];\n\n"
-            "    uefi_browser_tls_log(120, (int) A->n);\n",
-            "MPI division entry",
-        ),
-        (
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&X, A));\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&Y, B));",
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&X, A));\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&Y, B));\n"
-            "    uefi_browser_tls_log(121, (int) X.n);",
-            "MPI division operand copies",
-        ),
-        (
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(&Y, biL * (n - t)));",
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(&Y, biL * (n - t)));\n"
-            "    uefi_browser_tls_log(122, (int) (n - t));",
-            "MPI division divisor alignment",
-        ),
-        (
-            "    while (mbedtls_mpi_cmp_mpi(&X, &Y) >= 0) {\n"
-            "        Z.p[n - t]++;\n"
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &Y));\n"
-            "    }",
-            "    uefi_browser_tls_log(123, 0);\n"
-            "    while (mbedtls_mpi_cmp_mpi(&X, &Y) >= 0) {\n"
-            "        Z.p[n - t]++;\n"
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &Y));\n"
-            "    }\n"
-            "    uefi_browser_tls_log(124, (int) n);",
-            "MPI division initial subtract loop",
-        ),
-        (
-            "    for (i = n; i > t; i--) {\n",
-            "    for (i = n; i > t; i--) {\n"
-            "        uefi_browser_tls_log(125, (int) i);\n",
-            "MPI division quotient-limb iteration",
-        ),
-        (
-            "        Z.p[i - t - 1]++;\n"
-            "        do {\n",
-            "        Z.p[i - t - 1]++;\n"
-            "        uefi_browser_tls_log(126, (int) i);\n"
-            "        do {\n",
-            "MPI division quotient correction entry",
-        ),
-        (
-            "        } while (mbedtls_mpi_cmp_mpi(&T1, &T2) > 0);",
-            "        } while (mbedtls_mpi_cmp_mpi(&T1, &T2) > 0);\n"
-            "        uefi_browser_tls_log(127, (int) i);",
-            "MPI division quotient correction return",
-        ),
-        (
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &T1));",
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &T1));\n"
-            "        uefi_browser_tls_log(128, (int) i);",
-            "MPI division partial remainder subtraction",
-        ),
-        (
-            "            Z.p[i - t - 1]--;\n"
-            "        }\n"
-            "    }",
-            "            Z.p[i - t - 1]--;\n"
-            "        }\n"
-            "        uefi_browser_tls_log(129, (int) i);\n"
-            "    }\n"
-            "    uefi_browser_tls_log(130, (int) t);",
-            "MPI division quotient-limb completion",
-        ),
-        (
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_copy(R, &X));",
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_copy(R, &X));\n"
-            "        uefi_browser_tls_log(131, (int) R->n);",
-            "MPI division remainder copy",
-        ),
-        (
-            "    return ret;\n"
-            "}\n\n",
-            "    uefi_browser_tls_log(132, ret);\n"
-            "    return ret;\n"
-            "}\n\n",
-            "MPI division return",
-        ),
-    ],
-)
-
-patch_segment(
-    bignum,
-    "int mbedtls_mpi_mod_mpi(",
-    "/*\n * Modulo: r = A mod b\n */",
-    [
-        (
-            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n\n    if (mbedtls_mpi_cmp_int(B, 0) < 0) {",
-            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n\n"
-            "    uefi_browser_tls_log(133, (int) A->n);\n"
-            "    if (mbedtls_mpi_cmp_int(B, 0) < 0) {",
-            "MPI modulo entry",
-        ),
-        (
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));",
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));\n"
-            "    uefi_browser_tls_log(134, ret);",
-            "MPI modulo division return",
-        ),
-        (
-            "    while (mbedtls_mpi_cmp_int(R, 0) < 0) {",
-            "    uefi_browser_tls_log(135, 0);\n"
-            "    while (mbedtls_mpi_cmp_int(R, 0) < 0) {",
-            "MPI modulo negative-remainder correction entry",
-        ),
-        (
-            "    }\n\n    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
-            "    }\n"
-            "    uefi_browser_tls_log(136, 0);\n\n"
-            "    uefi_browser_tls_log(137, 0);\n"
-            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
-            "MPI modulo negative correction completion and positive correction entry",
-        ),
-        (
-            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
-            "    for (;;) {\n"
-            "        int cmp;\n"
-            "        uefi_browser_tls_log(162, (int) R->n);\n"
-            "        cmp = mbedtls_mpi_cmp_mpi(R, B);\n"
-            "        uefi_browser_tls_log(163, cmp);\n"
-            "        if (cmp < 0) {\n"
-            "            break;\n"
-            "        }\n"
-            "        uefi_browser_tls_log(164, 0);",
-            "MPI positive-remainder comparison",
-        ),
-        (
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));",
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n"
-            "        uefi_browser_tls_log(165, ret);",
-            "MPI positive-remainder subtraction return",
-        ),
-        (
-            "    }\n\ncleanup:\n\n    return ret;",
-            "    }\n"
-            "    uefi_browser_tls_log(138, 0);\n\n"
-            "cleanup:\n"
-            "    uefi_browser_tls_log(139, ret);\n\n"
-            "    return ret;",
-            "MPI modulo correction completion and return",
-        ),
-    ],
-)
-
-patch_segment(
     ecp,
     "int mbedtls_ecp_muladd_restartable(",
     "/*\n * Linear combination\n * NOT constant-time\n */",
@@ -595,6 +440,17 @@ patch_segment(
         ),
     ],
 )
+
+# Keep the underlying MPI arithmetic intact, but remove the temporary
+# division/modulo trace calls from the vendored Mbed TLS source. This also
+# cleans vendor trees that were patched by earlier diagnostic builds.
+mpi_source = bignum.read_text()
+mpi_source = re.sub(
+    r"(?m)^[ \t]*uefi_browser_tls_log[(](?:12[0-9]|13[0-9]|16[2-5]),[^\n]*[)];\n",
+    "",
+    mpi_source,
+)
+bignum.write_text(mpi_source)
 
 print("Mbed TLS ECDSA/PSA/ECP checkpoints installed (or already present).")
 PY
