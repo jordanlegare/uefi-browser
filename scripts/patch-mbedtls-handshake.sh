@@ -132,7 +132,31 @@ if debug_decl not in text:
         raise SystemExit(f"{x509}: X.509 diagnostic declaration point not found")
     text = text.replace(marker, marker + "\n" + debug_decl, 1)
 
-parent_trace_helper = """static void uefi_x509_parent_trace(
+parent_trace_helper = """static void uefi_x509_buf_hex(
+    const mbedtls_x509_buf *buf,
+    char *out,
+    size_t out_len)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    size_t i;
+    size_t used = 0;
+
+    if (out_len == 0) {
+        return;
+    }
+    out[0] = '\\0';
+    if (buf == NULL || buf->p == NULL) {
+        (void) mbedtls_snprintf(out, out_len, "-");
+        return;
+    }
+    for (i = 0; i < buf->len && used + 2 < out_len; i++) {
+        out[used++] = hex[buf->p[i] >> 4];
+        out[used++] = hex[buf->p[i] & 0x0F];
+    }
+    out[used] = '\\0';
+}
+
+static void uefi_x509_parent_trace(
     const mbedtls_x509_crt *child,
     const mbedtls_x509_crt *parent,
     int top,
@@ -148,7 +172,9 @@ parent_trace_helper = """static void uefi_x509_parent_trace(
     char child_issuer[256];
     char parent_subject[256];
     char parent_issuer[256];
-    char message[1400];
+    char parent_ski[96];
+    char child_aki[96];
+    char message[1800];
     const char *decision = "TRACE_ONLY";
 
     /*
@@ -184,18 +210,21 @@ parent_trace_helper = """static void uefi_x509_parent_trace(
     (void) mbedtls_x509_dn_gets(child_issuer, sizeof(child_issuer), &child->issuer);
     (void) mbedtls_x509_dn_gets(parent_subject, sizeof(parent_subject), &parent->subject);
     (void) mbedtls_x509_dn_gets(parent_issuer, sizeof(parent_issuer), &parent->issuer);
+    uefi_x509_buf_hex(&parent->subject_key_id, parent_ski, sizeof(parent_ski));
+    uefi_x509_buf_hex(&child->authority_key_id, child_aki, sizeof(child_aki));
 
     (void) mbedtls_snprintf(
         message, sizeof(message),
-        "verdict=%s phase=%s search=%s path=%u child-issuer=%s "
-        "parent-subject=%s parent-issuer=%s parent-check=%d "
-        "ca=%d key-usage=0x%04lx keyCertSign-check=%d max-pathlen=%d "
-        "path-ok=%d signature-ret=%d time-ok=%d",
+        "verdict=%s phase=%s search=%s path=%u child-subject=%s child-issuer=%s "
+        "parent-subject=%s parent-issuer=%s parent-ski=%s child-aki=%s "
+        "parent-check=%d ca=%d key-usage=0x%04lx keyCertSign-check=%d "
+        "max-pathlen=%d path-ok=%d signature-ret=%d sig-md=%d sig-pk=%d time-ok=%d",
         decision, phase, top ? "TRUST_STORE" : "PEER_CHAIN",
-        path_cnt, child_issuer, parent_subject, parent_issuer,
-        parent_check_ret, parent->ca_istrue,
+        path_cnt, child_subject, child_issuer, parent_subject, parent_issuer,
+        parent_ski, child_aki, parent_check_ret, parent->ca_istrue,
         (unsigned long) parent->key_usage, key_usage_ret,
-        parent->max_pathlen, path_ok, signature_ret, time_ok);
+        parent->max_pathlen, path_ok, signature_ret,
+        child->sig_md, child->sig_pk, time_ok);
     uefi_browser_tls_debug_log(1, "x509-parent", (int) path_cnt, message);
 }
 
