@@ -130,7 +130,17 @@ llvm-ar rcs "$BRIDGE_BUILD/libuefi_mbedtls_bridge.a" \
 export UEFI_MBEDTLS_LIB_DIR="$PREFIX/lib"
 export UEFI_MBEDTLS_BRIDGE_DIR="$BRIDGE_BUILD"
 
+if [[ "${UEFI_CA_AUTO_UPDATE:-1}" == "1" ]]; then
+  # Refresh from Mozilla's maintained store before release builds by default.
+  # Set UEFI_CA_AUTO_UPDATE=0 for an offline, pinned build; freshness and
+  # checksum validation still run below.
+  bash "$ROOT/scripts/update-ca-bundle.sh"
+fi
+
 if [[ -f "$ROOT/assets/cacert.pem" ]]; then
+  # Refuse stale or checksum-mismatched trust stores. Default maximum age is
+  # 90 days; override deliberately with UEFI_CA_MAX_AGE_DAYS if required.
+  source "$ROOT/scripts/check-ca-bundle.sh"
   export UEFI_CA_BUNDLE_PATH="$ROOT/assets/cacert.pem"
 else
   echo "CA bundle not found: run scripts/update-ca-bundle.sh to prepare HTTPS trust roots." >&2
