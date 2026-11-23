@@ -546,6 +546,47 @@ patch_segment(
     ],
 )
 
+# Instrument positive-remainder correction without per-iteration console spam.
+# The iteration checkpoints occur only at powers of two (logarithmic output).
+patch_segment(
+    bignum,
+    "int mbedtls_mpi_mod_mpi(",
+    "/*\n * Modulo: r = A mod b",
+    [
+        (
+            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n",
+            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n"
+            "    size_t correction_iterations = 0;\n",
+            "MPI correction iteration counter",
+        ),
+        (
+            "    uefi_browser_tls_log(169, 0);\n"
+            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
+            "    uefi_browser_tls_log(176, (int) R->n);\n"
+            "    uefi_browser_tls_log(177, (int) B->n);\n"
+            "    uefi_browser_tls_log(169, 0);\n"
+            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
+            "MPI remainder and modulus limb counts",
+        ),
+        (
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n",
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n"
+            "        correction_iterations++;\n"
+            "        if (correction_iterations == 1 ||\n"
+            "            (correction_iterations & (correction_iterations - 1)) == 0) {\n"
+            "            uefi_browser_tls_log(178, (int) correction_iterations);\n"
+            "        }\n",
+            "MPI positive-remainder correction progress",
+        ),
+        (
+            "    uefi_browser_tls_log(170, 0);",
+            "    uefi_browser_tls_log(179, (int) correction_iterations);\n"
+            "    uefi_browser_tls_log(170, 0);",
+            "MPI positive-remainder correction iteration total",
+        ),
+    ],
+)
+
 patch_segment(
     bignum,
     "int mbedtls_mpi_div_mpi(",
