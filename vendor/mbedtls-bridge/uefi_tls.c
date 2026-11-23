@@ -8,9 +8,7 @@
 
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
-#include "mbedtls/error.h"
 #include "mbedtls/platform.h"
-#include "mbedtls/debug.h"
 #include <psa/crypto.h>
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
@@ -35,15 +33,6 @@ static int bio_recv(void *ctx, unsigned char *data, size_t length) {
     uefi_tls_session *session = (uefi_tls_session *)ctx;
     int ret = session->recv_cb(session->io_context, data, length);
     return ret;
-}
-
-static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
-                                        int depth, uint32_t *flags) {
-    (void)ctx;
-    (void)crt;
-    (void)depth;
-    (void)flags;
-    return 0;
 }
 
 int uefi_mbedtls_client_new(
@@ -83,7 +72,7 @@ int uefi_mbedtls_client_new(
     }
 
     ret = mbedtls_x509_crt_parse(&session->roots, ca_pem, ca_pem_len);
-    if (ret != 0) { uefi_browser_tls_log(4, ret); goto fail; }
+    if (ret != 0) {  goto fail; }
 
     ret = mbedtls_ssl_config_defaults(
         &session->config,
@@ -91,16 +80,16 @@ int uefi_mbedtls_client_new(
         MBEDTLS_SSL_TRANSPORT_STREAM,
         MBEDTLS_SSL_PRESET_DEFAULT
     );
-    if (ret != 0) { uefi_browser_tls_log(6, ret); goto fail; }
+    if (ret != 0) {  goto fail; }
 
     mbedtls_ssl_conf_authmode(&session->config, MBEDTLS_SSL_VERIFY_REQUIRED);
     mbedtls_ssl_conf_ca_chain(&session->config, &session->roots, NULL);
 
     ret = mbedtls_ssl_setup(&session->ssl, &session->config);
-    if (ret != 0) { uefi_browser_tls_log(8, ret); goto fail; }
+    if (ret != 0) {  goto fail; }
 
     ret = mbedtls_ssl_set_hostname(&session->ssl, (const char *)hostname);
-    if (ret != 0) { uefi_browser_tls_log(9, ret); goto fail; }
+    if (ret != 0) {  goto fail; }
 
     mbedtls_ssl_set_bio(&session->ssl, session, bio_send, bio_recv, NULL);
 
@@ -122,8 +111,7 @@ int uefi_mbedtls_handshake_state(uefi_tls_session *session) {
 
 /*
  * Execute exactly one Mbed TLS handshake state-machine step. Returning to
- * Rust between steps lets the firmware print the RAM-buffered debug tail
- * without invoking UEFI console services from inside Mbed TLS callbacks.
+ * Rust between steps keeps the firmware responsive while the state machine runs.
  */
 int uefi_mbedtls_handshake_step(uefi_tls_session *session,
                                 int *complete, int *state) {
