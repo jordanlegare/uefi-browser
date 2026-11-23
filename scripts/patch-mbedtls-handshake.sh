@@ -233,28 +233,29 @@ check_signature:
         break;
     }"""
 new_parent_loop = """    for (parent = candidates; parent != NULL; parent = parent->next) {
-        int issuer_dn_match = x509_name_cmp(&child->issuer, &parent->subject) == 0;
-        int parent_check_ret = x509_crt_check_parent(child, parent, top);
-        int key_usage_ret = mbedtls_x509_crt_check_key_usage(
-            parent, MBEDTLS_X509_KU_KEY_CERT_SIGN);
-        int path_ok = !(parent->max_pathlen > 0 &&
-                        (size_t) parent->max_pathlen < 1 + path_cnt - self_cnt);
-
-        if (issuer_dn_match) {
-            uefi_x509_parent_trace(child, parent, top, path_cnt, "candidate",
-                                   parent_check_ret, key_usage_ret, path_ok,
-                                   -999, -1);
+        if (x509_name_cmp(&child->issuer, &parent->subject) == 0) {
+            uefi_x509_parent_trace(
+                child, parent, top, path_cnt, "candidate",
+                x509_crt_check_parent(child, parent, top),
+                mbedtls_x509_crt_check_key_usage(parent, MBEDTLS_X509_KU_KEY_CERT_SIGN),
+                !(parent->max_pathlen > 0 &&
+                  (size_t) parent->max_pathlen < 1 + path_cnt - self_cnt),
+                -999, -1);
         }
-        if (parent_check_ret != 0) {
+
+        /* basic parenting skills (name, CA bit, key usage) */
+        if (x509_crt_check_parent(child, parent, top) != 0) {
             continue;
         }
 
         /* +1 because stored max_pathlen is 1 higher that the actual value */
-        if (!path_ok) {
-            if (issuer_dn_match) {
-                uefi_x509_parent_trace(child, parent, top, path_cnt, "path-length-reject",
-                                       parent_check_ret, key_usage_ret, path_ok,
-                                       -999, -1);
+        if (parent->max_pathlen > 0 &&
+            (size_t) parent->max_pathlen < 1 + path_cnt - self_cnt) {
+            if (x509_name_cmp(&child->issuer, &parent->subject) == 0) {
+                uefi_x509_parent_trace(
+                    child, parent, top, path_cnt, "path-length-reject",
+                    0, mbedtls_x509_crt_check_key_usage(parent, MBEDTLS_X509_KU_KEY_CERT_SIGN),
+                    0, -999, -1);
             }
             continue;
         }
@@ -264,10 +265,12 @@ new_parent_loop = """    for (parent = candidates; parent != NULL; parent = pare
 check_signature:
 #endif
         ret = x509_crt_check_signature(child, parent, rs_ctx);
-        if (issuer_dn_match && ret != MBEDTLS_ERR_ECP_IN_PROGRESS) {
-            uefi_x509_parent_trace(child, parent, top, path_cnt, "signature",
-                                   parent_check_ret, key_usage_ret, path_ok,
-                                   ret, -1);
+        if (x509_name_cmp(&child->issuer, &parent->subject) == 0 &&
+            ret != MBEDTLS_ERR_ECP_IN_PROGRESS) {
+            uefi_x509_parent_trace(
+                child, parent, top, path_cnt, "signature",
+                0, mbedtls_x509_crt_check_key_usage(parent, MBEDTLS_X509_KU_KEY_CERT_SIGN),
+                1, ret, -1);
         }
 
 #if defined(MBEDTLS_ECP_RESTARTABLE)
@@ -290,42 +293,39 @@ check_signature:
 
 #if defined(MBEDTLS_HAVE_TIME_DATE)
         /* optional time check */
-        {
+        if (x509_name_cmp(&child->issuer, &parent->subject) == 0) {
             int parent_time_ok =
                 mbedtls_x509_time_cmp(&parent->valid_to, now) >= 0 &&
                 mbedtls_x509_time_cmp(&parent->valid_from, now) <= 0;
-            if (issuer_dn_match) {
-                uefi_x509_parent_trace(child, parent, top, path_cnt, "time",
-                                       parent_check_ret, key_usage_ret, path_ok,
-                                       ret, parent_time_ok);
+            uefi_x509_parent_trace(
+                child, parent, top, path_cnt, "time",
+                0, mbedtls_x509_crt_check_key_usage(parent, MBEDTLS_X509_KU_KEY_CERT_SIGN),
+                1, ret, parent_time_ok);
+        }
+        if (mbedtls_x509_time_cmp(&parent->valid_to, now) < 0 ||    /* past */
+            mbedtls_x509_time_cmp(&parent->valid_from, now) > 0) {  /* future */
+            if (fallback_parent == NULL) {
+                fallback_parent = parent;
+                fallback_signature_is_good = signature_is_good;
             }
-            if (!parent_time_ok) {
-                if (fallback_parent == NULL) {
-                    fallback_parent = parent;
-                    fallback_signature_is_good = signature_is_good;
-                }
 
-                continue;
-            }
+            continue;
         }
 #else
         ((void) now);
 #endif
 
-        if (issuer_dn_match) {
-            uefi_x509_parent_trace(child, parent, top, path_cnt, "selected",
-                                   parent_check_ret, key_usage_ret, path_ok,
-                                   ret, 1);
+        if (x509_name_cmp(&child->issuer, &parent->subject) == 0) {
+            uefi_x509_parent_trace(
+                child, parent, top, path_cnt, "selected",
+                0, mbedtls_x509_crt_check_key_usage(parent, MBEDTLS_X509_KU_KEY_CERT_SIGN),
+                1, ret, 1);
         }
         *r_parent = parent;
         *r_signature_is_good = signature_is_good;
 
         break;
     }"""
-if old_parent_loop in text:
-    text = text.replace(old_parent_loop, new_parent_loop, 1)
-elif new_parent_loop not in text:
-    raise SystemExit(f"{x509}: expected trusted-parent search loop not found; refusing patch")
 
 old_time = """#if defined(MBEDTLS_HAVE_TIME_DATE)
     if (mbedtls_x509_time_gmtime(mbedtls_time(NULL), &now) != 0) {
