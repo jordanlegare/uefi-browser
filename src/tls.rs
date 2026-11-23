@@ -114,9 +114,8 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
 
         for _ in 0..MAX_HANDSHAKE_STEPS {
             let mut complete = 0;
-            let result = unsafe {
-                uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut state)
-            };
+            let result =
+                unsafe { uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut state) };
 
             if result != 0 {
                 return Err(TlsError::Handshake(result));
