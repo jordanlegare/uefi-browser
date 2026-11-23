@@ -32,7 +32,7 @@ unsafe extern "C" {
 }
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-const TLS_DEBUG_CAPACITY: usize = 24;
+const TLS_DEBUG_CAPACITY: usize = 64;
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 const TLS_DEBUG_SOURCE_BYTES: usize = 32;
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
