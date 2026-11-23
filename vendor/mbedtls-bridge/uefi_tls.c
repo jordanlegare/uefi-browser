@@ -92,6 +92,50 @@ static void uefi_format_key_id(char *output, size_t output_size,
  * it does not select a parent or alter certificate verification.
  * The 2048-byte buffers cover the RSA/ECC public keys used by this trust set.
  */
+/*
+ * Match Mbed TLS 4.3's X.509 Name comparison semantics. Comparing the
+ * printable output of mbedtls_x509_dn_gets() is unsafe: it is a bounded,
+ * presentation-format string and can truncate or normalize differently.
+ */
+static int uefi_x509_string_equal(const mbedtls_x509_buf *a,
+                                  const mbedtls_x509_buf *b) {
+    if (a->tag == b->tag && a->len == b->len &&
+        memcmp(a->p, b->p, b->len) == 0) {
+        return 1;
+    }
+    if ((a->tag == MBEDTLS_ASN1_UTF8_STRING ||
+         a->tag == MBEDTLS_ASN1_PRINTABLE_STRING) &&
+        (b->tag == MBEDTLS_ASN1_UTF8_STRING ||
+         b->tag == MBEDTLS_ASN1_PRINTABLE_STRING) &&
+        a->len == b->len) {
+        for (size_t i = 0; i < a->len; i++) {
+            unsigned char ac = a->p[i];
+            unsigned char bc = b->p[i];
+            if (ac >= 'A' && ac <= 'Z') ac = (unsigned char)(ac + ('a' - 'A'));
+            if (bc >= 'A' && bc <= 'Z') bc = (unsigned char)(bc + ('a' - 'A'));
+            if (ac != bc) return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int uefi_x509_names_equal(const mbedtls_x509_name *a,
+                                 const mbedtls_x509_name *b) {
+    while (a != NULL || b != NULL) {
+        if (a == NULL || b == NULL) return 0;
+        if (a->oid.tag != b->oid.tag || a->oid.len != b->oid.len ||
+            memcmp(a->oid.p, b->oid.p, b->oid.len) != 0 ||
+            !uefi_x509_string_equal(&a->val, &b->val) ||
+            a->MBEDTLS_PRIVATE(next_merged) != b->MBEDTLS_PRIVATE(next_merged)) {
+            return 0;
+        }
+        a = a->next;
+        b = b->next;
+    }
+    return 1;
+}
+
 static int uefi_public_keys_equal(const mbedtls_pk_context *a,
                                   const mbedtls_pk_context *b) {
     unsigned char a_der[2048];
@@ -164,9 +208,10 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
             char candidate_issuer[256];
             char candidate_ski[96];
             char candidate_aki[96];
-            (void)mbedtls_x509_dn_gets(candidate_subject, sizeof(candidate_subject),
-                                       &candidate->subject);
-            if (strcmp(subject, candidate_subject) != 0) {
+            int candidate_subject_len = mbedtls_x509_dn_gets(
+                candidate_subject, sizeof(candidate_subject), &candidate->subject);
+            int subject_match = uefi_x509_names_equal(&crt->subject, &candidate->subject);
+            if (!subject_match) {
                 continue;
             }
             same_subject_candidates++;
@@ -179,11 +224,12 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
             int same_subject_key_match = uefi_public_keys_equal(&crt->pk, &candidate->pk);
             (void)mbedtls_snprintf(
                 message, sizeof(message),
-                "same-subject trust cert subject=%s issuer=%s SKI=%s AKI=%s self-issued=%s presented-key-match=%s",
+                "same-subject trust cert subject=%s issuer=%s SKI=%s AKI=%s self-issued=%s presented-key-match=%s formatted-subject-len=%d",
                 candidate_subject, candidate_issuer, candidate_ski, candidate_aki,
-                strcmp(candidate_subject, candidate_issuer) == 0 ? "yes" : "no",
+                uefi_x509_names_equal(&candidate->subject, &candidate->issuer) ? "yes" : "no",
                 same_subject_key_match < 0 ? "error" :
-                    (same_subject_key_match ? "yes" : "no"));
+                    (same_subject_key_match ? "yes" : "no"),
+                candidate_subject_len);
             uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
         }
     }
@@ -194,7 +240,7 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
             char root_ski[96];
             (void)mbedtls_x509_dn_gets(root_subject, sizeof(root_subject),
                                        &root->subject);
-            if (strcmp(issuer, root_subject) != 0) {
+            if (!uefi_x509_names_equal(&crt->issuer, &root->subject)) {
                 continue;
             }
 
