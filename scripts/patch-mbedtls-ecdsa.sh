@@ -40,6 +40,7 @@ def find_matching_brace(text: str, opening_brace: int) -> int:
                 return index + 1
     raise SystemExit("MPI modulo positive-remainder loop has unbalanced braces; refusing patch")
 
+
 def patch_segment(path: Path, start: str, end: str, replacements) -> None:
     text = insert_declaration(path)
     start_pos = text.find(start)
@@ -76,7 +77,7 @@ def patch_segment(path: Path, start: str, end: str, replacements) -> None:
             if "uefi_browser_tls_log(169," not in segment:
                 segment = (
                     segment[:loop_pos]
-                    + "    uefi_browser_tls_log(169, 0);\\n"
+                    + "    uefi_browser_tls_log(169, 0);\n"
                     + segment[loop_pos:]
                 )
         elif (
@@ -92,7 +93,7 @@ def patch_segment(path: Path, start: str, end: str, replacements) -> None:
             if "uefi_browser_tls_log(170," not in segment[loop_end:]:
                 segment = (
                     segment[:loop_end]
-                    + "\\n    uefi_browser_tls_log(170, 0);"
+                    + "\n    uefi_browser_tls_log(170, 0);"
                     + segment[loop_end:]
                 )
         else:
