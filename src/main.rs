@@ -290,6 +290,10 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             | 173
             | 174
             | 175
+            | 176
+            | 177
+            | 178
+            | 179
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
@@ -500,6 +504,10 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 detail
             ),
             175 => "MPI division: quotient-digit loop completed".to_string(),
+            176 => format!("MPI modulo: remainder before correction (R_limbs={})", detail),
+            177 => format!("MPI modulo: modulus size (B_limbs={})", detail),
+            178 => format!("MPI modulo: positive correction iterations={}", detail),
+            179 => format!("MPI modulo: positive correction exited after {} iterations", detail),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
                 detail
