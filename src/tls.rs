@@ -109,30 +109,16 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
     pub fn handshake(&mut self) -> Result<(), TlsError> {
         const MAX_HANDSHAKE_STEPS: usize = 64;
 
-        // Start the RAM-only trace before entering the first Mbed TLS step.
-
         let mut state = unsafe { uefi_mbedtls_handshake_state(self.raw) };
         let mut completed = false;
 
-        for step in 0..MAX_HANDSHAKE_STEPS {
-
-
+        for _ in 0..MAX_HANDSHAKE_STEPS {
             let mut complete = 0;
-            let mut next_state = state;
-            let result =
-                unsafe { uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut next_state) };
-
-            state = next_state;
+            let result = unsafe {
+                uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut state)
+            };
 
             if result != 0 {
-                let verification = unsafe { uefi_mbedtls_verify_result(self.raw) };
-                if verification != 0 {
-                    // The handshake failed before the normal post-handshake
-                    // verification check; capture the verifier's flags now.
-
-                }
-
-
                 return Err(TlsError::Handshake(result));
             }
 
@@ -143,10 +129,6 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
         }
 
         if !completed {
-            // Defensive guard against an unexpected state machine that makes
-            // no terminal progress. Do not spin indefinitely in firmware.
-
-
             return Err(TlsError::Handshake(-1));
         }
 
