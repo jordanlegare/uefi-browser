@@ -526,30 +526,30 @@ patch_segment(
 def patch_mpi_modulo_guard() -> None:
     text = insert_declaration(bignum)
     start = text.find("int mbedtls_mpi_mod_mpi(")
-    end = text.find("/*\\n * Modulo: r = A mod b", start)
+    end = text.find("/*\n * Modulo: r = A mod b", start)
     if start < 0 or end < 0:
         raise SystemExit(f"{bignum}: MPI modulo function boundaries not found; refusing patch")
 
     segment = text[start:end]
     div_call = "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));"
     div_pos = segment.find(div_call)
-    cleanup_pos = segment.find("\\ncleanup:", div_pos)
+    cleanup_pos = segment.find("\ncleanup:", div_pos)
     if div_pos < 0 or cleanup_pos < 0:
         raise SystemExit(f"{bignum}: MPI modulo division/cleanup boundary not found; refusing patch")
 
     guard = (
-        "\\n"
-        "    uefi_browser_tls_log(167, (int) R->n);\\n"
-        "    /* UEFI: fail closed if division violates the MPI remainder invariant. */\\n"
-        "    if (mbedtls_mpi_cmp_int(R, 0) < 0) {\\n"
-        "        MBEDTLS_MPI_CHK(mbedtls_mpi_add_mpi(R, R, B));\\n"
-        "    }\\n"
-        "    if (mbedtls_mpi_cmp_int(R, 0) < 0 ||\\n"
-        "        mbedtls_mpi_cmp_mpi(R, B) >= 0) {\\n"
-        "        ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\\n"
-        "        goto cleanup;\\n"
-        "    }\\n"
-        "    uefi_browser_tls_log(168, 0);\\n"
+        "\n"
+        "    uefi_browser_tls_log(167, (int) R->n);\n"
+        "    /* UEFI: fail closed if division violates the MPI remainder invariant. */\n"
+        "    if (mbedtls_mpi_cmp_int(R, 0) < 0) {\n"
+        "        MBEDTLS_MPI_CHK(mbedtls_mpi_add_mpi(R, R, B));\n"
+        "    }\n"
+        "    if (mbedtls_mpi_cmp_int(R, 0) < 0 ||\n"
+        "        mbedtls_mpi_cmp_mpi(R, B) >= 0) {\n"
+        "        ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n"
+        "        goto cleanup;\n"
+        "    }\n"
+        "    uefi_browser_tls_log(168, 0);\n"
     )
 
     if "/* UEFI: fail closed if division violates the MPI remainder invariant. */" in segment:
@@ -564,7 +564,7 @@ def patch_mpi_modulo_guard() -> None:
         div_pos = segment.find(div_call)
         segment = (
             segment[:div_pos]
-            + "    uefi_browser_tls_log(166, (int) A->n);\\n"
+            + "    uefi_browser_tls_log(166, (int) A->n);\n"
             + segment[div_pos:]
         )
 
