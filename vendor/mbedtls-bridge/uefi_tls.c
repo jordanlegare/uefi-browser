@@ -119,6 +119,9 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
                                depth, (unsigned long)cert_flags);
     }
 
+    /* Preserve the certificate's own DN and AKI before formatting lookup results. */
+    uefi_browser_tls_debug_log(1, "x509-verify", depth, message);
+
     /*
      * For each verified chain certificate, find trust-store certificates
      * whose subject DN matches its issuer DN. Report their SKIs and whether
@@ -167,7 +170,6 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
      * The Rust callback only copies these lines into its RAM diagnostic ring.
      * Never call UEFI console or runtime services from the verifier callback.
      */
-    uefi_browser_tls_debug_log(1, "x509-verify", depth, message);
     uefi_browser_tls_log(40, depth);
     uefi_browser_tls_log(41, (int)cert_flags);
     return 0;
