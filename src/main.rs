@@ -289,6 +289,9 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             | 173
             | 174
             | 175
+            | 176
+            | 177
+            | 178
     ) {
         // These explicit checkpoints are emitted at safe function boundaries,
         // never from the BIO or Mbed TLS debug callbacks.
@@ -501,6 +504,18 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 detail
             ),
             175 => "MPI division: quotient-digit loop completed".to_string(),
+            176 => format!(
+                "TLS init: CA bundle supplied ({} bytes)",
+                detail
+            ),
+            177 => format!(
+                "TLS init: CA bundle parse returned {}",
+                detail
+            ),
+            178 => format!(
+                "TLS init: parsed certificate count={}",
+                detail
+            ),
             61 => format!(
                 "TLS 1.3: parsing certificate list (message_bytes={})",
                 detail
