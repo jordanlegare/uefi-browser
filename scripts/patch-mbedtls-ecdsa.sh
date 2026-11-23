@@ -531,7 +531,7 @@ def patch_mpi_modulo_guard() -> None:
         raise SystemExit(f"{bignum}: MPI modulo function boundaries not found; refusing patch")
 
     segment = text[start:end]
-    segment = segment.replace("    size_t correction_iterations = 0;\\n", "")
+    segment = segment.replace("    size_t correction_iterations = 0;\n", "")
     div_call = "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));"
     div_pos = segment.find(div_call)
     cleanup_pos = segment.find("\ncleanup:", div_pos)
