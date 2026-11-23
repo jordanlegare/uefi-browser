@@ -183,12 +183,13 @@ fn tls_init_reset() {
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 fn tls_init_report() -> String {
     format!(
-        "TLS initialization summary: CA bundle bytes={}, parse result={}, parsed certificates={}, Mozilla source date={}, SHA-256={}",
+        "TLS initialization summary: CA bundle bytes={}, parse result={}, parsed certificates={}, Mozilla source date={}, source certificates={}, SHA-256={}",
         TLS_CA_BUNDLE_BYTES.load(Ordering::Relaxed),
         TLS_CA_PARSE_RESULT.load(Ordering::Relaxed),
         TLS_CA_CERTIFICATE_COUNT.load(Ordering::Relaxed),
-        env!("UEFI_CA_BUNDLE_SOURCE_DATE", "Mozilla CA source date was not recorded"),
-        env!("UEFI_CA_BUNDLE_SHA256", "Mozilla CA bundle checksum was not recorded"),
+        option_env!("UEFI_CA_BUNDLE_SOURCE_DATE").unwrap_or("not recorded"),
+        option_env!("UEFI_CA_BUNDLE_CERT_COUNT").unwrap_or("not recorded"),
+        option_env!("UEFI_CA_BUNDLE_SHA256").unwrap_or("not recorded"),
     )
 }
 
