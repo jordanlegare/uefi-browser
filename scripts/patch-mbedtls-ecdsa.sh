@@ -519,88 +519,61 @@ patch_segment(
     ],
 )
 
-# Add one-shot boundaries around MPI division and modulo. These checkpoints
-# deliberately sit outside all arithmetic loops so a failing build cannot flood
-# the UEFI console.
-patch_segment(
-    bignum,
-    "int mbedtls_mpi_mod_mpi(",
-    "/*\n * Modulo: r = A mod b",
-    [
-        (
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));",
-            "    uefi_browser_tls_log(166, (int) A->n);\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));\n"
-            "    uefi_browser_tls_log(167, (int) R->n);",
-            "MPI modulo division boundary",
-        ),
-        (
-            "    while (mbedtls_mpi_cmp_int(R, 0) < 0) {\n"
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_add_mpi(R, R, B));\n"
-            "    }",
-            "    while (mbedtls_mpi_cmp_int(R, 0) < 0) {\n"
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_add_mpi(R, R, B));\n"
-            "    }\n"
-            "    uefi_browser_tls_log(168, 0);",
-            "MPI modulo negative correction boundary",
-        ),
-        (
-            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
-            "    uefi_browser_tls_log(169, 0);\n"
-            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
-            "MPI modulo positive correction entry",
-        ),
-        (
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n"
-            "    }",
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n"
-            "    }\n"
-            "    uefi_browser_tls_log(170, 0);",
-            "MPI modulo positive correction completion",
-        ),
-    ],
-)
+# Keep MPI modulo correction bounded. Division must return a remainder whose
+# magnitude is smaller than the positive modulus. A negative remainder needs
+# at most one addition of B; any other out-of-range result is an arithmetic
+# invariant failure and must abort verification instead of looping forever.
+def patch_mpi_modulo_guard() -> None:
+    text = insert_declaration(bignum)
+    start = text.find("int mbedtls_mpi_mod_mpi(")
+    end = text.find("/*\n * Modulo: r = A mod b", start)
+    if start < 0 or end < 0:
+        raise SystemExit(f"{bignum}: MPI modulo function boundaries not found; refusing patch")
 
-# Instrument positive-remainder correction without per-iteration console spam.
-# The iteration checkpoints occur only at powers of two (logarithmic output).
-patch_segment(
-    bignum,
-    "int mbedtls_mpi_mod_mpi(",
-    "/*\n * Modulo: r = A mod b",
-    [
-        (
-            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n",
-            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n"
-            "    size_t correction_iterations = 0;\n",
-            "MPI correction iteration counter",
-        ),
-        (
-            "    uefi_browser_tls_log(169, 0);\n"
-            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
-            "    uefi_browser_tls_log(176, (int) R->n);\n"
-            "    uefi_browser_tls_log(177, (int) B->n);\n"
-            "    uefi_browser_tls_log(169, 0);\n"
-            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
-            "MPI remainder and modulus limb counts",
-        ),
-        (
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n",
-            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n"
-            "        correction_iterations++;\n"
-            "        if (correction_iterations == 1 ||\n"
-            "            (correction_iterations & (correction_iterations - 1)) == 0) {\n"
-            "            uefi_browser_tls_log(178, (int) correction_iterations);\n"
-            "        }\n",
-            "MPI positive-remainder correction progress",
-        ),
-        (
-            "    uefi_browser_tls_log(170, 0);",
-            "    uefi_browser_tls_log(179, (int) correction_iterations);\n"
-            "    uefi_browser_tls_log(170, 0);",
-            "MPI positive-remainder correction iteration total",
-        ),
-    ],
-)
+    segment = text[start:end]
+    segment = segment.replace("    size_t correction_iterations = 0;\n", "")
+    div_call = "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));"
+    div_pos = segment.find(div_call)
+    cleanup_pos = segment.find("\ncleanup:", div_pos)
+    if div_pos < 0 or cleanup_pos < 0:
+        raise SystemExit(f"{bignum}: MPI modulo division/cleanup boundary not found; refusing patch")
+
+    guard = (
+        "\n"
+        "    uefi_browser_tls_log(167, (int) R->n);\n"
+        "    /* UEFI: fail closed if division violates the MPI remainder invariant. */\n"
+        "    if (mbedtls_mpi_cmp_int(R, 0) < 0) {\n"
+        "        MBEDTLS_MPI_CHK(mbedtls_mpi_add_mpi(R, R, B));\n"
+        "    }\n"
+        "    if (mbedtls_mpi_cmp_int(R, 0) < 0 ||\n"
+        "        mbedtls_mpi_cmp_mpi(R, B) >= 0) {\n"
+        "        ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n"
+        "        goto cleanup;\n"
+        "    }\n"
+        "    uefi_browser_tls_log(168, 0);\n"
+    )
+
+    if "/* UEFI: fail closed if division violates the MPI remainder invariant. */" in segment:
+        # The guard is already present. Still ensure stage 166 remains before
+        # the division call when re-running against an existing vendor tree.
+        pass
+    else:
+        after_div = div_pos + len(div_call)
+        segment = segment[:after_div] + guard + segment[cleanup_pos:]
+
+    if "uefi_browser_tls_log(166," not in segment:
+        div_pos = segment.find(div_call)
+        segment = (
+            segment[:div_pos]
+            + "    uefi_browser_tls_log(166, (int) A->n);\n"
+            + segment[div_pos:]
+        )
+
+    text = text[:start] + segment + text[end:]
+    bignum.write_text(text)
+
+
+patch_mpi_modulo_guard()
 
 patch_segment(
     bignum,
