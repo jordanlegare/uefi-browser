@@ -28,6 +28,18 @@ def insert_declaration(path: Path) -> str:
     return text
 
 
+def find_matching_brace(text: str, opening_brace: int) -> int:
+    """Return the index immediately after the matching closing brace."""
+    depth = 0
+    for index in range(opening_brace, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    raise SystemExit("MPI modulo positive-remainder loop has unbalanced braces; refusing patch")
+
 def patch_segment(path: Path, start: str, end: str, replacements) -> None:
     text = insert_declaration(path)
     start_pos = text.find(start)
@@ -52,6 +64,37 @@ def patch_segment(path: Path, start: str, end: str, replacements) -> None:
             continue
         if old in segment:
             segment = segment.replace(old, new, 1)
+        elif (
+            start == "int mbedtls_mpi_mod_mpi("
+            and description == "MPI modulo positive correction entry"
+            and "for (;;) {" in segment
+        ):
+            # Older diagnostic builds rewrote the positive-remainder while
+            # loop as for (;;) with an explicit comparison/break. Keep that
+            # loop intact and put the new one-shot marker before it.
+            loop_pos = segment.find("for (;;) {")
+            if "uefi_browser_tls_log(169," not in segment:
+                segment = (
+                    segment[:loop_pos]
+                    + "    uefi_browser_tls_log(169, 0);\\n"
+                    + segment[loop_pos:]
+                )
+        elif (
+            start == "int mbedtls_mpi_mod_mpi("
+            and description == "MPI modulo positive correction completion"
+            and "for (;;) {" in segment
+        ):
+            # Locate the loop's closing brace structurally so stage 170
+            # remains outside the arithmetic loop.
+            loop_pos = segment.find("for (;;) {")
+            opening_brace = segment.find("{", loop_pos)
+            loop_end = find_matching_brace(segment, opening_brace)
+            if "uefi_browser_tls_log(170," not in segment[loop_end:]:
+                segment = (
+                    segment[:loop_end]
+                    + "\\n    uefi_browser_tls_log(170, 0);"
+                    + segment[loop_end:]
+                )
         else:
             raise SystemExit(f"{path}: expected {description} not found; refusing patch")
 
@@ -487,7 +530,7 @@ patch_segment(
         ),
         (
             "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
-            "    uefi_browser_tls_log(169, mbedtls_mpi_cmp_mpi(R, B));\n"
+            "    uefi_browser_tls_log(169, 0);\n"
             "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
             "MPI modulo positive correction entry",
         ),
