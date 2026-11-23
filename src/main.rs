@@ -36,7 +36,7 @@ const TLS_DEBUG_CAPACITY: usize = 24;
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 const TLS_DEBUG_SOURCE_BYTES: usize = 32;
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-const TLS_DEBUG_MESSAGE_BYTES: usize = 176;
+const TLS_DEBUG_MESSAGE_BYTES: usize = 768;
 
 #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
 #[derive(Clone, Copy)]
