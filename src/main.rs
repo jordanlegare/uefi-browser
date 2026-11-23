@@ -254,26 +254,6 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             | 115
             | 116
             | 117
-            | 120
-            | 121
-            | 122
-            | 123
-            | 124
-            | 125
-            | 126
-            | 127
-            | 128
-            | 129
-            | 130
-            | 131
-            | 132
-            | 133
-            | 134
-            | 135
-            | 136
-            | 137
-            | 138
-            | 139
             | 140
             | 141
             | 142
@@ -445,41 +425,6 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
             115 => format!("ECDSA: u2 multiplication returned (result={})", detail),
             116 => "ECDSA: entering u2 modulo curve-order reduction".to_string(),
             117 => format!("ECDSA: u2 modular reduction returned (result={})", detail),
-            120 => format!("MPI division: entered (dividend_limbs={})", detail),
-            121 => format!("MPI division: operands copied (limbs={})", detail),
-            122 => format!("MPI division: divisor aligned (limb_shift={})", detail),
-            123 => "MPI division: entering initial subtract loop".to_string(),
-            124 => format!(
-                "MPI division: initial subtract loop returned (limbs={})",
-                detail
-            ),
-            125 => format!("MPI division: entering quotient limb (index={})", detail),
-            126 => format!(
-                "MPI division: entering quotient correction (index={})",
-                detail
-            ),
-            127 => format!(
-                "MPI division: quotient correction returned (index={})",
-                detail
-            ),
-            128 => format!(
-                "MPI division: partial remainder subtraction returned (index={})",
-                detail
-            ),
-            129 => format!("MPI division: quotient limb completed (index={})", detail),
-            130 => format!(
-                "MPI division: quotient loop returned (divisor_limbs={})",
-                detail
-            ),
-            131 => format!("MPI division: remainder copied (limbs={})", detail),
-            132 => format!("MPI division returned (result={})", detail),
-            133 => format!("MPI modulo: entered (dividend_limbs={})", detail),
-            134 => format!("MPI modulo: division returned (result={})", detail),
-            135 => "MPI modulo: entering negative-remainder correction".to_string(),
-            136 => "MPI modulo: negative-remainder correction returned".to_string(),
-            137 => "MPI modulo: entering positive-remainder correction".to_string(),
-            138 => "MPI modulo: positive-remainder correction returned".to_string(),
-            139 => format!("MPI modulo returned (result={})", detail),
             140 => "ECP: entering first scalar multiplication".to_string(),
             141 => format!(
                 "ECP: first scalar multiplication returned (result={})",
@@ -547,19 +492,6 @@ pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
                 detail
             ),
             66 => format!("TLS 1.3: transcript update returned (result={})", detail),
-            162 => format!(
-                "MPI modulo: positive-remainder loop entered (limbs={})",
-                detail
-            ),
-            163 => format!(
-                "MPI modulo: positive-remainder comparison returned (cmp={})",
-                detail
-            ),
-            164 => "MPI modulo: entering positive-remainder subtraction".to_string(),
-            165 => format!(
-                "MPI modulo: positive-remainder subtraction returned (result={})",
-                detail
-            ),
             _ => unreachable!(),
         };
         uefi::println!("{}", message);
