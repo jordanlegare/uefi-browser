@@ -201,9 +201,22 @@ parent_trace_helper = """static void uefi_x509_parent_trace(
 
 """
 helper_marker = "static int x509_crt_find_parent_in("
-if parent_trace_helper not in text:
-    if helper_marker not in text:
-        raise SystemExit(f"{x509}: parent-search function marker not found")
+if helper_marker not in text:
+    raise SystemExit(f"{x509}: parent-search function marker not found")
+
+# The build directory may already contain the helper from an earlier version
+# of this patcher. Detect it by its function signature, not by comparing the
+# entire body: the body intentionally evolves as diagnostics improve.
+helper_signature = "static void uefi_x509_parent_trace("
+helper_start = text.find(helper_signature)
+if helper_start >= 0:
+    # Replace the complete existing helper block. This also collapses
+    # duplicate definitions left by a previous non-idempotent patch run.
+    helper_end = text.find(helper_marker, helper_start)
+    if helper_end < 0:
+        raise SystemExit(f"{x509}: existing parent-trace helper has no end marker")
+    text = text[:helper_start] + parent_trace_helper + text[helper_end:]
+else:
     text = text.replace(helper_marker, parent_trace_helper + helper_marker, 1)
 
 old_parent_loop = """    for (parent = candidates; parent != NULL; parent = parent->next) {
@@ -445,6 +458,9 @@ if old_verify in text:
     text = text.replace(old_verify, new_verify, 1)
 elif new_verify not in text:
     raise SystemExit(f"{x509}: expected public-key signature verification call not found")
+
+if text.count("static void uefi_x509_parent_trace(") != 1:
+    raise SystemExit(f"{x509}: parent-trace helper count is not exactly one; refusing patched source")
 
 x509.write_text(text)
 
