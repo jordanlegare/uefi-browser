@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PEM="$ROOT/assets/cacert.pem"
 CHECKSUM="$ROOT/assets/cacert.pem.sha256"
 MAX_AGE_DAYS="${UEFI_CA_MAX_AGE_DAYS:-90}"
+[[ "$MAX_AGE_DAYS" =~ ^[0-9]+$ ]] || { echo "UEFI_CA_MAX_AGE_DAYS must be a non-negative integer." >&2; return 1 2>/dev/null || exit 1; }
 fail() { echo "$1" >&2; return 1 2>/dev/null || exit 1; }
 [[ -s "$PEM" && -s "$CHECKSUM" ]] || fail "CA bundle/checksum missing; run scripts/update-ca-bundle.sh."
 EXPECTED="$(grep -Eo '[[:xdigit:]]{64}' "$CHECKSUM" | head -n 1 | tr 'A-F' 'a-f')"
