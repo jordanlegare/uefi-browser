@@ -131,6 +131,9 @@ export UEFI_MBEDTLS_LIB_DIR="$PREFIX/lib"
 export UEFI_MBEDTLS_BRIDGE_DIR="$BRIDGE_BUILD"
 
 if [[ -f "$ROOT/assets/cacert.pem" ]]; then
+  # Refuse stale or checksum-mismatched trust stores. Default maximum age is
+  # 90 days; override deliberately with UEFI_CA_MAX_AGE_DAYS if required.
+  source "$ROOT/scripts/check-ca-bundle.sh"
   export UEFI_CA_BUNDLE_PATH="$ROOT/assets/cacert.pem"
 else
   echo "CA bundle not found: run scripts/update-ca-bundle.sh to prepare HTTPS trust roots." >&2
