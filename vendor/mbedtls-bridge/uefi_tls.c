@@ -9,6 +9,7 @@
 
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
+#include "mbedtls/oid.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/error.h"
 #include "mbedtls/platform.h"
@@ -136,6 +137,27 @@ static int uefi_x509_names_equal(const mbedtls_x509_name *a,
     return 1;
 }
 
+/* Compare only the CN attributes of two parsed X.509 Names.
+ * This is diagnostic-only: a CN match never makes a certificate a parent.
+ * It helps reveal a likely issuer certificate whose other DN attributes
+ * differ from the peer's issuer DN.
+ */
+static int uefi_x509_name_cn_equal(const mbedtls_x509_name *a,
+                                   const mbedtls_x509_name *b) {
+    for (const mbedtls_x509_name *an = a; an != NULL; an = an->next) {
+        if (MBEDTLS_OID_CMP(MBEDTLS_OID_AT_CN, &an->oid) != 0) {
+            continue;
+        }
+        for (const mbedtls_x509_name *bn = b; bn != NULL; bn = bn->next) {
+            if (MBEDTLS_OID_CMP(MBEDTLS_OID_AT_CN, &bn->oid) == 0) {
+                return uefi_x509_string_equal(&an->val, &bn->val);
+            }
+        }
+        return 0;
+    }
+    return 0;
+}
+
 static int uefi_public_keys_equal(const mbedtls_pk_context *a,
                                   const mbedtls_pk_context *b) {
     unsigned char a_der[2048];
@@ -198,6 +220,7 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
      * self-issued or cross-signed.
      */
     int issuer_dn_candidates = 0;
+    int issuer_cn_candidates = 0;
     int aki_matches = 0;
     int same_subject_candidates = 0;
     if (crt != NULL && session != NULL) {
@@ -240,7 +263,22 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
             char root_ski[96];
             (void)mbedtls_x509_dn_gets(root_subject, sizeof(root_subject),
                                        &root->subject);
-            if (!uefi_x509_names_equal(&crt->issuer, &root->subject)) {
+            int issuer_dn_match = uefi_x509_names_equal(&crt->issuer, &root->subject);
+            int issuer_cn_match = uefi_x509_name_cn_equal(&crt->issuer, &root->subject);
+            if (issuer_cn_match) {
+                issuer_cn_candidates++;
+                (void)mbedtls_x509_dn_gets(root_subject, sizeof(root_subject),
+                                           &root->subject);
+                uefi_format_key_id(root_ski, sizeof(root_ski), &root->subject_key_id);
+                (void)mbedtls_snprintf(
+                    message, sizeof(message),
+                    "issuer CN candidate subject=%s SKI=%s full-issuer-DN-match=%s self-issued=%s",
+                    root_subject, root_ski,
+                    issuer_dn_match ? "yes" : "no",
+                    uefi_x509_names_equal(&root->subject, &root->issuer) ? "yes" : "no");
+                uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
+            }
+            if (!issuer_dn_match) {
                 continue;
             }
 
@@ -269,8 +307,8 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
 
     (void)mbedtls_snprintf(
         message, sizeof(message),
-        "issuer lookup: DN candidates=%d AKI/SKI matches=%d same-subject trust certs=%d",
-        issuer_dn_candidates, aki_matches, same_subject_candidates);
+        "issuer lookup: DN candidates=%d CN candidates=%d AKI/SKI matches=%d same-subject trust certs=%d",
+        issuer_dn_candidates, issuer_cn_candidates, aki_matches, same_subject_candidates);
     uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
 
     /*
