@@ -265,8 +265,7 @@ new_parent_loop = """    for (parent = candidates; parent != NULL; parent = pare
 check_signature:
 #endif
         ret = x509_crt_check_signature(child, parent, rs_ctx);
-        if (x509_name_cmp(&child->issuer, &parent->subject) == 0 &&
-            ret != MBEDTLS_ERR_ECP_IN_PROGRESS) {
+        if (x509_name_cmp(&child->issuer, &parent->subject) == 0) {
             uefi_x509_parent_trace(
                 child, parent, top, path_cnt, "signature",
                 0, mbedtls_x509_crt_check_key_usage(parent, MBEDTLS_X509_KU_KEY_CERT_SIGN),
