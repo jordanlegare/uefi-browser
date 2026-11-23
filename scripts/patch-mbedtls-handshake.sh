@@ -211,7 +211,7 @@ static void uefi_x509_parent_trace(
     (void) mbedtls_x509_dn_gets(parent_subject, sizeof(parent_subject), &parent->subject);
     (void) mbedtls_x509_dn_gets(parent_issuer, sizeof(parent_issuer), &parent->issuer);
     uefi_x509_buf_hex(&parent->subject_key_id, parent_ski, sizeof(parent_ski));
-    uefi_x509_buf_hex(&child->authority_key_id, child_aki, sizeof(child_aki));
+    uefi_x509_buf_hex(&child->authority_key_id.keyIdentifier, child_aki, sizeof(child_aki));
 
     (void) mbedtls_snprintf(
         message, sizeof(message),
