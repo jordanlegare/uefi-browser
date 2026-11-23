@@ -446,7 +446,7 @@ patch_segment(
 # cleans vendor trees that were patched by earlier diagnostic builds.
 mpi_source = bignum.read_text()
 mpi_source = re.sub(
-    r"(?m)^[ \\t]*uefi_browser_tls_log\\((?:12[0-9]|13[0-9]|16[2-5]),[^\\n]*\\);\\n",
+    r"(?m)^[ \t]*uefi_browser_tls_log[(](?:12[0-9]|13[0-9]|16[2-5]),[^\n]*[)];\n",
     "",
     mpi_source,
 )
