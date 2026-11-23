@@ -72,8 +72,8 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
     uint32_t cert_flags = flags != NULL ? *flags : UINT32_MAX;
 
     (void)ctx;
-    subject[0] = '\\0';
-    issuer[0] = '\\0';
+    subject[0] = '\0';
+    issuer[0] = '\0';
 
     if (crt != NULL) {
         (void)mbedtls_x509_dn_gets(subject, sizeof(subject), &crt->subject);
