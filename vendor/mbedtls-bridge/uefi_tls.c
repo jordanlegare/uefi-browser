@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
@@ -64,26 +65,50 @@ static void uefi_mbedtls_debug(void *ctx, int level, const char *file,
  * MBEDTLS_SSL_VERIFY_REQUIRED and the original verification flags remain in
  * force and are still checked by Mbed TLS.
  */
+static void uefi_format_key_id(char *output, size_t output_size,
+                                const mbedtls_x509_buf *key_id) {
+    static const char hex[] = "0123456789abcdef";
+    size_t offset = 0;
+
+    if (output_size == 0) {
+        return;
+    }
+    output[0] = '\0';
+    if (key_id == NULL || key_id->p == NULL || key_id->len == 0) {
+        (void)mbedtls_snprintf(output, output_size, "<none>");
+        return;
+    }
+
+    for (size_t i = 0; i < key_id->len && offset + 2 < output_size; i++) {
+        output[offset++] = hex[key_id->p[i] >> 4];
+        output[offset++] = hex[key_id->p[i] & 0x0f];
+    }
+    output[offset] = '\0';
+}
+
 static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
                                         int depth, uint32_t *flags) {
+    uefi_tls_session *session = (uefi_tls_session *)ctx;
     char subject[256];
     char issuer[256];
+    char aki[96];
     char message[768];
     uint32_t cert_flags = flags != NULL ? *flags : UINT32_MAX;
 
-    (void)ctx;
     subject[0] = '\0';
     issuer[0] = '\0';
+    aki[0] = '\0';
 
     if (crt != NULL) {
         (void)mbedtls_x509_dn_gets(subject, sizeof(subject), &crt->subject);
         (void)mbedtls_x509_dn_gets(issuer, sizeof(issuer), &crt->issuer);
+        uefi_format_key_id(aki, sizeof(aki), &crt->authority_key_id.keyIdentifier);
         (void)mbedtls_snprintf(
             message, sizeof(message),
-            "depth=%d flags=0x%08lx subject=%s issuer=%s "
+            "depth=%d flags=0x%08lx subject=%s issuer=%s AKI=%s "
             "not_before=%04d-%02d-%02dT%02d:%02d:%02dZ "
             "not_after=%04d-%02d-%02dT%02d:%02d:%02dZ",
-            depth, (unsigned long)cert_flags, subject, issuer,
+            depth, (unsigned long)cert_flags, subject, issuer, aki,
             crt->valid_from.year, crt->valid_from.mon, crt->valid_from.day,
             crt->valid_from.hour, crt->valid_from.min, crt->valid_from.sec,
             crt->valid_to.year, crt->valid_to.mon, crt->valid_to.day,
@@ -95,7 +120,51 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
     }
 
     /*
-     * The Rust callback only copies this line into its RAM diagnostic ring.
+     * For each verified chain certificate, find trust-store certificates
+     * whose subject DN matches its issuer DN. Report their SKIs and whether
+     * the child AKI matches, without modifying verification state.
+     */
+    int issuer_dn_candidates = 0;
+    int aki_matches = 0;
+    if (crt != NULL && session != NULL) {
+        for (mbedtls_x509_crt *root = &session->roots;
+             root != NULL && root->raw.p != NULL; root = root->next) {
+            char root_subject[256];
+            char root_ski[96];
+            (void)mbedtls_x509_dn_gets(root_subject, sizeof(root_subject),
+                                       &root->subject);
+            if (strcmp(issuer, root_subject) != 0) {
+                continue;
+            }
+
+            issuer_dn_candidates++;
+            uefi_format_key_id(root_ski, sizeof(root_ski), &root->subject_key_id);
+            int aki_match =
+                crt->authority_key_id.keyIdentifier.len != 0 &&
+                root->subject_key_id.len == crt->authority_key_id.keyIdentifier.len &&
+                memcmp(root->subject_key_id.p,
+                       crt->authority_key_id.keyIdentifier.p,
+                       root->subject_key_id.len) == 0;
+            if (aki_match) {
+                aki_matches++;
+            }
+
+            (void)mbedtls_snprintf(
+                message, sizeof(message),
+                "issuer candidate subject=%s SKI=%s child-AKI=%s match=%s",
+                root_subject, root_ski, aki, aki_match ? "yes" : "no");
+            uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
+        }
+    }
+
+    (void)mbedtls_snprintf(
+        message, sizeof(message),
+        "issuer lookup: DN candidates=%d AKI/SKI matches=%d",
+        issuer_dn_candidates, aki_matches);
+    uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
+
+    /*
+     * The Rust callback only copies these lines into its RAM diagnostic ring.
      * Never call UEFI console or runtime services from the verifier callback.
      */
     uefi_browser_tls_debug_log(1, "x509-verify", depth, message);
@@ -177,7 +246,7 @@ int uefi_mbedtls_client_new(
 #endif
     mbedtls_ssl_conf_authmode(&session->config, MBEDTLS_SSL_VERIFY_REQUIRED);
     mbedtls_ssl_conf_ca_chain(&session->config, &session->roots, NULL);
-    mbedtls_ssl_conf_verify(&session->config, uefi_mbedtls_verify_observer, NULL);
+    mbedtls_ssl_conf_verify(&session->config, uefi_mbedtls_verify_observer, session);
 
     uefi_browser_tls_log(7, 0);
     ret = mbedtls_ssl_setup(&session->ssl, &session->config);
