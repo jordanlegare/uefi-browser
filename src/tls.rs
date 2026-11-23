@@ -7,21 +7,6 @@ use alloc::ffi::CString;
 use core::ffi::{c_int, c_void};
 use core::marker::PhantomData;
 
-#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-unsafe extern "C" {
-    fn uefi_browser_tls_log(stage: i32, detail: i32);
-}
-
-#[inline]
-fn tls_log(stage: i32, detail: i32) {
-    #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-    unsafe {
-        uefi_browser_tls_log(stage, detail);
-    }
-    #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked)))]
-    let _ = (stage, detail);
-}
-
 pub trait TlsStreamIo {
     /// Write some bytes to the established TCP stream. Implementations block
     /// or poll until progress, EOF, or a bounded timeout.
@@ -124,32 +109,15 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
     pub fn handshake(&mut self) -> Result<(), TlsError> {
         const MAX_HANDSHAKE_STEPS: usize = 64;
 
-        // Start the RAM-only trace before entering the first Mbed TLS step.
-        tls_log(11, 0);
         let mut state = unsafe { uefi_mbedtls_handshake_state(self.raw) };
         let mut completed = false;
 
-        for step in 0..MAX_HANDSHAKE_STEPS {
-            tls_log(54, state);
-            tls_log(50, step as i32);
-
+        for _ in 0..MAX_HANDSHAKE_STEPS {
             let mut complete = 0;
-            let mut next_state = state;
             let result =
-                unsafe { uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut next_state) };
-
-            state = next_state;
-            tls_log(51, state);
+                unsafe { uefi_mbedtls_handshake_step(self.raw, &mut complete, &mut state) };
 
             if result != 0 {
-                let verification = unsafe { uefi_mbedtls_verify_result(self.raw) };
-                if verification != 0 {
-                    // The handshake failed before the normal post-handshake
-                    // verification check; capture the verifier's flags now.
-                    tls_log(42, verification as i32);
-                }
-                tls_log(52, result);
-                tls_log(12, result);
                 return Err(TlsError::Handshake(result));
             }
 
@@ -160,14 +128,9 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
         }
 
         if !completed {
-            // Defensive guard against an unexpected state machine that makes
-            // no terminal progress. Do not spin indefinitely in firmware.
-            tls_log(52, -1);
-            tls_log(12, -1);
             return Err(TlsError::Handshake(-1));
         }
 
-        tls_log(12, 0);
         let verification = unsafe { uefi_mbedtls_verify_result(self.raw) };
         if verification != 0 {
             return Err(TlsError::CertificateVerification(verification));
@@ -229,13 +192,13 @@ unsafe extern "C" fn send_callback<S: TlsStreamIo>(
     let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else {
         return -1;
     };
-    tls_log(34, length as i32);
+
     let bytes = unsafe { core::slice::from_raw_parts(data, length) };
     let result = match stream.send(bytes) {
         Ok(written) if written <= c_int::MAX as usize => written as c_int,
         _ => -1,
     };
-    tls_log(35, result);
+
     result
 }
 
@@ -253,12 +216,12 @@ unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
     let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else {
         return -1;
     };
-    tls_log(36, capacity as i32);
+
     let buffer = unsafe { core::slice::from_raw_parts_mut(output, capacity) };
     let result = match stream.receive(buffer) {
         Ok(read) if read <= c_int::MAX as usize => read as c_int,
         _ => -1,
     };
-    tls_log(37, result);
+
     result
 }
