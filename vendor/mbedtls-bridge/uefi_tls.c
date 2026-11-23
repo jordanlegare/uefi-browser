@@ -9,6 +9,7 @@
 
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
+#include "mbedtls/oid.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/error.h"
 #include "mbedtls/platform.h"
