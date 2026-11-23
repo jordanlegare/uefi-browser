@@ -325,6 +325,12 @@ check_signature:
 
         break;
     }"""
+ 
+if old_parent_loop in text:
+    text = text.replace(old_parent_loop, new_parent_loop, 1)
+elif new_parent_loop not in text:
+    raise SystemExit(f"{x509}: expected trusted-parent search loop not found; refusing patch")
+
 
 old_time = """#if defined(MBEDTLS_HAVE_TIME_DATE)
     if (mbedtls_x509_time_gmtime(mbedtls_time(NULL), &now) != 0) {
