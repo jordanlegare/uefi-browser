@@ -120,8 +120,8 @@ fn tls_debug_record(level: i32, source: &[u8], line: i32, message: &[u8]) {
             && previous.line == line
             && previous.source_len as usize == source.len()
             && previous.message_len as usize == message.len()
-            && previous.source[..source.len()] == *source
-            && previous.message[..message.len()] == *message;
+            && &previous.source[..source.len()] == source
+            && &previous.message[..message.len()] == message;
         if same_as_previous {
             tls_debug_unlock();
             return;
