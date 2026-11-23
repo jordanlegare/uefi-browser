@@ -130,7 +130,7 @@ if debug_decl not in text:
     marker = "extern void uefi_browser_tls_log(int stage, int detail);"
     if marker not in text:
         raise SystemExit(f"{x509}: X.509 diagnostic declaration point not found")
-    text = text.replace(marker, marker + "\\n" + debug_decl, 1)
+    text = text.replace(marker, marker + "\n" + debug_decl, 1)
 
 parent_trace_helper = """static void uefi_x509_parent_trace(
     const mbedtls_x509_crt *child,
