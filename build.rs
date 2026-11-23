@@ -6,6 +6,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=UEFI_MBEDTLS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=UEFI_MBEDTLS_BRIDGE_DIR");
     println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_PATH");
+    println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_SOURCE_DATE");
+    println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_SHA256");
+    println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_CERT_COUNT");
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os != "uefi" {
@@ -80,6 +83,15 @@ fn main() {
         fs::write(&embedded, nul_terminated).expect("failed to stage the NUL-terminated CA bundle");
 
         println!("cargo:rustc-env=UEFI_CA_BUNDLE_FILE={}", embedded.display());
+        for (key, variable) in [
+            ("UEFI_CA_BUNDLE_SOURCE_DATE", "UEFI_CA_BUNDLE_SOURCE_DATE"),
+            ("UEFI_CA_BUNDLE_SHA256", "UEFI_CA_BUNDLE_SHA256"),
+            ("UEFI_CA_BUNDLE_CERT_COUNT", "UEFI_CA_BUNDLE_CERT_COUNT"),
+        ] {
+            if let Ok(value) = env::var(variable) {
+                println!("cargo:rustc-env={key}={value}");
+            }
+        }
         println!("cargo:rustc-cfg=uefi_ca_bundle");
         println!("cargo:rerun-if-changed={}", ca_path.display());
     }
