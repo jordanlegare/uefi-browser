@@ -460,6 +460,92 @@ patch_segment(
     ],
 )
 
+# Add one-shot boundaries around MPI division and modulo. These checkpoints
+# deliberately sit outside all arithmetic loops so a failing build cannot flood
+# the UEFI console.
+patch_segment(
+    bignum,
+    "int mbedtls_mpi_mod_mpi(",
+    "/*\n * Modulo: r = A mod b",
+    [
+        (
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));",
+            "    uefi_browser_tls_log(166, (int) A->n);\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_div_mpi(NULL, R, A, B));\n"
+            "    uefi_browser_tls_log(167, (int) R->n);",
+            "MPI modulo division boundary",
+        ),
+        (
+            "    while (mbedtls_mpi_cmp_int(R, 0) < 0) {\n"
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_add_mpi(R, R, B));\n"
+            "    }",
+            "    while (mbedtls_mpi_cmp_int(R, 0) < 0) {\n"
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_add_mpi(R, R, B));\n"
+            "    }\n"
+            "    uefi_browser_tls_log(168, 0);",
+            "MPI modulo negative correction boundary",
+        ),
+        (
+            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
+            "    uefi_browser_tls_log(169, mbedtls_mpi_cmp_mpi(R, B));\n"
+            "    while (mbedtls_mpi_cmp_mpi(R, B) >= 0) {",
+            "MPI modulo positive correction entry",
+        ),
+        (
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n"
+            "    }",
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, B));\n"
+            "    }\n"
+            "    uefi_browser_tls_log(170, 0);",
+            "MPI modulo positive correction completion",
+        ),
+    ],
+)
+
+patch_segment(
+    bignum,
+    "int mbedtls_mpi_div_mpi(",
+    "/*\n * Division by int:",
+    [
+        (
+            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n",
+            "    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;\n"
+            "    uefi_browser_tls_log(171, (int) A->n);\n",
+            "MPI division entry",
+        ),
+        (
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(&Y, biL * (n - t)));\n",
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(&Y, biL * (n - t)));\n"
+            "    uefi_browser_tls_log(172, (int) (n - t));",
+            "MPI division aligned-divisor boundary",
+        ),
+        (
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &Y));\n"
+            "    }\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_r(&Y, biL * (n - t)));",
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(&X, &X, &Y));\n"
+            "    }\n"
+            "    uefi_browser_tls_log(173, (int) X.n);\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_r(&Y, biL * (n - t)));",
+            "MPI division leading quotient-digit completion",
+        ),
+        (
+            "    for (i = n; i > t; i--) {",
+            "    uefi_browser_tls_log(174, (int) (n - t));\n"
+            "    for (i = n; i > t; i--) {",
+            "MPI division quotient-digit loop entry",
+        ),
+        (
+            "    if (R != NULL) {\n"
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_shift_r(&X, k));",
+            "    uefi_browser_tls_log(175, 0);\n"
+            "    if (R != NULL) {\n"
+            "        MBEDTLS_MPI_CHK(mbedtls_mpi_shift_r(&X, k));",
+            "MPI division quotient-digit loop completion",
+        ),
+    ],
+)
+
 # Keep the underlying MPI arithmetic intact, but remove the temporary
 # division/modulo trace calls from the vendored Mbed TLS source. This also
 # cleans vendor trees that were patched by earlier diagnostic builds.
