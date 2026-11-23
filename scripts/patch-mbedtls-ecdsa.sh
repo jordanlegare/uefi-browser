@@ -216,6 +216,23 @@ patch_segment(
     "/*\n * Verify ECDSA signature of hashed message\n */",
     [
         (
+            "    mbedtls_mpi e, s_inv, u1, u2;\n",
+            "    mbedtls_mpi e, s_inv, u1, u2, mod_tmp;\n",
+            "ECDSA temporary modulo MPI declaration",
+        ),
+        (
+            "    mbedtls_mpi_init(&u1); mbedtls_mpi_init(&u2);\n",
+            "    mbedtls_mpi_init(&u1); mbedtls_mpi_init(&u2);\n"
+            "    mbedtls_mpi_init(&mod_tmp);\n",
+            "ECDSA temporary modulo MPI initialization",
+        ),
+        (
+            "    mbedtls_mpi_free(&u1); mbedtls_mpi_free(&u2);\n",
+            "    mbedtls_mpi_free(&u1); mbedtls_mpi_free(&u2);\n"
+            "    mbedtls_mpi_free(&mod_tmp);\n",
+            "ECDSA temporary modulo MPI cleanup",
+        ),
+        (
             "    mbedtls_mpi *pu1 = &u1, *pu2 = &u2;\n",
             "    mbedtls_mpi *pu1 = &u1, *pu2 = &u2;\n\n"
             "    uefi_browser_tls_log(96, (int) grp->pbits);\n",
@@ -244,9 +261,10 @@ patch_segment(
         (
             "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu1, pu1, &grp->N));",
             "    uefi_browser_tls_log(112, 0);\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu1, pu1, &grp->N));\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(&mod_tmp, pu1, &grp->N));\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(pu1, &mod_tmp));\n"
             "    uefi_browser_tls_log(113, ret);",
-            "ECDSA u1 modular reduction",
+            "ECDSA u1 modular reduction without MPI aliasing",
         ),
         (
             "    MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu2, r, &s_inv));",
@@ -258,9 +276,10 @@ patch_segment(
         (
             "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu2, pu2, &grp->N));",
             "    uefi_browser_tls_log(116, 0);\n"
-            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu2, pu2, &grp->N));\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(&mod_tmp, pu2, &grp->N));\n"
+            "    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(pu2, &mod_tmp));\n"
             "    uefi_browser_tls_log(117, ret);",
-            "ECDSA u2 modular reduction",
+            "ECDSA u2 modular reduction without MPI aliasing",
         ),
         (
             "    MBEDTLS_MPI_CHK(mbedtls_ecp_muladd_restartable(grp,\n"
