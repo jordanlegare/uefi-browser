@@ -9,6 +9,7 @@
 
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
+#include "mbedtls/pk.h"
 #include "mbedtls/error.h"
 #include "mbedtls/platform.h"
 #include "mbedtls/debug.h"
@@ -84,6 +85,28 @@ static void uefi_format_key_id(char *output, size_t output_size,
         output[offset++] = hex[key_id->p[i] & 0x0f];
     }
     output[offset] = '\0';
+}
+
+/*
+ * Compare SubjectPublicKeyInfo DER encodings. This is diagnostic-only:
+ * it does not select a parent or alter certificate verification.
+ * The 2048-byte buffers cover the RSA/ECC public keys used by this trust set.
+ */
+static int uefi_public_keys_equal(const mbedtls_pk_context *a,
+                                  const mbedtls_pk_context *b) {
+    unsigned char a_der[2048];
+    unsigned char b_der[2048];
+    int a_len = mbedtls_pk_write_pubkey_der(a, a_der, sizeof(a_der));
+    int b_len = mbedtls_pk_write_pubkey_der(b, b_der, sizeof(b_der));
+    if (a_len < 0 || b_len < 0) {
+        return -1;
+    }
+    if (a_len != b_len) {
+        return 0;
+    }
+    return memcmp(a_der + sizeof(a_der) - (size_t)a_len,
+                  b_der + sizeof(b_der) - (size_t)b_len,
+                  (size_t)a_len) == 0;
 }
 
 static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
@@ -180,14 +203,17 @@ static int uefi_mbedtls_verify_observer(void *ctx, mbedtls_x509_crt *crt,
                 memcmp(root->subject_key_id.p,
                        crt->authority_key_id.keyIdentifier.p,
                        root->subject_key_id.len) == 0;
+            int public_key_match = uefi_public_keys_equal(&crt->pk, &root->pk);
             if (aki_match) {
                 aki_matches++;
             }
 
             (void)mbedtls_snprintf(
                 message, sizeof(message),
-                "issuer candidate subject=%s SKI=%s child-AKI=%s match=%s",
-                root_subject, root_ski, aki, aki_match ? "yes" : "no");
+                "issuer candidate subject=%s SKI=%s child-AKI=%s aki-match=%s public-key-match=%s",
+                root_subject, root_ski, aki,
+                aki_match ? "yes" : "no",
+                public_key_match < 0 ? "error" : (public_key_match ? "yes" : "no"));
             uefi_browser_tls_debug_log(1, "x509-trust-store", depth, message);
         }
     }
