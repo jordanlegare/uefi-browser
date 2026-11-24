@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use crate::css::{ComputedStyle, DisplayMode, TextAlign};
 use crate::document::{
     Block, BlockKind, Document, FormControl, FormControlKind, InlineRun, InlineStyle, Table,
-    TableCell,
+    TableCell, TermColor,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -83,6 +83,17 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
 
         for line in &mut block_lines {
             line.block_index = Some(block_index);
+            // UEFI text mode uses a black background. Web pages commonly use
+            // near-black foreground colors intended for white browser canvases;
+            // printing those literal colors makes successful pages unreadable.
+            // Keep the terminal's black canvas and promote dark CSS colors to
+            // their bright ANSI equivalents before the firmware renderer sees
+            // them. CSS background fills are intentionally omitted in this
+            // text-mode presentation.
+            for span in &mut line.spans {
+                span.style.foreground = span.style.foreground.map(terminal_text_color);
+                span.style.background = None;
+            }
             apply_alignment(line, local_width, block.style.text_align);
             apply_block_indent(line, indent);
         }
@@ -105,6 +116,19 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
         output.pop();
     }
     output
+}
+
+fn terminal_text_color(color: TermColor) -> TermColor {
+    match color {
+        TermColor::Black | TermColor::DarkGray => TermColor::LightGray,
+        TermColor::DarkRed => TermColor::LightRed,
+        TermColor::DarkGreen => TermColor::LightGreen,
+        TermColor::Brown => TermColor::Yellow,
+        TermColor::DarkBlue => TermColor::LightBlue,
+        TermColor::DarkMagenta => TermColor::LightMagenta,
+        TermColor::DarkCyan => TermColor::LightCyan,
+        bright => bright,
+    }
 }
 
 fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
@@ -836,6 +860,26 @@ pub fn line_for_anchor(document: &Document, lines: &[RenderLine], name: &str) ->
 mod tests {
     use super::*;
     use crate::document::{Block, Document, Link, Table, TableCell, TableRow};
+
+    #[test]
+    fn black_web_text_remains_readable_on_terminal_background() {
+        let base = crate::url::Url::parse("https://example.org/").unwrap();
+        let page = crate::document::parse_html_with_styles(
+            "<!doctype html><html><body><p class=dark>Dark text should remain visible.</p></body></html>",
+            &base,
+            &[".dark{color:#202124;background-color:#ffffff}".to_string()],
+        );
+
+        let lines = layout_document(&page, 80);
+        let span = lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .find(|span| span.text.contains("Dark text"))
+            .expect("paragraph should be rendered");
+
+        assert_eq!(span.style.foreground, Some(TermColor::LightGray));
+        assert_eq!(span.style.background, None);
+    }
 
     #[test]
     fn wraps_to_terminal_width_without_losing_link_metadata() {
