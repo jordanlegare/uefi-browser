@@ -223,7 +223,10 @@ fn absolute_name(hostname: &str) -> Result<String, DnsError> {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
-    use hickory_proto::rr::{Record, rdata::{A, CNAME}};
+    use hickory_proto::rr::{
+        Record,
+        rdata::{A, CNAME},
+    };
 
     struct FixedRandom(u16);
 
