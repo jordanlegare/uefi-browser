@@ -209,7 +209,11 @@ pub fn resolve_aaaa<T: UdpDnsTransport, R: SecureRandom>(
                                 DNS_PORT,
                                 &query,
                                 &mut response,
-                                if timeout_ms == 0 { DEFAULT_TIMEOUT_MS } else { timeout_ms },
+                                if timeout_ms == 0 {
+                                    DEFAULT_TIMEOUT_MS
+                                } else {
+                                    timeout_ms
+                                },
                             )
                             .map_err(map_io_error)?;
                         if tcp_length > response.len() {
