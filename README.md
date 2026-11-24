@@ -2,7 +2,7 @@
 
 A standalone Rust application for x86-64 UEFI firmware, intended to grow into a full terminal web browser in the style of ELinks. It is packaged as a PE32+ EFI application and designed to run before an operating system.
 
-> **Status: CI-built standalone EFI image; runtime firmware/network tests still pending.** The source includes an EFI Simple Network Protocol (SNP) Ethernet adapter, an in-application smoltcp IPv4/DHCP/UDP/TCP stack, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. The wolfSSL 5.9.4 replacement is being integrated on a feature branch; its complete PE32+ x86-64 build is pending CI. It has not yet been boot-tested under OVMF or on physical firmware, and it is not feature-equivalent to ELinks.
+> **Status: wolfSSL replacement in progress; wolfSSL build and runtime firmware/network tests pending.** The source includes an EFI Simple Network Protocol (SNP) Ethernet adapter, an in-application smoltcp IPv4/DHCP/UDP/TCP stack, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. The wolfSSL 5.9.4 replacement is being integrated on a feature branch; its complete PE32+ x86-64 build is pending CI. It has not yet been boot-tested under OVMF or on physical firmware, and it is not feature-equivalent to ELinks.
 
 ## Goals
 
@@ -97,25 +97,25 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | Secure random source abstraction and EFI RNG implementation | Implemented; no weak fallback |
 | Firmware UTC conversion and fail-closed date policy | Implemented; unspecified timezone, DST flags, invalid RTC and implausibly old time are rejected |
 | DNS-to-TCP-to-TLS orchestration | Implemented; hostname is retained for SNI and certificate checks |
-| TCP stream-to-Mbed-TLS callback bridge | Implemented in Rust/C |
+| TCP stream-to-wolfSSL callback bridge | Implemented in Rust/C |
 | wolfSSL 5.9.4 source fetch and archive checksum verification | Implemented |
-| UEFI Boot Services allocator hooks for wolfSSL | Implemented and exercised in the successful static link |
+| UEFI Boot Services allocator hooks for wolfSSL | Implemented; static-link verification pending |
 | wolfSSL platform clock and gmtime hooks | Implemented in C/Rust source and configured for the build |
-| wolfSSL static libraries and PE/COFF link integration | Full cross-build and final EFI link passed in CI |
+| wolfSSL static libraries and PE/COFF link integration | Build and link job added; CI verification pending |
 | Mozilla-derived CA bundle update script | Implemented with checksum verification |
 | Build-time CA bundle embedding | Implemented; bundle asset is generated locally, not committed by default |
 | HTTP/1.1 GET and response parsing | Implemented |
 | Content-Length, chunked and close-delimited response bodies | Implemented with bounded response sizes |
 | Redirect following | Implemented with a hop limit and HTTPS-to-HTTP downgrade rejection |
 | HTTP fetch over smoltcp TCP | Integrated in the browser loop |
-| HTTPS fetch over wolfSSL | Integrated conditionally; requires the static bridge and embedded CA bundle |
+| HTTPS fetch over wolfSSL | Adapter integrated; end-to-end firmware test pending |
 | Terminal navigation loop | Implemented: open URL, links, back, forward, reload, search, help, quit |
 | Reflowing ELinks-style viewport, keyboard link focus and scrolling controls | Not yet implemented |
 | CSS, JavaScript, forms, cookies, bookmarks and downloads | Not implemented |
 | QEMU/OVMF network integration test | Not yet run |
 | EFI image | Produced and uploaded as a CI artifact; OVMF/physical-firmware validation remains pending |
 
-The SNP adapter and smoltcp integration are concrete implementations, not just traits. CI passes Rust formatting, portable-core tests, the x86-64 UEFI target check, wolfSSL 5.9.4 static compilation, UEFI C bridge compilation, final Rust+wolfSSL link, PE/COFF inspection, and EFI artifact upload. SNP driver interoperability, DHCP, DNS, NTP, HTTP, and HTTPS must still be verified under OVMF and on physical hardware.
+The SNP adapter and smoltcp integration are concrete implementations, not just traits. This branch adds a wolfSSL 5.9.4 static cross-build, UEFI C bridge, final EFI link, and PE/COFF verification to CI. Those checks have not yet completed for this branch. SNP driver interoperability, DHCP, DNS, NTP, HTTP, and HTTPS must still be verified under OVMF and on physical hardware.
 
 ## Repository layout
 
@@ -136,7 +136,7 @@ The SNP adapter and smoltcp integration are concrete implementations, not just t
 | src/uefi_memory.rs | UEFI Boot Services pool allocator hooks for wolfSSL |
 | src/ca_bundle.rs | Optional build-time embedded PEM trust bundle |
 | vendor/wolfssl-bridge/uefi_tls.c | wolfSSL client setup, BIO callbacks, handshake and mandatory X.509 verification |
-| vendor/wolfssl-bridge/uefi_platform.c | EFI_RNG entropy provider, UEFI time/gmtime hooks, monotonic-time adapter, and volatile zeroization |
+| vendor/wolfssl-bridge/uefi_platform.c | UEFI AllocatePool allocator, EFI_RNG entropy callback, and validated UEFI time callback |
 | vendor/wolfssl-bridge/uefi_crt.c | Minimal freestanding C string primitives required by wolfSSL without a host CRT |
 | vendor/wolfssl-bridge/include/ | wolfSSL and wolfCrypt UEFI configurations plus freestanding platform headers |
 | scripts/fetch-wolfssl.sh | Downloads and checksum-verifies the pinned wolfSSL source archive |
@@ -279,7 +279,7 @@ dist/EFI/BOOT/BOOTX64.EFI
 
 build.rs also supports manual static-link input through UEFI_WOLFSSL_LIB_DIR, UEFI_WOLFSSL_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
 
-**Historical verification record (22 November 2026):** GitHub Actions run [#44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870) passed the earlier firmware-transport implementation. It is not the artifact for the SNP/smoltcp stack. The full-build job compiled wolfSSL 5.9.4 and the UEFI bridge, linked the standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `553d4c7c5757a921adf53fcddf55bf9f6cb45a15e6618dfc63352ce0fe45d0cb` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
+**Historical verification record (22 November 2026):** GitHub Actions run [#44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870) passed the earlier firmware-transport implementation. It is not the artifact for the SNP/smoltcp stack. The full-build job compiled Mbed TLS 4.3.0 and its UEFI bridge, linked the then-current standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). It does not validate this wolfSSL replacement. The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `553d4c7c5757a921adf53fcddf55bf9f6cb45a15e6618dfc63352ce0fe45d0cb` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
 
 ## Firmware adapter details
 
@@ -299,19 +299,19 @@ At startup, the browser creates an SNP/smoltcp stack and runs its DHCPv4 client.
 
 ### Firmware randomness and time
 
-src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the wolfCrypt C-ABI entropy callback. The TLS stack uses the `WOLFSSL_PSA_DRIVER_GET_ENTROPY` path, not the removed wolfSSL 3.x `wolfssl_ssl_conf_rng` hook. Each wolfCrypt entropy request opens the firmware protocol for the duration of its read; failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
+src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the wolfCrypt C-ABI entropy callback. wolfCrypt uses the `CUSTOM_RAND_GENERATE_BLOCK` hook, which calls the Rust C-ABI adapter. Each entropy request opens EFI_RNG_PROTOCOL for the duration of its read; failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
 
-src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The wolfSSL user configuration and C platform bridge route certificate-time operations through these hooks. The static C bridge and final EFI link pass in CI. Runtime operation against real firmware network drivers is still unverified.
+src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The wolfSSL user configuration and C platform bridge route certificate-time operations through these hooks. The C bridge and final EFI link are part of the new CI job; results are pending. Runtime operation against real firmware network drivers is still unverified.
 
 ### C runtime and wolfSSL platform hooks
 
-The C bridge no longer uses POSIX allocation: TLS session allocations use wolfSSL platform macros backed by uefi_wolfssl_calloc and uefi_wolfssl_free in src/uefi_memory.rs. Those functions use UEFI AllocatePool/FreePool and are valid only while Boot Services remain active.
+The C bridge no longer uses POSIX allocation: TLS allocations use wolfSSL's `XMALLOC_USER` callbacks backed by `uefi_browser_alloc` and `uefi_browser_free` in src/uefi_memory.rs. Those functions use UEFI AllocatePool/FreePool and are valid only while Boot Services remain active.
 
-The custom wolfSSL platform configuration also routes time/gmtime operations through the UEFI Runtime Services callback and a freestanding Gregorian conversion. There is no host socket, libc clock, or firmware TLS dependency in the intended runtime path. The wolfSSL library and C bridge compilation passed in the most recent full-build attempt. Cargo then stopped in build.rs because it incorrectly required a PEM begin marker at byte zero; the official Mozilla bundle includes descriptive comments before the first certificate. The build script now validates bounded PEM marker presence and embeds from the first certificate, and the next CI run must confirm the final EFI link.
+The wolfSSL `USER_TIME`/`XTIME` hook obtains certificate time from the validated UEFI Runtime Services clock. There is no host socket, libc clock, or firmware TLS dependency in the intended runtime path. The full cross-build and final EFI link have not yet been validated for this branch.
 
-### Latest CI image
+### Previous Mbed TLS CI image (historical)
 
-The current CI artifact is the removable-media EFI application. The GitHub artifact expires on 20 February 2027.
+The following artifact is from the previous Mbed TLS implementation. It is historical only and is not a wolfSSL build artifact.
 
 - Workflow: [run #44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870)
 - Artifact: [uefi-browser-x86_64.zip](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086)
@@ -350,8 +350,8 @@ Copying a binary to this path does not guarantee network access. Firmware must e
 - [x] Implement HTTP/1.1 GET, header/status parsing, Content-Length, chunked and close-delimited responses.
 - [x] Implement a keyboard-driven terminal navigation loop with links, history, back/forward, reload and search.
 - [x] Implement bounded redirects and reject HTTPS-to-HTTP redirect downgrade.
-- [x] Run and verify the complete wolfSSL 5.9.4 C cross-build and final PE/COFF link in CI.
-- [x] Build and inspect an EFI binary containing the CA roots and wolfSSL libraries.
+- [ ] Run and verify the complete wolfSSL 5.9.4 C cross-build and final PE/COFF link in CI.
+- [ ] Build and inspect an EFI binary containing the CA roots and wolfSSL libraries.
 - [ ] Run the browser under OVMF with SNP Ethernet and DHCPv4 networking and test real HTTP/HTTPS sites.
 - [ ] Test on multiple physical UEFI implementations and NIC drivers.
 - [ ] Add DNS CNAME/AAAA, DNS-over-TCP fallback, and cache.
@@ -364,19 +364,18 @@ Copying a binary to this path does not guarantee network access. Firmware must e
 
 This is pre-OS code running with firmware privileges. Bugs in parsers, TLS callbacks, allocation, or protocol lifetime handling can crash the machine or compromise the boot chain. Remote content is untrusted. The browser must not execute remote JavaScript in the firmware environment.
 
-The project is not yet release-verified. Do not use it to handle secrets or replace a maintained operating-system browser until the wolfSSL cross-build, final EFI link, CA-bundle review, and real firmware integration tests have passed.
+The project is not yet release-verified. Do not use it to handle secrets or replace a maintained operating-system browser until wolfSSL CI, the final EFI link, CA-bundle review, and real firmware integration tests have passed.
 
 ## References
 
 - [Hickory DNS protocol crate](https://docs.rs/hickory-proto/0.26.3/hickory_proto/)
 - [Hickory protocol feature flags](https://docs.rs/crate/hickory-proto/0.26.3/features)
-- [wolfSSL upstream](https://github.com/Mbed-TLS/wolfssl)
-- [wolfCrypt configuration split in wolfSSL 4.x](https://github.com/Mbed-TLS/wolfCrypt/blob/development/docs/psa-transition.md#compile-time-configuration)
-- [wolfSSL 5.9.4 release](https://github.com/Mbed-TLS/wolfssl/releases/tag/wolfssl-4.3.0)
+- [wolfSSL upstream](https://github.com/wolfSSL/wolfssl)
+- [wolfSSL downloads and release information](https://www.wolfssl.com/download/)
 - [UEFI 2.11 network protocols](https://uefi.org/specs/UEFI/2.11/29_Network_Protocols_ARP_and_DHCP.html)
 - [Rust UEFI crate](https://docs.rs/uefi/)
 - [Rust UEFI target](https://doc.rust-lang.org/rustc/platform-support/unknown-uefi.html)
 
 ## License
 
-The combined browser distribution is licensed under GPLv3 to comply with the selected wolfSSL open-source distribution. wolfSSL's upstream copyright and license notices are retained.
+The combined browser distribution is licensed under GPLv3 to comply with the selected wolfSSL open-source distribution. The GPLv3 text is included in `COPYING`, and wolfSSL's upstream copyright and license notices are retained.
