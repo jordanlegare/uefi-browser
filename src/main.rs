@@ -17,7 +17,7 @@ use uefi_browser::document::{
 };
 use uefi_browser::http::{self, HttpResponse};
 use uefi_browser::network::connect_firmware_url;
-use uefi_browser::persistence::{CachedPage, HistoryEntry, PersistentStore};
+use uefi_browser::persistence::{CachedPage, PersistentStore};
 use uefi_browser::renderer::{self, RenderLine};
 use uefi_browser::uefi_storage::UefiFileStore;
 use uefi_browser::url::{Scheme, Url};
@@ -1917,6 +1917,23 @@ fn run_browser_ui(
                 command = format!("open {}", bookmark.url);
             } else {
                 status = String::from("Bookmark not found, or persistent storage is unavailable");
+                continue;
+            }
+        }
+
+        if let Some(number) = command.strip_prefix("open-history ") {
+            let index = number
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|value| value.checked_sub(1));
+            let entry = storage
+                .as_mut()
+                .and_then(|store| index.and_then(|i| store.history().get(i).cloned()));
+            if let Some(entry) = entry {
+                command = format!("open {}", entry.url);
+            } else {
+                status = String::from("History entry not found, or persistent storage is unavailable");
                 continue;
             }
         }
