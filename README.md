@@ -100,7 +100,7 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | TCP stream-to-wolfSSL callback bridge | Implemented in Rust/C |
 | wolfSSL 5.9.4 source fetch and archive checksum verification | Implemented |
 | UEFI Boot Services allocator hooks for wolfSSL | Implemented; static-link verification pending |
-| wolfSSL platform clock and gmtime hooks | Implemented in C/Rust source and configured for the build |
+| wolfSSL certificate-time hook | Implemented in C/Rust source and configured for the build |
 | wolfSSL static libraries and PE/COFF link integration | Build and link job added; CI verification pending |
 | Mozilla-derived CA bundle update script | Implemented with checksum verification |
 | Build-time CA bundle embedding | Implemented; bundle asset is generated locally, not committed by default |
