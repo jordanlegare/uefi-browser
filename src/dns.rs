@@ -437,9 +437,7 @@ mod tests {
             output[..self.packet.len()].copy_from_slice(&self.packet);
             Ok(self.packet.len())
         }
-    }
 
-    impl UdpDnsTransport for FakeUdp {
         fn exchange_tcp(
             &mut self,
             _resolver: Ipv4Addr,
