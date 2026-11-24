@@ -77,7 +77,7 @@
  * or Windows performance-counter APIs.
  */
 #define WOLFSSL_32BIT_MILLI_TIME
-#define XTIME_MS uefi_wolfssl_time_ms
+#define XTIME_MS(ignored) uefi_wolfssl_time_ms()
 
 #define XSNPRINTF uefi_wolfssl_snprintf
 #define XVSNPRINTF uefi_wolfssl_vsnprintf
