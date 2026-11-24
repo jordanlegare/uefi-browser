@@ -66,12 +66,16 @@ clang $BRIDGE_CFLAGS --target="$COFF_TARGET" \
   -c "$ROOT/vendor/wolfssl-bridge/uefi_platform.c" \
   -o "$BRIDGE_BUILD/uefi_platform.obj"
 clang $BRIDGE_CFLAGS --target="$COFF_TARGET" \
+  -c "$ROOT/vendor/wolfssl-bridge/uefi_date.c" \
+  -o "$BRIDGE_BUILD/uefi_date.obj"
+clang $BRIDGE_CFLAGS --target="$COFF_TARGET" \
   -c "$ROOT/vendor/wolfssl-bridge/uefi_crt.c" \
   -o "$BRIDGE_BUILD/uefi_crt.obj"
 
 llvm-ar rcs "$BRIDGE_BUILD/libuefi_wolfssl_bridge.a" \
   "$BRIDGE_BUILD/uefi_tls.obj" \
   "$BRIDGE_BUILD/uefi_platform.obj" \
+  "$BRIDGE_BUILD/uefi_date.obj" \
   "$BRIDGE_BUILD/uefi_crt.obj"
 
 export UEFI_WOLFSSL_LIB_DIR="$PREFIX/lib"
