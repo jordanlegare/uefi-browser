@@ -383,22 +383,39 @@ fn fetch_response(
                     .ok_or_else(|| String::from("no embedded CA trust bundle"))?;
                 // Keep TLS I/O bounded so an unresponsive peer cannot freeze the firmware UI.
                 connection.peer.stream.set_io_timeout_ms(5_000);
-                uefi::println!("[TLS 1/6] Loading the embedded CA trust bundle and creating a TLS 1.3 client.");
-                uefi::println!("[TLS 2/6] wolfSSL peer verification is mandatory; no certificate-override mode is enabled.");
-                uefi::println!("[TLS 3/6] Binding SNI and certificate identity checks to requested host: {}", url.host);
+                uefi::println!(
+                    "[TLS 1/6] Loading the embedded CA trust bundle and creating a TLS 1.3 client."
+                );
+                uefi::println!(
+                    "[TLS 2/6] wolfSSL peer verification is mandatory; no certificate-override mode is enabled."
+                );
+                uefi::println!(
+                    "[TLS 3/6] Binding SNI and certificate identity checks to requested host: {}",
+                    url.host
+                );
                 // CA parsing and trust-store loading occur during TLS session construction.
                 let mut tls = connection
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
-                uefi::println!("[TLS 4/6] TLS context ready. Starting handshake and certificate-path validation.");
+                uefi::println!(
+                    "[TLS 4/6] TLS context ready. Starting handshake and certificate-path validation."
+                );
                 if let Err(error) = tls.handshake() {
-                    uefi::println!("[TLS 5/6] Handshake did not complete. The site is not trusted and no HTTP request will be sent.");
+                    uefi::println!(
+                        "[TLS 5/6] Handshake did not complete. The site is not trusted and no HTTP request will be sent."
+                    );
                     let observed_chain = tls.peer_chain_sha1();
                     let failing_certificate_der = tls.failing_certificate_der();
-                    let der_status = failing_certificate_der.as_ref()
+                    let der_status = failing_certificate_der
+                        .as_ref()
                         .map(|der| format!("{} bytes captured", der.len()))
-                        .unwrap_or_else(|| String::from("unavailable or above the 16 KiB diagnostic cap"));
-                    uefi::println!("[TLS 6/6] Rejected certificate DER: {}. Closing the original TLS/TCP connection.", der_status);
+                        .unwrap_or_else(|| {
+                            String::from("unavailable or above the 16 KiB diagnostic cap")
+                        });
+                    uefi::println!(
+                        "[TLS 6/6] Rejected certificate DER: {}. Closing the original TLS/TCP connection.",
+                        der_status
+                    );
                     let report = if is_certificate_verification_failure(&error) {
                         drop(tls);
                         drop(connection);
@@ -414,7 +431,9 @@ fn fetch_response(
                     };
                     return Err(report);
                 }
-                uefi::println!("[TLS] Certificate path, validity, and hostname checks passed. HTTPS data may now flow.");
+                uefi::println!(
+                    "[TLS] Certificate path, validity, and hostname checks passed. HTTPS data may now flow."
+                );
                 let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
                 uefi::println!("HTTPS response received ({} bytes).", response.body.len());
@@ -455,7 +474,12 @@ fn describe_tls_failure_with_grc(
     report.push_str("\n\nVERIFICATION TRACE (the original connection remains fail-closed):");
     report.push_str("\n1. The TLS 1.3 client was configured with the embedded CA trust store and the requested hostname as the identity to verify.");
     report.push_str("\n2. wolfSSL processed the peer certificate path. The live console trace identifies each callback depth that passed an individual check; a later failure can still invalidate the path.");
-    if let uefi_browser::tls::TlsError::Handshake { verify_error, verify_depth, .. } = error {
+    if let uefi_browser::tls::TlsError::Handshake {
+        verify_error,
+        verify_depth,
+        ..
+    } = error
+    {
         report.push_str(&format!(
             "\n3. wolfSSL reported X.509 error {} at chain depth {} (depth 0 is the leaf). This is the first failure recorded by the verification callback.",
             verify_error, verify_depth
@@ -496,7 +520,9 @@ fn describe_tls_failure_with_grc(
         "\nQuery: https://www.grc.com/fingerprints.htm?chain={hostname}"
     ));
 
-    uefi::println!("[CHAIN] Original failed session is gone; retrieving an independent reference before comparing fingerprints.");
+    uefi::println!(
+        "[CHAIN] Original failed session is gone; retrieving an independent reference before comparing fingerprints."
+    );
     if let uefi_browser::tls::TlsError::Handshake { verify_depth, .. } = error {
         if *verify_depth >= 0 {
             if let Some(fingerprint) = observed_chain.get(*verify_depth as usize) {
@@ -511,7 +537,9 @@ fn describe_tls_failure_with_grc(
     match fetch_grc_reference_chain(hostname, network) {
         Ok(reference) => {
             let comparison = compare_chains(&reference, observed_chain);
-            uefi::println!("[CHAIN] GRC reference parsed; comparing leaf and non-root peer-chain fingerprints.");
+            uefi::println!(
+                "[CHAIN] GRC reference parsed; comparing leaf and non-root peer-chain fingerprints."
+            );
             if let uefi_browser::tls::TlsError::Handshake { verify_depth, .. } = error {
                 if *verify_depth >= 0 {
                     if let Some(fingerprint) = observed_chain.get(*verify_depth as usize) {
@@ -520,7 +548,12 @@ fn describe_tls_failure_with_grc(
                             .iter()
                             .find(|certificate| &certificate.sha1 == fingerprint)
                         {
-                            uefi::println!("[CHAIN] Culprit identified at depth {}: {} {}.", verify_depth, certificate.role.label(), certificate.name);
+                            uefi::println!(
+                                "[CHAIN] Culprit identified at depth {}: {} {}.",
+                                verify_depth,
+                                certificate.role.label(),
+                                certificate.name
+                            );
                             report.push_str(&format!(
                                 "\nProblematic certificate identified at wolfSSL depth {}: {} {} [{}].",
                                 verify_depth,
@@ -529,7 +562,10 @@ fn describe_tls_failure_with_grc(
                                 format_sha1(fingerprint)
                             ));
                         } else {
-                            uefi::println!("[CHAIN] Culprit fingerprint at depth {} is not present in GRC's reference.", verify_depth);
+                            uefi::println!(
+                                "[CHAIN] Culprit fingerprint at depth {} is not present in GRC's reference.",
+                                verify_depth
+                            );
                             report.push_str(&format!(
                                 "\nProblematic certificate fingerprint at wolfSSL depth {}: {} (not listed in the GRC reference).",
                                 verify_depth,
@@ -631,13 +667,17 @@ fn fetch_grc_reference_chain(
         .map_err(|failure| format!("GRC DNS/TCP connection failed: {:?}", failure.error))?;
     connection.peer.stream.set_io_timeout_ms(5_000);
 
-    uefi::println!("[GRC 3/4] Establishing an independent TLS session with the same CA bundle and mandatory hostname verification.");
+    uefi::println!(
+        "[GRC 3/4] Establishing an independent TLS session with the same CA bundle and mandatory hostname verification."
+    );
     let mut tls = connection
         .start_tls(ca_bundle)
         .map_err(|error| format!("GRC TLS initialization failed: {error:?}"))?;
     tls.handshake()
         .map_err(|error| format!("GRC TLS certificate verification failed: {error:?}"))?;
-    uefi::println!("[GRC 4/4] Reference TLS verified. Fetching and parsing the bounded fingerprint response.");
+    uefi::println!(
+        "[GRC 4/4] Reference TLS verified. Fetching and parsing the bounded fingerprint response."
+    );
 
     let response = http::exchange_get(&mut tls, &reference_url, 128 * 1024)
         .map_err(|error| format!("GRC HTTPS request failed: {error:?}"))?;
