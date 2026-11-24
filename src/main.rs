@@ -19,11 +19,7 @@ const MAX_BODY_BYTES: usize = 256 * 1024;
 const MAX_REDIRECTS: usize = 5;
 const MAX_INPUT_BYTES: usize = 2048;
 
-#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-unsafe extern "C" {
-    fn uefi_mbedtls_link_anchor() -> i32;
-}
-
+#[cfg(all(target_os = "uefi", uefi_wolfssl_linked))]
 struct BrowserPage {
     url: Url,
     status: u16,
@@ -50,7 +46,7 @@ fn main() -> Status {
     uefi::println!("|               standalone x86_64 pre-OS browser               |");
     uefi::println!("+--------------------------------------------------------------+");
     uefi::println!("Rust DNS: Hickory | IP stack: smoltcp over UEFI SNP");
-    uefi::println!("TLS: embedded Mbed TLS | Rendering: UEFI text console");
+    uefi::println!("TLS: embedded wolfSSL | Rendering: UEFI text console");
     uefi::println!("");
     uefi::println!("Initializing SNP Ethernet and smoltcp IPv4/DHCP...");
     let mut network = match uefi_browser::firmware_rng::UefiRandom::open() {
@@ -82,24 +78,26 @@ fn main() -> Status {
     };
     uefi::println!("");
 
-    #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
+    #[cfg(all(target_os = "uefi", uefi_wolfssl_linked))]
     {
         // Touch the allocator and clock exports so their definitions remain
         // reachable for the statically linked C bridge.
-        let allocation = uefi_browser::uefi_memory::uefi_mbedtls_calloc(1, 16);
-        if !allocation.is_null() {
-            uefi_browser::uefi_memory::uefi_mbedtls_free(allocation);
+        // Touch the UEFI allocator exports used by wolfSSL's custom heap hooks.
+        let allocation = uefi_browser::uefi_memory::uefi_browser_alloc(16);
+        let allocator_linked = !allocation.is_null();
+        if allocator_linked {
+            uefi_browser::uefi_memory::uefi_browser_free(allocation);
         }
-        let bridge_linked = unsafe { uefi_mbedtls_link_anchor() } == 0;
-        uefi::println!("Mbed TLS 4.3 static bridge: {}", bridge_linked);
+        let bridge_linked = cfg!(uefi_wolfssl_linked);
+        uefi::println!("wolfSSL 5.9.4 static bridge: {}", bridge_linked);
         uefi::println!(
             "UEFI clock suitable for X.509: {}",
             uefi_browser::firmware_time::uefi_browser_time_unix() >= 0
         );
     }
 
-    #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked)))]
-    uefi::println!("Mbed TLS bridge: unavailable (build with scripts/build-uefi.sh)");
+    #[cfg(not(all(target_os = "uefi", uefi_wolfssl_linked)))]
+    uefi::println!("wolfSSL bridge: unavailable (build with scripts/build-uefi.sh)");
 
     if !uefi_browser::ca_bundle::is_available() {
         uefi::println!("CA roots: not embedded; HTTPS is disabled.");
@@ -329,10 +327,10 @@ fn fetch_response(
     url: &Url,
     network: &mut uefi_browser::snp_network::SnpNetwork,
 ) -> Result<HttpResponse, String> {
-    #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle)))]
+    #[cfg(not(all(target_os = "uefi", uefi_wolfssl_linked, uefi_ca_bundle)))]
     if url.scheme == Scheme::Https {
         return Err(String::from(
-            "HTTPS unavailable: this EFI image needs the linked Mbed TLS bridge and embedded CA bundle",
+            "HTTPS unavailable: this EFI image needs the linked wolfSSL bridge and embedded CA bundle",
         ));
     }
 
@@ -380,7 +378,7 @@ fn fetch_response(
             Ok(response)
         }
         Scheme::Https => {
-            #[cfg(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle))]
+            #[cfg(all(target_os = "uefi", uefi_wolfssl_linked, uefi_ca_bundle))]
             {
                 let ca_bundle = uefi_browser::ca_bundle::pem()
                     .ok_or_else(|| String::from("no embedded CA trust bundle"))?;
@@ -403,11 +401,11 @@ fn fetch_response(
                 Ok(response)
             }
 
-            #[cfg(not(all(target_os = "uefi", uefi_mbedtls_linked, uefi_ca_bundle)))]
+            #[cfg(not(all(target_os = "uefi", uefi_wolfssl_linked, uefi_ca_bundle)))]
             {
                 let _ = connection;
                 Err(String::from(
-                    "HTTPS unavailable: this EFI image has no linked Mbed TLS bridge and embedded CA bundle",
+                    "HTTPS unavailable: this EFI image has no linked wolfSSL bridge and embedded CA bundle",
                 ))
             }
         }
