@@ -45,27 +45,75 @@ impl CertificateSummary {
         out.push_str("X.509 CERTIFICATE FIELD SUMMARY\n");
         out.push_str(&format!("  Version: {}\n", self.version));
         out.push_str(&format!("  Serial number: {}\n", self.serial_number));
-        out.push_str(&format!("  Signature algorithm: {}\n", self.signature_algorithm));
+        out.push_str(&format!(
+            "  Signature algorithm: {}\n",
+            self.signature_algorithm
+        ));
         out.push_str(&format!("  Issuer: {}\n", self.issuer));
         out.push_str(&format!("  Not before: {}\n", self.not_before));
         out.push_str(&format!("  Not after: {}\n", self.not_after));
         out.push_str(&format!("  Subject: {}\n", self.subject));
-        out.push_str(&format!("  Subject public-key algorithm: {}\n", self.public_key_algorithm));
-        out.push_str(&format!("  Subject public-key parameters: {}\n", self.public_key_parameters));
-        out.push_str(&format!("  Subject public-key size: {} bits\n", self.public_key_bits));
-        out.push_str(&format!("  Basic constraints: {}\n", self.basic_constraints));
-        out.push_str(&format!("  Key usage: {}\n", join_or_unavailable(&self.key_usage)));
-        out.push_str(&format!("  Extended key usage: {}\n", join_or_unavailable(&self.extended_key_usage)));
-        out.push_str(&format!("  Subject alternative names: {}\n", join_or_unavailable(&self.subject_alt_names)));
-        out.push_str(&format!("  Subject key identifier: {}\n", self.subject_key_identifier));
-        out.push_str(&format!("  Authority key identifier: {}\n", self.authority_key_identifier));
-        out.push_str(&format!("  Authority certificate issuer: {}\n", self.authority_certificate_issuer));
-        out.push_str(&format!("  Authority certificate serial number: {}\n", self.authority_certificate_serial_number));
+        out.push_str(&format!(
+            "  Subject public-key algorithm: {}\n",
+            self.public_key_algorithm
+        ));
+        out.push_str(&format!(
+            "  Subject public-key parameters: {}\n",
+            self.public_key_parameters
+        ));
+        out.push_str(&format!(
+            "  Subject public-key size: {} bits\n",
+            self.public_key_bits
+        ));
+        out.push_str(&format!(
+            "  Basic constraints: {}\n",
+            self.basic_constraints
+        ));
+        out.push_str(&format!(
+            "  Key usage: {}\n",
+            join_or_unavailable(&self.key_usage)
+        ));
+        out.push_str(&format!(
+            "  Extended key usage: {}\n",
+            join_or_unavailable(&self.extended_key_usage)
+        ));
+        out.push_str(&format!(
+            "  Subject alternative names: {}\n",
+            join_or_unavailable(&self.subject_alt_names)
+        ));
+        out.push_str(&format!(
+            "  Subject key identifier: {}\n",
+            self.subject_key_identifier
+        ));
+        out.push_str(&format!(
+            "  Authority key identifier: {}\n",
+            self.authority_key_identifier
+        ));
+        out.push_str(&format!(
+            "  Authority certificate issuer: {}\n",
+            self.authority_certificate_issuer
+        ));
+        out.push_str(&format!(
+            "  Authority certificate serial number: {}\n",
+            self.authority_certificate_serial_number
+        ));
         out.push_str(&format!("  Issuer unique ID: {}\n", self.issuer_unique_id));
-        out.push_str(&format!("  Subject unique ID: {}\n", self.subject_unique_id));
-        out.push_str(&format!("  Certificate policies: {}\n", join_or_unavailable(&self.certificate_policies)));
-        out.push_str(&format!("  Authority information access: {}\n", join_or_unavailable(&self.authority_info_access)));
-        out.push_str(&format!("  CRL distribution points: {}\n", join_or_unavailable(&self.crl_distribution_points)));
+        out.push_str(&format!(
+            "  Subject unique ID: {}\n",
+            self.subject_unique_id
+        ));
+        out.push_str(&format!(
+            "  Certificate policies: {}\n",
+            join_or_unavailable(&self.certificate_policies)
+        ));
+        out.push_str(&format!(
+            "  Authority information access: {}\n",
+            join_or_unavailable(&self.authority_info_access)
+        ));
+        out.push_str(&format!(
+            "  CRL distribution points: {}\n",
+            join_or_unavailable(&self.crl_distribution_points)
+        ));
         out.push_str("  Extensions (OID and critical flag):\n");
         if self.extensions.is_empty() {
             out.push_str("    unavailable / none present\n");
@@ -74,8 +122,14 @@ impl CertificateSummary {
                 out.push_str(&format!("    - {}\n", extension));
             }
         }
-        out.push_str(&format!("  Signature value: {} bytes\n", self.signature_value_bytes));
-        out.push_str(&format!("  Encoded certificate size: {} bytes\n", self.der_bytes));
+        out.push_str(&format!(
+            "  Signature value: {} bytes\n",
+            self.signature_value_bytes
+        ));
+        out.push_str(&format!(
+            "  Encoded certificate size: {} bytes\n",
+            self.der_bytes
+        ));
         out
     }
 }
@@ -142,7 +196,9 @@ fn oid_text(bytes: &[u8]) -> String {
     let mut subidentifiers = Vec::new();
     let mut value = 0u64;
     for byte in bytes {
-        value = value.saturating_mul(128).saturating_add((byte & 0x7f) as u64);
+        value = value
+            .saturating_mul(128)
+            .saturating_add((byte & 0x7f) as u64);
         if byte & 0x80 == 0 {
             subidentifiers.push(value);
             value = 0;
@@ -275,10 +331,16 @@ fn algorithm(input: &[u8]) -> (String, String) {
         return (String::from("unavailable"), String::from("unavailable"));
     }
     let Some(fields) = children(sequence.value) else {
-        return (String::from("malformed algorithm identifier"), String::from("unavailable"));
+        return (
+            String::from("malformed algorithm identifier"),
+            String::from("unavailable"),
+        );
     };
     let Some(oid) = fields.first().filter(|field| field.tag == 0x06) else {
-        return (String::from("unknown algorithm"), String::from("unavailable"));
+        return (
+            String::from("unknown algorithm"),
+            String::from("unavailable"),
+        );
     };
     let oid = oid_text(oid.value);
     let name = match oid.as_str() {
@@ -299,21 +361,24 @@ fn algorithm(input: &[u8]) -> (String, String) {
         _ => "unrecognized algorithm",
     };
 
-    let parameters = fields.get(1).map(|parameter| {
-        if parameter.tag == 0x06 {
-            let curve = oid_text(parameter.value);
-            match curve.as_str() {
-                "1.2.840.10045.3.1.7" => String::from("prime256v1 / secp256r1"),
-                "1.3.132.0.34" => String::from("secp384r1"),
-                "1.3.132.0.35" => String::from("secp521r1"),
-                _ => format!("OID {curve}"),
+    let parameters = fields
+        .get(1)
+        .map(|parameter| {
+            if parameter.tag == 0x06 {
+                let curve = oid_text(parameter.value);
+                match curve.as_str() {
+                    "1.2.840.10045.3.1.7" => String::from("prime256v1 / secp256r1"),
+                    "1.3.132.0.34" => String::from("secp384r1"),
+                    "1.3.132.0.35" => String::from("secp521r1"),
+                    _ => format!("OID {curve}"),
+                }
+            } else if parameter.tag == 0x05 {
+                String::from("NULL")
+            } else {
+                format!("ASN.1 tag 0x{:02X}", parameter.tag)
             }
-        } else if parameter.tag == 0x05 {
-            String::from("NULL")
-        } else {
-            format!("ASN.1 tag 0x{:02X}", parameter.tag)
-        }
-    }).unwrap_or_else(|| String::from("none"));
+        })
+        .unwrap_or_else(|| String::from("none"));
 
     (format!("{name} (OID {oid})"), parameters)
 }
@@ -366,7 +431,9 @@ fn parse_san(input: &[u8]) -> Vec<String> {
             0x87 if entry.value.len() == 16 => {
                 let mut ip = String::new();
                 for (index, pair) in entry.value.chunks_exact(2).enumerate() {
-                    if index != 0 { ip.push(':'); }
+                    if index != 0 {
+                        ip.push(':');
+                    }
                     ip.push_str(&format!("{:02x}{:02x}", pair[0], pair[1]));
                 }
                 format!("IP: {ip}")
@@ -426,7 +493,10 @@ fn parse_bit_names(input: &[u8], names: &[&str]) -> Vec<String> {
     for (index, name) in names.iter().enumerate() {
         let byte_index = index / 8;
         let bit_index = index % 8;
-        if bits.get(byte_index).is_some_and(|byte| byte & (0x80 >> bit_index) != 0) {
+        if bits
+            .get(byte_index)
+            .is_some_and(|byte| byte & (0x80 >> bit_index) != 0)
+        {
             output.push((*name).to_string());
         }
     }
@@ -435,22 +505,32 @@ fn parse_bit_names(input: &[u8], names: &[&str]) -> Vec<String> {
 
 fn parse_eku(input: &[u8]) -> Vec<String> {
     let mut offset = 0usize;
-    let Some(sequence) = read_tlv(input, &mut offset) else { return Vec::new(); };
-    if sequence.tag != 0x30 { return Vec::new(); }
-    let Some(items) = children(sequence.value) else { return Vec::new(); };
-    items.into_iter().filter(|item| item.tag == 0x06).map(|item| {
-        let oid = oid_text(item.value);
-        let label = match oid.as_str() {
-            "1.3.6.1.5.5.7.3.1" => "serverAuth",
-            "1.3.6.1.5.5.7.3.2" => "clientAuth",
-            "1.3.6.1.5.5.7.3.3" => "codeSigning",
-            "1.3.6.1.5.5.7.3.4" => "emailProtection",
-            "1.3.6.1.5.5.7.3.8" => "timeStamping",
-            "1.3.6.1.5.5.7.3.9" => "OCSPSigning",
-            _ => "unknown EKU",
-        };
-        format!("{label} (OID {oid})")
-    }).collect()
+    let Some(sequence) = read_tlv(input, &mut offset) else {
+        return Vec::new();
+    };
+    if sequence.tag != 0x30 {
+        return Vec::new();
+    }
+    let Some(items) = children(sequence.value) else {
+        return Vec::new();
+    };
+    items
+        .into_iter()
+        .filter(|item| item.tag == 0x06)
+        .map(|item| {
+            let oid = oid_text(item.value);
+            let label = match oid.as_str() {
+                "1.3.6.1.5.5.7.3.1" => "serverAuth",
+                "1.3.6.1.5.5.7.3.2" => "clientAuth",
+                "1.3.6.1.5.5.7.3.3" => "codeSigning",
+                "1.3.6.1.5.5.7.3.4" => "emailProtection",
+                "1.3.6.1.5.5.7.3.8" => "timeStamping",
+                "1.3.6.1.5.5.7.3.9" => "OCSPSigning",
+                _ => "unknown EKU",
+            };
+            format!("{label} (OID {oid})")
+        })
+        .collect()
 }
 
 fn parse_ski(input: &[u8]) -> String {
@@ -464,13 +544,25 @@ fn parse_ski(input: &[u8]) -> String {
 fn parse_aki(input: &[u8]) -> (String, String, String) {
     let mut offset = 0usize;
     let Some(sequence) = read_tlv(input, &mut offset) else {
-        return (String::from("malformed"), String::from("unavailable"), String::from("unavailable"));
+        return (
+            String::from("malformed"),
+            String::from("unavailable"),
+            String::from("unavailable"),
+        );
     };
     if sequence.tag != 0x30 {
-        return (String::from("malformed"), String::from("unavailable"), String::from("unavailable"));
+        return (
+            String::from("malformed"),
+            String::from("unavailable"),
+            String::from("unavailable"),
+        );
     }
     let Some(fields) = children(sequence.value) else {
-        return (String::from("malformed"), String::from("unavailable"), String::from("unavailable"));
+        return (
+            String::from("malformed"),
+            String::from("unavailable"),
+            String::from("unavailable"),
+        );
     };
     let mut key_id = String::from("keyIdentifier not present");
     let mut issuer = String::from("not present");
@@ -488,25 +580,47 @@ fn parse_aki(input: &[u8]) -> (String, String, String) {
 
 fn parse_policies(input: &[u8]) -> Vec<String> {
     let mut offset = 0usize;
-    let Some(sequence) = read_tlv(input, &mut offset) else { return Vec::new(); };
-    if sequence.tag != 0x30 { return Vec::new(); }
-    let Some(items) = children(sequence.value) else { return Vec::new(); };
-    items.into_iter().filter_map(|item| {
-        let fields = children(item.value)?;
-        fields.first().filter(|field| field.tag == 0x06)
-            .map(|oid| oid_text(oid.value))
-    }).take(24).collect()
+    let Some(sequence) = read_tlv(input, &mut offset) else {
+        return Vec::new();
+    };
+    if sequence.tag != 0x30 {
+        return Vec::new();
+    }
+    let Some(items) = children(sequence.value) else {
+        return Vec::new();
+    };
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let fields = children(item.value)?;
+            fields
+                .first()
+                .filter(|field| field.tag == 0x06)
+                .map(|oid| oid_text(oid.value))
+        })
+        .take(24)
+        .collect()
 }
 
 fn parse_aia(input: &[u8]) -> Vec<String> {
     let mut offset = 0usize;
-    let Some(sequence) = read_tlv(input, &mut offset) else { return Vec::new(); };
-    if sequence.tag != 0x30 { return Vec::new(); }
-    let Some(items) = children(sequence.value) else { return Vec::new(); };
+    let Some(sequence) = read_tlv(input, &mut offset) else {
+        return Vec::new();
+    };
+    if sequence.tag != 0x30 {
+        return Vec::new();
+    }
+    let Some(items) = children(sequence.value) else {
+        return Vec::new();
+    };
     let mut output = Vec::new();
     for item in items.into_iter().take(16) {
-        let Some(fields) = children(item.value) else { continue; };
-        if fields.len() < 2 || fields[0].tag != 0x06 { continue; }
+        let Some(fields) = children(item.value) else {
+            continue;
+        };
+        if fields.len() < 2 || fields[0].tag != 0x06 {
+            continue;
+        }
         let method = oid_text(fields[0].value);
         let method_name = match method.as_str() {
             "1.3.6.1.5.5.7.48.1" => "OCSP",
@@ -516,7 +630,10 @@ fn parse_aia(input: &[u8]) -> Vec<String> {
         if fields[1].tag == 0x86 {
             output.push(format!("{method_name}: {}", safe_text(fields[1].value)));
         } else {
-            output.push(format!("{method_name}: location tag 0x{:02X}", fields[1].tag));
+            output.push(format!(
+                "{method_name}: location tag 0x{:02X}",
+                fields[1].tag
+            ));
         }
     }
     output
@@ -526,10 +643,14 @@ fn parse_crl_uris(input: &[u8]) -> Vec<String> {
     // DistributionPoint nesting is variable; recursively collect GeneralName
     // URI values (tag 0x86) without interpreting untrusted text as control codes.
     fn visit(input: &[u8], output: &mut Vec<String>, depth: usize) {
-        if depth > 8 || output.len() >= 16 { return; }
+        if depth > 8 || output.len() >= 16 {
+            return;
+        }
         let mut offset = 0usize;
         while offset < input.len() {
-            let Some(item) = read_tlv(input, &mut offset) else { return; };
+            let Some(item) = read_tlv(input, &mut offset) else {
+                return;
+            };
             if item.tag == 0x86 {
                 output.push(safe_text(item.value));
             } else if item.tag & 0x20 != 0 || item.tag == 0xa0 || item.tag == 0xa1 {
@@ -552,7 +673,8 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
         return Err("certificate is not one complete DER SEQUENCE");
     }
     let outer_fields = children(outer.value).ok_or("malformed Certificate sequence")?;
-    if outer_fields.len() < 3 || outer_fields[0].tag != 0x30
+    if outer_fields.len() < 3
+        || outer_fields[0].tag != 0x30
         || outer_fields[1].tag != 0x30
         || outer_fields[2].tag != 0x03
         || outer_fields[2].value.is_empty()
@@ -562,7 +684,11 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
 
     let tbs = outer_fields[0];
     let (outer_signature_algorithm, _) = algorithm_from_tlv(outer_fields[1]);
-    let signature_bytes = if outer_fields[2].tag == 0x03 { outer_fields[2].value.len().saturating_sub(1) } else { 0 };
+    let signature_bytes = if outer_fields[2].tag == 0x03 {
+        outer_fields[2].value.len().saturating_sub(1)
+    } else {
+        0
+    };
 
     let tbs_fields = children(tbs.value).ok_or("malformed TBSCertificate sequence")?;
     let mut index = 0usize;
@@ -584,7 +710,9 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
     }
 
     let serial = *tbs_fields.get(index).ok_or("missing serial number")?;
-    if serial.tag != 0x02 { return Err("invalid serial number field"); }
+    if serial.tag != 0x02 {
+        return Err("invalid serial number field");
+    }
     index += 1;
     let tbs_signature = *tbs_fields.get(index).ok_or("missing signature algorithm")?;
     index += 1;
@@ -594,7 +722,9 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
     index += 1;
     let subject = *tbs_fields.get(index).ok_or("missing subject")?;
     index += 1;
-    let spki = *tbs_fields.get(index).ok_or("missing SubjectPublicKeyInfo")?;
+    let spki = *tbs_fields
+        .get(index)
+        .ok_or("missing SubjectPublicKeyInfo")?;
 
     if issuer.tag != 0x30 || subject.tag != 0x30 || validity.tag != 0x30 || spki.tag != 0x30 {
         return Err("invalid X.509 field structure");
@@ -619,8 +749,11 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
         return Err("SubjectPublicKeyInfo is missing its BIT STRING");
     }
     let public_key_algorithm_field = *spki_fields.first().ok_or("missing public key algorithm")?;
-    let (public_key_algorithm, public_key_parameters) = algorithm_from_tlv(public_key_algorithm_field);
-    let public_key_bits = spki_fields.get(1).filter(|field| field.tag == 0x03)
+    let (public_key_algorithm, public_key_parameters) =
+        algorithm_from_tlv(public_key_algorithm_field);
+    let public_key_bits = spki_fields
+        .get(1)
+        .filter(|field| field.tag == 0x03)
         .map(|bits| {
             let encoded_bits = bits.value.len().saturating_sub(1).saturating_mul(8);
             encoded_bits.saturating_sub(bits.value.first().copied().unwrap_or(0) as usize)
@@ -670,14 +803,22 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
             _ => continue,
         }
         let mut explicit_offset = 0usize;
-        let extension_sequence = read_tlv(field.value, &mut explicit_offset)
-            .ok_or("malformed extensions wrapper")?;
-        if extension_sequence.tag != 0x30 { return Err("extensions are not a SEQUENCE"); }
+        let extension_sequence =
+            read_tlv(field.value, &mut explicit_offset).ok_or("malformed extensions wrapper")?;
+        if extension_sequence.tag != 0x30 {
+            return Err("extensions are not a SEQUENCE");
+        }
         let extension_fields = children(extension_sequence.value).ok_or("malformed extensions")?;
         for extension in extension_fields.into_iter().take(48) {
-            if extension.tag != 0x30 { continue; }
-            let Some(parts) = children(extension.value) else { continue; };
-            if parts.len() < 2 || parts[0].tag != 0x06 { continue; }
+            if extension.tag != 0x30 {
+                continue;
+            }
+            let Some(parts) = children(extension.value) else {
+                continue;
+            };
+            if parts.len() < 2 || parts[0].tag != 0x06 {
+                continue;
+            }
             let oid = oid_text(parts[0].value);
             let mut critical = false;
             let mut value_index = 1usize;
@@ -686,18 +827,33 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
                 value_index += 1;
             }
             let Some(value) = parts.get(value_index).filter(|part| part.tag == 0x04) else {
-                summary.extensions.push(format!("{oid}, critical={critical}, value unavailable"));
+                summary
+                    .extensions
+                    .push(format!("{oid}, critical={critical}, value unavailable"));
                 continue;
             };
-            summary.extensions.push(format!("{oid}, critical={critical}"));
+            summary
+                .extensions
+                .push(format!("{oid}, critical={critical}"));
             match oid.as_str() {
                 "2.5.29.17" => summary.subject_alt_names = parse_san(value.value),
                 "2.5.29.19" => summary.basic_constraints = parse_basic_constraints(value.value),
-                "2.5.29.15" => summary.key_usage = parse_bit_names(value.value, &[
-                    "digitalSignature", "contentCommitment", "keyEncipherment",
-                    "dataEncipherment", "keyAgreement", "keyCertSign", "cRLSign",
-                    "encipherOnly", "decipherOnly",
-                ]),
+                "2.5.29.15" => {
+                    summary.key_usage = parse_bit_names(
+                        value.value,
+                        &[
+                            "digitalSignature",
+                            "contentCommitment",
+                            "keyEncipherment",
+                            "dataEncipherment",
+                            "keyAgreement",
+                            "keyCertSign",
+                            "cRLSign",
+                            "encipherOnly",
+                            "decipherOnly",
+                        ],
+                    )
+                }
                 "2.5.29.37" => summary.extended_key_usage = parse_eku(value.value),
                 "2.5.29.14" => summary.subject_key_identifier = parse_ski(value.value),
                 "2.5.29.35" => {
@@ -705,7 +861,7 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
                     summary.authority_key_identifier = key_id;
                     summary.authority_certificate_issuer = issuer;
                     summary.authority_certificate_serial_number = serial;
-                },
+                }
                 "2.5.29.32" => summary.certificate_policies = parse_policies(value.value),
                 "1.3.6.1.5.5.7.1.1" => summary.authority_info_access = parse_aia(value.value),
                 "2.5.29.31" => summary.crl_distribution_points = parse_crl_uris(value.value),
@@ -729,7 +885,10 @@ fn algorithm_from_tlv(field: Tlv<'_>) -> (String, String) {
         encoded.push(0x81);
         encoded.push(length as u8);
     } else {
-        return (String::from("oversized algorithm identifier"), String::from("unavailable"));
+        return (
+            String::from("oversized algorithm identifier"),
+            String::from("unavailable"),
+        );
     }
     encoded.extend_from_slice(field.value);
     algorithm(&encoded)
@@ -765,18 +924,18 @@ mod tests {
         let issuer = sequence(&[tlv(0x31, &attribute)]);
         let subject = issuer.clone();
 
-        let algorithm = sequence(&[tlv(0x06, &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01]), tlv(0x05, &[])]);
-        let validity = sequence(&[
-            tlv(0x17, b"260101000000Z"),
-            tlv(0x17, b"270101000000Z"),
+        let algorithm = sequence(&[
+            tlv(
+                0x06,
+                &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+            ),
+            tlv(0x05, &[]),
         ]);
+        let validity = sequence(&[tlv(0x17, b"260101000000Z"), tlv(0x17, b"270101000000Z")]);
         let spki = sequence(&[algorithm.clone(), tlv(0x03, &[0, 0xaa, 0xbb, 0xcc])]);
 
         let san_value = sequence(&[tlv(0x82, b"example.test")]);
-        let san_ext = sequence(&[
-            tlv(0x06, &[0x55, 0x1d, 0x11]),
-            tlv(0x04, &san_value),
-        ]);
+        let san_ext = sequence(&[tlv(0x06, &[0x55, 0x1d, 0x11]), tlv(0x04, &san_value)]);
         let extensions = tlv(0xa3, &sequence(&[san_ext]));
         let tbs = sequence(&[
             tlv(0xa0, &tlv(0x02, &[2])),
