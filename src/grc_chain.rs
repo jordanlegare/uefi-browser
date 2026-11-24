@@ -120,9 +120,9 @@ pub fn parse_grc_chain_text(
     let hostname_found = heading_tail
         .split_whitespace()
         .take(12)
-        .map(|token| token.trim_matches(|ch: char| {
-            matches!(ch, ':' | ',' | ';' | '(' | ')' | '[' | ']')
-        }))
+        .map(|token| {
+            token.trim_matches(|ch: char| matches!(ch, ':' | ',' | ';' | '(' | ')' | '[' | ']'))
+        })
         .any(|token| token.eq_ignore_ascii_case(expected_hostname));
 
     if !hostname_found {
@@ -152,7 +152,9 @@ pub fn parse_grc_chain_text(
             let name_in_line = line[..start].trim();
             let name = if name_in_line.is_empty()
                 || name_in_line.eq_ignore_ascii_case("certificate identification")
-                || name_in_line.to_ascii_lowercase().contains("sha1 fingerprint")
+                || name_in_line
+                    .to_ascii_lowercase()
+                    .contains("sha1 fingerprint")
             {
                 previous_text.trim()
             } else {
@@ -169,7 +171,9 @@ pub fn parse_grc_chain_text(
                 name,
                 sha1: fingerprint,
             });
-        } else if !line.to_ascii_lowercase().contains("certificate identification")
+        } else if !line
+            .to_ascii_lowercase()
+            .contains("certificate identification")
             && !line.to_ascii_lowercase().contains("sha1 fingerprint")
             && !line.to_ascii_lowercase().contains("chain of trust for")
             && !line.eq_ignore_ascii_case(expected_hostname)
@@ -200,7 +204,9 @@ pub fn compare_chains(
     let mut unexpected_local = Vec::new();
 
     for certificate in &reference.certificates {
-        let found = local_depth_order.iter().any(|local| local == &certificate.sha1);
+        let found = local_depth_order
+            .iter()
+            .any(|local| local == &certificate.sha1);
         if found {
             matched.push(certificate.clone());
         } else if certificate.role != CertificateRole::Root {
