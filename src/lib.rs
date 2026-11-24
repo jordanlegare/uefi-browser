@@ -10,6 +10,7 @@ pub mod http;
 pub mod network;
 pub mod tls;
 pub mod url;
+pub mod x509_summary;
 
 #[cfg(target_os = "uefi")]
 pub mod ca_bundle;
