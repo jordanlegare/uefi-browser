@@ -80,7 +80,9 @@ export UEFI_WOLFSSL_BRIDGE_DIR="$BRIDGE_BUILD"
 bash "$ROOT/scripts/update-ca-bundle.sh"
 if [[ -f "$ROOT/assets/cacert.pem" ]]; then
   source "$ROOT/scripts/check-ca-bundle.sh"
-  export UEFI_CA_BUNDLE_PATH="$ROOT/assets/cacert.pem"
+  FILTERED_CA_BUNDLE="$ROOT/build/cacert-uefi.pem"
+  bash "$ROOT/scripts/filter-ca-bundle.sh" "$ROOT/assets/cacert.pem" "$FILTERED_CA_BUNDLE"
+  export UEFI_CA_BUNDLE_PATH="$FILTERED_CA_BUNDLE"
 else
   echo "CA bundle not found: run scripts/update-ca-bundle.sh to prepare HTTPS trust roots." >&2
   exit 1
