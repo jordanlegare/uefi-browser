@@ -31,15 +31,15 @@ static int is_ipv4_literal(const char *hostname)
     unsigned int dots = 0;
     const unsigned char *cursor = (const unsigned char *)hostname;
 
-    if (hostname == NULL || *hostname == '\\0') return 0;
+    if (hostname == NULL || *hostname == '\0') return 0;
     for (;;) {
         if (*cursor >= '0' && *cursor <= '9') {
             octet = octet * 10U + (unsigned int)(*cursor - '0');
             if (++digits > 3 || octet > 255U) return 0;
-        } else if (*cursor == '.' || *cursor == '\\0') {
+        } else if (*cursor == '.' || *cursor == '\0') {
             if (digits == 0) return 0;
             ++dots;
-            if (*cursor == '\\0') break;
+            if (*cursor == '\0') break;
             octet = 0;
             digits = 0;
         } else {
