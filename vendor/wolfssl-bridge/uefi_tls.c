@@ -85,11 +85,6 @@ static void uefi_record_peer_certificate(WOLFSSL_X509_STORE_CTX *store)
     der = wolfSSL_X509_get_der(certificate, &der_length);
     if (der == NULL || der_length <= 0) return;
 
-    if ((uefi_peer_chain_reported_mask & (1U << (unsigned int)depth)) == 0U) {
-        uefi_peer_chain_reported_mask |= (1U << (unsigned int)depth);
-        if (uefi_progress_callback != NULL) uefi_progress_callback(1, depth, 0);
-    }
-
     if (wc_InitSha(&sha) != 0) return;
     if (wc_ShaUpdate(&sha, der, (word32)der_length) == 0 &&
         wc_ShaFinal(&sha, uefi_peer_chain_sha1[depth]) == 0) {
@@ -104,8 +99,17 @@ static void uefi_record_peer_certificate(WOLFSSL_X509_STORE_CTX *store)
 static int uefi_verify_diagnostic_callback(int preverify_ok,
                                            WOLFSSL_X509_STORE_CTX *store)
 {
-    /* Collect the verified path by depth, including successful validations. */
+    /* Collect path fingerprints without changing wolfSSL's verification result. */
     uefi_record_peer_certificate(store);
+
+    if (preverify_ok && store != NULL) {
+        int depth = wolfSSL_X509_STORE_CTX_get_error_depth(store);
+        if (depth >= 0 && depth < UEFI_MAX_PEER_CHAIN_CERTS &&
+            (uefi_peer_chain_reported_mask & (1U << (unsigned int)depth)) == 0U) {
+            uefi_peer_chain_reported_mask |= (1U << (unsigned int)depth);
+            if (uefi_progress_callback != NULL) uefi_progress_callback(1, depth, 0);
+        }
+    }
 
     if (!preverify_ok && store != NULL && uefi_last_verify_error == 0) {
         WOLFSSL_X509 *certificate;
