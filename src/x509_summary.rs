@@ -267,18 +267,21 @@ fn oid_label(oid: &str) -> &'static str {
 }
 
 fn parse_name(input: &[u8]) -> String {
-    let mut offset = 0usize;
-    let Some(sequence) = read_tlv(input, &mut offset) else {
-        return String::from("unavailable");
+    // Certificate issuer/subject fields arrive as the contents of a Name
+    // SEQUENCE, while GeneralName.directoryName carries the SEQUENCE wrapper.
+    // Accept both representations without relaxing DER bounds checking.
+    let mut outer_offset = 0usize;
+    let name_content = match read_tlv(input, &mut outer_offset) {
+        Some(sequence) if sequence.tag == 0x30 && outer_offset == input.len() => {
+            sequence.value
+        }
+        _ => input,
     };
-    if sequence.tag != 0x30 {
-        return String::from("unavailable");
-    }
 
     let mut parts = Vec::new();
     let mut set_offset = 0usize;
-    while set_offset < sequence.value.len() {
-        let Some(set) = read_tlv(sequence.value, &mut set_offset) else {
+    while set_offset < name_content.len() {
+        let Some(set) = read_tlv(name_content, &mut set_offset) else {
             return String::from("malformed distinguished name");
         };
         if set.tag != 0x31 {
