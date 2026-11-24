@@ -652,14 +652,7 @@ impl DocumentBuilder<'_> {
         // Traverse the form's actual DOM subtree so labels, explanatory text,
         // block structure and widgets retain their source order in the page.
         let mut next_control = 0usize;
-        self.emit_form_flow(
-            node,
-            style,
-            index,
-            &control_nodes,
-            &mut next_control,
-            0,
-        );
+        self.emit_form_flow(node, style, index, &control_nodes, &mut next_control, 0);
     }
 
     fn emit_form_flow(
@@ -712,10 +705,8 @@ impl DocumentBuilder<'_> {
                     if tag == "br" {
                         push_run(&mut inline, "\n", inline_style(&child_style), None);
                     } else if is_inline_tag(tag) || child_style.display == DisplayMode::Inline {
-                        let contains_later_control = control_nodes
-                            .iter()
-                            .skip(*next_control)
-                            .any(|control| {
+                        let contains_later_control =
+                            control_nodes.iter().skip(*next_control).any(|control| {
                                 *control == child || self.dom.ancestors(*control).contains(&child)
                             });
                         if contains_later_control {
@@ -1245,23 +1236,47 @@ mod tests {
             "<form action=/search><p>Before <label for=q>Query</label><input id=q name=q value=uefi> after</p><p>More text</p><button type=submit name=go value=1>Search</button></form>",
             &base,
         );
-        let first_text = page.blocks.iter().position(|block| {
-            block.runs.iter().any(|run| run.text.contains("Before"))
-        }).unwrap();
-        let input = page.blocks.iter().position(|block| matches!(
-            &block.kind,
-            BlockKind::FormControl { form_index: 0, control_index: 0 }
-        )).unwrap();
-        let after_text = page.blocks.iter().position(|block| {
-            block.runs.iter().any(|run| run.text.contains("after"))
-        }).unwrap();
-        let more_text = page.blocks.iter().position(|block| {
-            block.runs.iter().any(|run| run.text.contains("More text"))
-        }).unwrap();
-        let submit = page.blocks.iter().position(|block| matches!(
-            &block.kind,
-            BlockKind::FormControl { form_index: 0, control_index: 1 }
-        )).unwrap();
+        let first_text = page
+            .blocks
+            .iter()
+            .position(|block| block.runs.iter().any(|run| run.text.contains("Before")))
+            .unwrap();
+        let input = page
+            .blocks
+            .iter()
+            .position(|block| {
+                matches!(
+                    &block.kind,
+                    BlockKind::FormControl {
+                        form_index: 0,
+                        control_index: 0
+                    }
+                )
+            })
+            .unwrap();
+        let after_text = page
+            .blocks
+            .iter()
+            .position(|block| block.runs.iter().any(|run| run.text.contains("after")))
+            .unwrap();
+        let more_text = page
+            .blocks
+            .iter()
+            .position(|block| block.runs.iter().any(|run| run.text.contains("More text")))
+            .unwrap();
+        let submit = page
+            .blocks
+            .iter()
+            .position(|block| {
+                matches!(
+                    &block.kind,
+                    BlockKind::FormControl {
+                        form_index: 0,
+                        control_index: 1
+                    }
+                )
+            })
+            .unwrap();
 
         assert!(first_text < input);
         assert!(input < after_text);
