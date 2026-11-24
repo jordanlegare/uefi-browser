@@ -469,6 +469,14 @@ fn describe_tls_failure_with_grc(
             ));
             match uefi_browser::x509_summary::summarize_certificate(der) {
                 Ok(summary) => {
+                    report.push_str(&format!(
+                        "\nCULPRIT IDENTIFICATION: wolfSSL rejected the certificate at the reported depth. Subject: {}; Issuer: {}; Serial: {}.",
+                        summary.subject, summary.issuer, summary.serial_number
+                    ));
+                    uefi::println!(
+                        "[CHAIN] Rejected certificate identified from its captured DER. Subject: {}; Issuer: {}.",
+                        summary.subject, summary.issuer
+                    );
                     report.push_str("\n\nREJECTED CERTIFICATE — FIELD-BY-FIELD SUMMARY\n");
                     report.push_str(&summary.render());
                 }
