@@ -995,6 +995,60 @@ mod tests {
     }
 
     #[test]
+    fn table_rowspan_reserves_columns_and_draws_merged_cell() {
+        let table = Table {
+            rows: alloc::vec![
+                TableRow {
+                    header: false,
+                    cells: alloc::vec![
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "Shared".to_string(),
+                                style: InlineStyle::default(),
+                                link: None,
+                            }],
+                            colspan: 1,
+                            rowspan: 2,
+                            style: ComputedStyle::default(),
+                        },
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "Top".to_string(),
+                                style: InlineStyle::default(),
+                                link: None,
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            style: ComputedStyle::default(),
+                        },
+                    ],
+                },
+                TableRow {
+                    header: false,
+                    cells: alloc::vec![TableCell {
+                        runs: alloc::vec![InlineRun {
+                            text: "Lower".to_string(),
+                            style: InlineStyle::default(),
+                            link: None,
+                        }],
+                        colspan: 1,
+                        rowspan: 1,
+                        style: ComputedStyle::default(),
+                    }],
+                },
+            ],
+        };
+        let lines = layout_table(&table, 40);
+        let rendered = lines.iter().map(RenderLine::plain_text).collect::<Vec<_>>().join("\n");
+        assert!(rendered.contains("Shared"));
+        assert!(rendered.contains("Top"));
+        assert!(rendered.contains("Lower"));
+        assert!(lines.iter().all(|line| line.width <= 40));
+        let lower = lines.iter().find(|line| line.plain_text().contains("Lower")).unwrap();
+        assert!(lower.plain_text().find("Lower").unwrap() > lower.plain_text().find("Shared").unwrap_or(0));
+    }
+
+    #[test]
     fn search_returns_matching_rendered_line() {
         let document = Document::from_plain("Example", "first line\nsecond match\nthird line");
         let lines = layout_document(&document, 80);
