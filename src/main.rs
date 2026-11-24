@@ -488,7 +488,18 @@ fn describe_tls_failure_with_grc(
         "\nQuery: https://www.grc.com/fingerprints.htm?chain={hostname}"
     ));
 
-    uefi::println!("[CHAIN] Comparing the captured peer fingerprints with the independently retrieved reference.");
+    uefi::println!("[CHAIN] Original failed session is gone; retrieving an independent reference before comparing fingerprints.");
+    if let uefi_browser::tls::TlsError::Handshake { verify_depth, .. } = error {
+        if *verify_depth >= 0 {
+            if let Some(fingerprint) = observed_chain.get(*verify_depth as usize) {
+                report.push_str(&format!(
+                    "\\nRejected certificate SHA-1 (GRC comparison format): {}",
+                    format_sha1(fingerprint)
+                ));
+            }
+        }
+    }
+
     match fetch_grc_reference_chain(hostname, network) {
         Ok(reference) => {
             let comparison = compare_chains(&reference, observed_chain);
