@@ -104,7 +104,11 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
 
     pub fn read(&mut self, output: &mut [u8]) -> Result<usize, TlsError> {
         let result = unsafe { uefi_wolfssl_read(self.raw, output.as_mut_ptr(), output.len()) };
-        if result < 0 { Err(TlsError::Read(result)) } else { Ok(result as usize) }
+        if result < 0 {
+            Err(TlsError::Read(result))
+        } else {
+            Ok(result as usize)
+        }
     }
 
     pub fn write(&mut self, input: &[u8]) -> Result<usize, TlsError> {
@@ -112,19 +116,30 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
             return Err(TlsError::Write(-1));
         }
         let result = unsafe { uefi_wolfssl_write(self.raw, input.as_ptr(), input.len()) };
-        if result < 0 { Err(TlsError::Write(result)) } else { Ok(result as usize) }
+        if result < 0 {
+            Err(TlsError::Write(result))
+        } else {
+            Ok(result as usize)
+        }
     }
 }
 
 impl<S: TlsStreamIo> TlsStreamIo for TlsConnection<'_, S> {
-    fn send(&mut self, bytes: &[u8]) -> Result<usize, ()> { self.write(bytes).map_err(|_| ()) }
-    fn receive(&mut self, output: &mut [u8]) -> Result<usize, ()> { self.read(output).map_err(|_| ()) }
+    fn send(&mut self, bytes: &[u8]) -> Result<usize, ()> {
+        self.write(bytes).map_err(|_| ())
+    }
+
+    fn receive(&mut self, output: &mut [u8]) -> Result<usize, ()> {
+        self.read(output).map_err(|_| ())
+    }
 }
 
 impl<S: TlsStreamIo> Drop for TlsConnection<'_, S> {
     fn drop(&mut self) {
         if !self.raw.is_null() {
-            unsafe { uefi_wolfssl_client_free(self.raw) };
+            unsafe {
+                uefi_wolfssl_client_free(self.raw);
+            }
             self.raw = core::ptr::null_mut();
         }
     }
@@ -136,8 +151,12 @@ unsafe extern "C" fn send_callback<S: TlsStreamIo>(
     if context.is_null() || (data.is_null() && length != 0) || length > c_int::MAX as usize {
         return -1;
     }
-    if length == 0 { return 0; }
-    let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else { return -1; };
+    if length == 0 {
+        return 0;
+    }
+    let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else {
+        return -1;
+    };
     let bytes = unsafe { core::slice::from_raw_parts(data, length) };
     match stream.send(bytes) {
         Ok(written) if written <= c_int::MAX as usize => written as c_int,
@@ -151,7 +170,9 @@ unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
     if context.is_null() || (output.is_null() && capacity != 0) || capacity > c_int::MAX as usize {
         return -1;
     }
-    if capacity == 0 { return 0; }
+    if capacity == 0 {
+        return 0;
+    }
     let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else { return -1; };
     let buffer = unsafe { core::slice::from_raw_parts_mut(output, capacity) };
     match stream.receive(buffer) {
