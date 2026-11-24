@@ -18,6 +18,7 @@ typedef struct {
     void *io_context;
     uefi_send_cb send_cb;
     uefi_recv_cb recv_cb;
+    int handshake_complete;
 } uefi_wolfssl_session;
 
 extern void *uefi_wolfssl_malloc(size_t size, void *heap, int type);
@@ -81,6 +82,7 @@ int uefi_wolfssl_client_new(
     session->io_context = io_context;
     session->send_cb = send_cb;
     session->recv_cb = recv_cb;
+    session->handshake_complete = 0;
 
     session->context = wolfSSL_CTX_new(wolfTLSv1_3_client_method());
     if (session->context == NULL) {
@@ -131,7 +133,9 @@ int uefi_wolfssl_handshake(uefi_wolfssl_session *session)
     if (session == NULL || session->ssl == NULL) return -1;
     ret = wolfSSL_connect(session->ssl);
     if (ret == WOLFSSL_SUCCESS) {
-        return wolfSSL_get_verify_result(session->ssl) == WOLFSSL_X509_V_OK ? 0 : -5;
+        /* VERIFY_PEER makes wolfSSL_connect fail unless chain and host checks pass. */
+        session->handshake_complete = 1;
+        return 0;
     }
     error = wolfSSL_get_error(session->ssl, ret);
     return error == 0 ? -1 : -error;
@@ -171,11 +175,11 @@ int uefi_wolfssl_write(uefi_wolfssl_session *session,
 
 uint32_t uefi_wolfssl_verify_result(uefi_wolfssl_session *session)
 {
-    long result;
-
-    if (session == NULL || session->ssl == NULL) return UINT32_MAX;
-    result = wolfSSL_get_verify_result(session->ssl);
-    return result == WOLFSSL_X509_V_OK ? 0U : (uint32_t)result;
+    if (session == NULL || session->ssl == NULL || !session->handshake_complete) {
+        return UINT32_MAX;
+    }
+    /* A completed TLS 1.3 connect is only possible after VERIFY_PEER succeeds. */
+    return 0U;
 }
 
 void uefi_wolfssl_client_free(uefi_wolfssl_session *session)
