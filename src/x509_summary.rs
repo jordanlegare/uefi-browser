@@ -26,6 +26,10 @@ pub struct CertificateSummary {
     pub subject_alt_names: Vec<String>,
     pub subject_key_identifier: String,
     pub authority_key_identifier: String,
+    pub authority_certificate_issuer: String,
+    pub authority_certificate_serial_number: String,
+    pub issuer_unique_id: String,
+    pub subject_unique_id: String,
     pub certificate_policies: Vec<String>,
     pub authority_info_access: Vec<String>,
     pub crl_distribution_points: Vec<String>,
@@ -55,6 +59,10 @@ impl CertificateSummary {
         out.push_str(&format!("  Subject alternative names: {}\n", join_or_unavailable(&self.subject_alt_names)));
         out.push_str(&format!("  Subject key identifier: {}\n", self.subject_key_identifier));
         out.push_str(&format!("  Authority key identifier: {}\n", self.authority_key_identifier));
+        out.push_str(&format!("  Authority certificate issuer: {}\n", self.authority_certificate_issuer));
+        out.push_str(&format!("  Authority certificate serial number: {}\n", self.authority_certificate_serial_number));
+        out.push_str(&format!("  Issuer unique ID: {}\n", self.issuer_unique_id));
+        out.push_str(&format!("  Subject unique ID: {}\n", self.subject_unique_id));
         out.push_str(&format!("  Certificate policies: {}\n", join_or_unavailable(&self.certificate_policies)));
         out.push_str(&format!("  Authority information access: {}\n", join_or_unavailable(&self.authority_info_access)));
         out.push_str(&format!("  CRL distribution points: {}\n", join_or_unavailable(&self.crl_distribution_points)));
@@ -235,7 +243,12 @@ fn parse_name(input: &[u8]) -> String {
             }
             let oid = oid_text(fields[0].value);
             let value = safe_text(fields[1].value);
-            parts.push(format!("{}={}", oid_label(&oid), value));
+            let label = oid_label(&oid);
+            if label == "OID" {
+                parts.push(format!("OID {oid}={value}"));
+            } else {
+                parts.push(format!("{label}={value}"));
+            }
         }
     }
 
@@ -448,14 +461,29 @@ fn parse_ski(input: &[u8]) -> String {
     }
 }
 
-fn parse_aki(input: &[u8]) -> String {
+fn parse_aki(input: &[u8]) -> (String, String, String) {
     let mut offset = 0usize;
-    let Some(sequence) = read_tlv(input, &mut offset) else { return String::from("malformed"); };
-    if sequence.tag != 0x30 { return String::from("malformed"); }
-    let Some(fields) = children(sequence.value) else { return String::from("malformed"); };
-    fields.into_iter().find(|field| field.tag == 0x80)
-        .map(|field| hex(field.value))
-        .unwrap_or_else(|| String::from("keyIdentifier not present"))
+    let Some(sequence) = read_tlv(input, &mut offset) else {
+        return (String::from("malformed"), String::from("unavailable"), String::from("unavailable"));
+    };
+    if sequence.tag != 0x30 {
+        return (String::from("malformed"), String::from("unavailable"), String::from("unavailable"));
+    }
+    let Some(fields) = children(sequence.value) else {
+        return (String::from("malformed"), String::from("unavailable"), String::from("unavailable"));
+    };
+    let mut key_id = String::from("keyIdentifier not present");
+    let mut issuer = String::from("not present");
+    let mut serial = String::from("not present");
+    for field in fields {
+        match field.tag {
+            0x80 => key_id = hex(field.value),
+            0xa1 => issuer = format!("present (DER: {})", hex(field.value)),
+            0x82 => serial = hex(field.value),
+            _ => {}
+        }
+    }
+    (key_id, issuer, serial)
 }
 
 fn parse_policies(input: &[u8]) -> Vec<String> {
@@ -616,6 +644,10 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
         subject_alt_names: Vec::new(),
         subject_key_identifier: String::from("not present"),
         authority_key_identifier: String::from("not present"),
+        authority_certificate_issuer: String::from("not present"),
+        authority_certificate_serial_number: String::from("not present"),
+        issuer_unique_id: String::from("not present"),
+        subject_unique_id: String::from("not present"),
         certificate_policies: Vec::new(),
         authority_info_access: Vec::new(),
         crl_distribution_points: Vec::new(),
@@ -625,7 +657,18 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
     };
 
     for field in tbs_fields.iter().skip(index + 1) {
-        if field.tag != 0xa3 { continue; }
+        match field.tag {
+            0x81 => {
+                summary.issuer_unique_id = hex(field.value);
+                continue;
+            }
+            0x82 => {
+                summary.subject_unique_id = hex(field.value);
+                continue;
+            }
+            0xa3 => {}
+            _ => continue,
+        }
         let mut explicit_offset = 0usize;
         let extension_sequence = read_tlv(field.value, &mut explicit_offset)
             .ok_or("malformed extensions wrapper")?;
@@ -657,7 +700,12 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
                 ]),
                 "2.5.29.37" => summary.extended_key_usage = parse_eku(value.value),
                 "2.5.29.14" => summary.subject_key_identifier = parse_ski(value.value),
-                "2.5.29.35" => summary.authority_key_identifier = parse_aki(value.value),
+                "2.5.29.35" => {
+                    let (key_id, issuer, serial) = parse_aki(value.value);
+                    summary.authority_key_identifier = key_id;
+                    summary.authority_certificate_issuer = issuer;
+                    summary.authority_certificate_serial_number = serial;
+                },
                 "2.5.29.32" => summary.certificate_policies = parse_policies(value.value),
                 "1.3.6.1.5.5.7.1.1" => summary.authority_info_access = parse_aia(value.value),
                 "2.5.29.31" => summary.crl_distribution_points = parse_crl_uris(value.value),
