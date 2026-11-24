@@ -21,3 +21,13 @@ There is also a substantial runtime boundary. ELinks' HTML parser and renderer a
 The appropriate path for this project is to implement ELinks-compatible behaviour in the native Rust/UEFI architecture: structured HTML blocks, line layout and terminal-width reflow, tables and lists, keyboard-focused link traversal, scrolling, anchors, forms, search, and browser history. This can preserve the existing smoltcp and mandatory wolfSSL verification pipeline without importing incompatible code or adding a POSIX runtime.
 
 If the ELinks copyright holders ever provide an explicit GPLv3-compatible license grant for the required core modules, or the project adopts a compatible licensing arrangement for all components, direct code reuse can be reassessed. Until then, only separately and permissively licensed/public-domain upstream data is reused.
+
+## Native Rust terminal renderer
+
+The browser now has a native Rust document and terminal-rendering layer. It retains a bounded sequence of semantic HTML blocks and inline runs, rather than flattening the page before display. The current block model covers headings, paragraphs, preformatted regions, quotations, ordered/unordered list items, definition terms/descriptions, and table rows. Inline runs retain strong/emphasis/code/underline metadata and their originating link index.
+
+The layout engine reflows those runs to the active UEFI text-console width and tracks the screen line for every link. The UEFI frontend draws a fixed header/address/status/footer, scrollable viewport, colored link text and a reverse-video focused link. Keyboard controls provide scrolling, link traversal/activation, URL entry, history, reload, and in-page text search. Plain-text responses are kept preformatted so line breaks and indentation survive.
+
+This is a clean-room Rust implementation based on observable text-browser behaviour and the public-domain entity mapping data described above. It does not contain a port of ELinks' GPLv2-only C renderer. Current gaps include full HTML5 tokenization/tree construction, CSS selectors and layout, tables with computed column widths, URL fragments and named anchors, form controls/submission, character-set negotiation, script execution (intentionally out of scope in firmware), downloads, persistent cache, and bookmarks. UEFI text output is UCS-2, so code points outside the BMP are replaced with '?' at the final console boundary. These limitations are explicit and should guide subsequent parity work.
+
+The new UI does not change network transport or trust policy. HTTPS requests continue through the existing wolfSSL path; certificate-chain, date, and hostname verification remain mandatory, and redirect downgrade protection remains in force.

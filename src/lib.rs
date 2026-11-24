@@ -8,6 +8,7 @@ pub mod entropy;
 pub mod grc_chain;
 pub mod http;
 pub mod network;
+pub mod renderer;
 pub mod tls;
 pub mod url;
 pub mod x509_summary;
