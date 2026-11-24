@@ -6,7 +6,7 @@ set -euo pipefail
 INPUT="${1:?usage: filter-ca-bundle.sh input.pem output.pem}"
 OUTPUT="${2:?usage: filter-ca-bundle.sh input.pem output.pem}"
 
-for tool in openssl awk date sed cat mktemp; do
+for tool in openssl awk date sed cat grep mktemp; do
   command -v "$tool" >/dev/null || {
     echo "Required tool not found: $tool" >&2
     exit 1
