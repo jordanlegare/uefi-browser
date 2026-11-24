@@ -63,7 +63,7 @@ impl SecureRandom for UefiRandom {
     }
 }
 
-/// C ABI entropy callback used by TF-PSA-Crypto's Mbed TLS 4.x RNG.
+/// C ABI entropy callback used by wolfCrypt's custom random-block hook.
 ///
 /// Each request opens EFI_RNG_PROTOCOL for the duration of the read. This
 /// keeps protocol lifetime scoped to the call and ensures that missing or
