@@ -2090,6 +2090,9 @@ fn read_browser_action(
                 if character == '\u{8}' {
                     return Some(BrowserAction::Backspace);
                 }
+                if character == '\t' {
+                    return Some(BrowserAction::NextLink);
+                }
                 if focused_control {
                     if text_entry && !character.is_control() {
                         return Some(BrowserAction::Text(character));
