@@ -592,7 +592,8 @@ mod tests {
             &url,
             Some("\"v1\""),
             Some("Wed, 21 Oct 2015 07:28:00 GMT"),
-        )).unwrap();
+        ))
+        .unwrap();
         assert!(request.contains("If-None-Match: \"v1\"\r\n"));
         assert!(request.contains("If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT\r\n"));
         assert!(!request.contains("If-None-Match: bad\\r\\nInjected"));
