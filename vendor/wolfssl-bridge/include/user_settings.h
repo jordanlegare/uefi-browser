@@ -63,6 +63,5 @@ extern time_t uefi_wolfssl_time(time_t *timer);
 
 /* UEFI AllocatePool-backed allocator. Realloc is implemented with a size header. */
 #define XMALLOC_USER
-#define XMALLOC_USER
 
 #endif
