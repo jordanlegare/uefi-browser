@@ -22,6 +22,7 @@
  */
 #define _errno uefi_wolfssl_errno
 #define tolower uefi_wolfssl_tolower
+#define isspace uefi_wolfssl_isspace
 #define _stricmp uefi_wolfssl_stricmp
 #define stricmp uefi_wolfssl_stricmp
 #define XSTRCASECMP uefi_wolfssl_stricmp
@@ -29,6 +30,7 @@
 #ifndef __ASSEMBLER__
 extern int *uefi_wolfssl_errno(void);
 extern int uefi_wolfssl_tolower(int character);
+extern int uefi_wolfssl_isspace(int character);
 extern int uefi_wolfssl_stricmp(const char *left, const char *right);
 #endif
 
