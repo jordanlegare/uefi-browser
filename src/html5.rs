@@ -672,8 +672,8 @@ pub fn build_tree(source: &str) -> Dom {
                     }
                 }
 
-                let foster = !is_allowed_in_table(&name)
-                    && table_foster_location(&stack, &dom).is_some();
+                let foster =
+                    !is_allowed_in_table(&name) && table_foster_location(&stack, &dom).is_some();
                 let node_kind = NodeKind::Element {
                     tag: name.clone(),
                     attributes,
@@ -749,9 +749,7 @@ mod tests {
 
     #[test]
     fn foster_parents_misplaced_table_text_and_elements_before_the_table() {
-        let dom = build_tree(
-            "<table>before<div id=outside>inside</div>after<tr><td>cell</table>",
-        );
+        let dom = build_tree("<table>before<div id=outside>inside</div>after<tr><td>cell</table>");
         let body = dom.find_by_tag(dom.root, "body")[0];
         let div = dom.find_by_tag(dom.root, "div")[0];
         let table = dom.find_by_tag(dom.root, "table")[0];
