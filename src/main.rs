@@ -12,9 +12,9 @@ use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::{Status, helpers, system};
 
 use uefi_browser::document::{Document, Link, parse_html};
-use uefi_browser::renderer::{self, RenderLine};
 use uefi_browser::http::{self, HttpResponse};
 use uefi_browser::network::connect_firmware_url;
+use uefi_browser::renderer::{self, RenderLine};
 use uefi_browser::url::{Scheme, Url};
 
 const MAX_BODY_BYTES: usize = 256 * 1024;
@@ -851,7 +851,8 @@ fn run_browser_ui(
                 if page.document.links.is_empty() {
                     status = String::from("No links on this page");
                 } else {
-                    let next = selected_link.map_or(0, |index| (index + 1) % page.document.links.len());
+                    let next =
+                        selected_link.map_or(0, |index| (index + 1) % page.document.links.len());
                     selected_link = Some(next);
                     reveal_link(&lines, next, &mut first_line, content_height);
                     status = format!("Link {}/{}", next + 1, page.document.links.len());
@@ -863,7 +864,11 @@ fn run_browser_ui(
                     status = String::from("No links on this page");
                 } else {
                     let previous = selected_link.map_or(page.document.links.len() - 1, |index| {
-                        if index == 0 { page.document.links.len() - 1 } else { index - 1 }
+                        if index == 0 {
+                            page.document.links.len() - 1
+                        } else {
+                            index - 1
+                        }
                     });
                     selected_link = Some(previous);
                     reveal_link(&lines, previous, &mut first_line, content_height);
@@ -910,8 +915,9 @@ fn run_browser_ui(
                 if last_search.is_empty() {
                     status = String::from("Use / to search the page first");
                 } else {
-                    let found = renderer::find_line(&lines, &last_search, first_line.saturating_add(1))
-                        .or_else(|| renderer::find_line(&lines, &last_search, 0));
+                    let found =
+                        renderer::find_line(&lines, &last_search, first_line.saturating_add(1))
+                            .or_else(|| renderer::find_line(&lines, &last_search, 0));
                     if let Some(line) = found {
                         first_line = line.min(max_first);
                         status = format!("Next match: {}", last_search);
@@ -1145,10 +1151,14 @@ fn render_terminal_page(
     let width = width.max(20);
     let content_height = content_height.min(height.saturating_sub(5).max(1));
 
-    let header = format!(" UEFI BROWSER  |  HTTP {}  |  {}", page.status, page.document.title);
+    let header = format!(
+        " UEFI BROWSER  |  HTTP {}  |  {}",
+        page.status, page.document.title
+    );
     let address = format!(" URL  {}", page.url.as_string());
     let status_line = navigation_error.unwrap_or(status);
-    let footer = " TAB link  ENTER open  arrows scroll  PGUP/PGDN page  g go  / find  : command  q quit";
+    let footer =
+        " TAB link  ENTER open  arrows scroll  PGUP/PGDN page  g go  / find  : command  q quit";
 
     let _ = system::with_stdout(|output| {
         let _ = output.clear();
@@ -1189,7 +1199,11 @@ fn render_terminal_page(
             output,
             status_row,
             width,
-            if navigation_error.is_some() { Color::LightRed } else { Color::Yellow },
+            if navigation_error.is_some() {
+                Color::LightRed
+            } else {
+                Color::Yellow
+            },
             Color::Black,
             &format!(
                 " {}  |  line {}/{}",
@@ -1198,7 +1212,14 @@ fn render_terminal_page(
                 lines.len()
             ),
         );
-        write_console_row(output, height.saturating_sub(1), width, Color::LightCyan, Color::Black, footer);
+        write_console_row(
+            output,
+            height.saturating_sub(1),
+            width,
+            Color::LightCyan,
+            Color::Black,
+            footer,
+        );
         let _ = output.set_cursor_position(0, height.saturating_sub(1));
     });
 }
@@ -1215,7 +1236,10 @@ fn write_console_row(
     let _ = output.set_color(foreground, background);
     let clipped = clip_text(text, width);
     write_console_text(output, &clipped);
-    let used = clipped.chars().map(renderer::character_width).sum::<usize>();
+    let used = clipped
+        .chars()
+        .map(renderer::character_width)
+        .sum::<usize>();
     if used < width {
         let _ = write!(output, "{}", " ".repeat(width - used));
     }
@@ -1250,7 +1274,10 @@ fn write_render_line(
         let remaining = width.saturating_sub(used);
         let clipped = clip_text(&span.text, remaining);
         write_console_text(output, &clipped);
-        let span_width = clipped.chars().map(renderer::character_width).sum::<usize>();
+        let span_width = clipped
+            .chars()
+            .map(renderer::character_width)
+            .sum::<usize>();
         used = used.saturating_add(span_width);
     }
     let _ = output.set_color(Color::LightGray, Color::Black);
@@ -1307,7 +1334,9 @@ fn print_help() {
     uefi::println!("  :               Open the command prompt");
     uefi::println!("  b / f / r       Back / forward / reload");
     uefi::println!("  l               List links; q quits to firmware");
-    uefi::println!("  Commands: open URL, open N, back, forward, reload, links, search WORD, help, quit");
+    uefi::println!(
+        "  Commands: open URL, open N, back, forward, reload, links, search WORD, help, quit"
+    );
     uefi::println!("");
 }
 

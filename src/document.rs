@@ -38,8 +38,14 @@ pub enum BlockKind {
     Heading(u8),
     Preformatted,
     Quote,
-    ListItem { depth: u8, ordered: bool, ordinal: u16 },
-    TableRow { header: bool },
+    ListItem {
+        depth: u8,
+        ordered: bool,
+        ordinal: u16,
+    },
+    TableRow {
+        header: bool,
+    },
     DefinitionTerm,
     DefinitionDescription,
 }
@@ -138,7 +144,12 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 continue;
             }
 
-            if !closing && matches!(name.as_str(), "script" | "style" | "template" | "noscript" | "svg") {
+            if !closing
+                && matches!(
+                    name.as_str(),
+                    "script" | "style" | "template" | "noscript" | "svg"
+                )
+            {
                 skipped = Some(name);
                 continue;
             }
@@ -161,7 +172,9 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                         }
                     }
                     "b" | "strong" | "i" | "em" | "u" | "code" | "tt" => {
-                        if let Some(position) = style_stack.iter().rposition(|(tag, _)| tag == &name) {
+                        if let Some(position) =
+                            style_stack.iter().rposition(|(tag, _)| tag == &name)
+                        {
                             let (_, previous) = style_stack.remove(position);
                             style = previous;
                         }
@@ -174,7 +187,11 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                         table_cells = table_cells.saturating_add(1);
                     }
                     "tr" => {
-                        flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                        flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                         current_kind = BlockKind::Paragraph;
                         in_table_row = false;
                         table_cells = 0;
@@ -184,7 +201,11 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 }
 
                 if is_block_tag(&name) && !matches!(name.as_str(), "tr") {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     current_kind = BlockKind::Paragraph;
                     append_newline(&mut document.text);
                 }
@@ -202,11 +223,20 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 "head" => in_head = true,
                 "title" => in_title = true,
                 "br" => {
-                    push_run(&mut current_runs, "\n", style, active_link.as_ref().map(|link| link.index));
+                    push_run(
+                        &mut current_runs,
+                        "\n",
+                        style,
+                        active_link.as_ref().map(|link| link.index),
+                    );
                     append_newline(&mut document.text);
                 }
                 "hr" => {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     if document.blocks.len() < MAX_BLOCKS {
                         document.blocks.push(Block {
                             kind: BlockKind::Paragraph,
@@ -222,7 +252,11 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 "ul" => list_stack.push((false, 0)),
                 "ol" => list_stack.push((true, 0)),
                 "li" => {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     let depth = list_stack.len().min(u8::MAX as usize) as u8;
                     let (ordered, ordinal) = if let Some((ordered, count)) = list_stack.last_mut() {
                         *count = count.saturating_add(1);
@@ -230,31 +264,59 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                     } else {
                         (false, 1)
                     };
-                    current_kind = BlockKind::ListItem { depth, ordered, ordinal };
+                    current_kind = BlockKind::ListItem {
+                        depth,
+                        ordered,
+                        ordinal,
+                    };
                 }
                 "blockquote" => {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     current_kind = BlockKind::Quote;
                 }
                 "pre" => {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     current_kind = BlockKind::Preformatted;
                     in_pre = true;
                 }
                 "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     current_kind = BlockKind::Heading(name.as_bytes()[1] - b'0');
                 }
                 "dt" => {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     current_kind = BlockKind::DefinitionTerm;
                 }
                 "dd" => {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     current_kind = BlockKind::DefinitionDescription;
                 }
                 "tr" => {
-                    flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                    flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                     current_kind = BlockKind::TableRow { header: false };
                     in_table_row = true;
                     table_cells = 0;
@@ -290,7 +352,10 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                                     label: String::new(),
                                     target: target.as_string(),
                                 });
-                                active_link = Some(LinkState { index, label: String::new() });
+                                active_link = Some(LinkState {
+                                    index,
+                                    label: String::new(),
+                                });
                             }
                         }
                     }
@@ -308,13 +373,22 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 "img" => {
                     if let Some(alt) = attribute(content, "alt") {
                         let label = format!("[image: {}]", alt);
-                        push_run(&mut current_runs, &label, style, active_link.as_ref().map(|link| link.index));
+                        push_run(
+                            &mut current_runs,
+                            &label,
+                            style,
+                            active_link.as_ref().map(|link| link.index),
+                        );
                         append_plain(&mut document.text, &label, false);
                     }
                 }
                 _ => {
                     if is_block_tag(&name) {
-                        flush_block(&mut document.blocks, &mut current_runs, current_kind.clone());
+                        flush_block(
+                            &mut document.blocks,
+                            &mut current_runs,
+                            current_kind.clone(),
+                        );
                         current_kind = BlockKind::Paragraph;
                     }
                 }
@@ -411,10 +485,34 @@ fn append_newline(output: &mut String) {
 fn is_block_tag(name: &str) -> bool {
     matches!(
         name,
-        "address" | "article" | "blockquote" | "dd" | "div" | "dl" | "dt" | "fieldset"
-            | "figcaption" | "figure" | "footer" | "form" | "h1" | "h2" | "h3" | "h4"
-            | "h5" | "h6" | "header" | "li" | "main" | "nav" | "p" | "pre" | "section"
-            | "table" | "ul" | "ol"
+        "address"
+            | "article"
+            | "blockquote"
+            | "dd"
+            | "div"
+            | "dl"
+            | "dt"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "footer"
+            | "form"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "li"
+            | "main"
+            | "nav"
+            | "p"
+            | "pre"
+            | "section"
+            | "table"
+            | "ul"
+            | "ol"
     )
 }
 
@@ -517,7 +615,9 @@ fn decode_entity(entity: &str) -> Option<char> {
         "ndash" => Some('–'),
         "hellip" => Some('…'),
         _ if entity.starts_with("#x") || entity.starts_with("#X") => {
-            u32::from_str_radix(&entity[2..], 16).ok().and_then(char::from_u32)
+            u32::from_str_radix(&entity[2..], 16)
+                .ok()
+                .and_then(char::from_u32)
         }
         _ if entity.starts_with('#') => entity[1..].parse::<u32>().ok().and_then(char::from_u32),
         _ => elinks_entities::decode_named_entity(entity),
@@ -537,10 +637,27 @@ mod tests {
         assert!(page.text.contains("Welcome"));
         assert!(page.text.contains("guide [1]"));
         assert_eq!(page.links[0].target, "https://example.org/guide");
-        assert!(page.blocks.iter().any(|block| matches!(&block.kind, BlockKind::Heading(1))));
-        assert!(page.blocks.iter().any(|block| matches!(&block.kind, BlockKind::ListItem { .. })));
-        assert!(page.blocks.iter().flat_map(|block| &block.runs).any(|run| run.style.strong));
-        assert!(page.blocks.iter().any(|block| matches!(&block.kind, BlockKind::Preformatted)));
+        assert!(
+            page.blocks
+                .iter()
+                .any(|block| matches!(&block.kind, BlockKind::Heading(1)))
+        );
+        assert!(
+            page.blocks
+                .iter()
+                .any(|block| matches!(&block.kind, BlockKind::ListItem { .. }))
+        );
+        assert!(
+            page.blocks
+                .iter()
+                .flat_map(|block| &block.runs)
+                .any(|run| run.style.strong)
+        );
+        assert!(
+            page.blocks
+                .iter()
+                .any(|block| matches!(&block.kind, BlockKind::Preformatted))
+        );
     }
 
     #[test]

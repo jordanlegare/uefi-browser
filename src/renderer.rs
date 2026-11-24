@@ -62,7 +62,11 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
             }
             BlockKind::Preformatted => prefix.push_str("  "),
             BlockKind::Quote => prefix.push_str("| "),
-            BlockKind::ListItem { depth, ordered, ordinal } => {
+            BlockKind::ListItem {
+                depth,
+                ordered,
+                ordinal,
+            } => {
                 for _ in 0..(*depth).min(8) {
                     prefix.push_str("  ");
                 }
@@ -314,7 +318,11 @@ mod tests {
         let lines = layout_document(&document, 12);
         assert!(lines.len() > 1);
         assert!(lines.iter().all(|line| line.width <= 12));
-        assert!(lines.iter().any(|line| line.spans.iter().any(|span| span.link == Some(0))));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.spans.iter().any(|span| span.link == Some(0)))
+        );
         assert_eq!(line_for_link(&lines, 0), Some(2));
     }
 
