@@ -63,11 +63,6 @@ extern time_t uefi_wolfssl_time(time_t *timer);
 
 /* UEFI AllocatePool-backed allocator. Realloc is implemented with a size header. */
 #define XMALLOC_USER
-extern void *uefi_wolfssl_malloc(size_t size, void *heap, int type);
-extern void *uefi_wolfssl_realloc(void *pointer, size_t size, void *heap, int type);
-extern void uefi_wolfssl_free(void *pointer, void *heap, int type);
-#define XMALLOC(size, heap, type) uefi_wolfssl_malloc((size), (heap), (type))
-#define XREALLOC(pointer, size, heap, type) uefi_wolfssl_realloc((pointer), (size), (heap), (type))
-#define XFREE(pointer, heap, type) uefi_wolfssl_free((pointer), (heap), (type))
+#define XMALLOC_USER
 
 #endif
