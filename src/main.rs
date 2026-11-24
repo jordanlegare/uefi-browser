@@ -481,7 +481,8 @@ fn print_tls_rejection_diagnostics(
         verify_depth,
         failing_certificate_sha256,
         ..
-    } = error else {
+    } = error
+    else {
         return;
     };
 
@@ -499,10 +500,7 @@ fn print_tls_rejection_diagnostics(
             }
             fingerprint.push_str(&format!("{:02X}", byte));
         }
-        uefi::println!(
-            "[TLS VERIFY] Rejected certificate SHA-256: {}",
-            fingerprint
-        );
+        uefi::println!("[TLS VERIFY] Rejected certificate SHA-256: {}", fingerprint);
     } else {
         uefi::println!(
             "[TLS VERIFY] Rejected certificate SHA-256: unavailable (wolfSSL did not return a digest)."
@@ -526,8 +524,14 @@ fn print_tls_rejection_diagnostics(
     match failing_certificate_der {
         Some(der) => match uefi_browser::x509_summary::summarize_certificate(der) {
             Ok(summary) => {
-                uefi::println!("[TLS VERIFY] Rejected certificate Subject: {}", summary.subject);
-                uefi::println!("[TLS VERIFY] Rejected certificate Issuer: {}", summary.issuer);
+                uefi::println!(
+                    "[TLS VERIFY] Rejected certificate Subject: {}",
+                    summary.subject
+                );
+                uefi::println!(
+                    "[TLS VERIFY] Rejected certificate Issuer: {}",
+                    summary.issuer
+                );
                 uefi::println!(
                     "[TLS VERIFY] Rejected certificate Serial: {}",
                     summary.serial_number
