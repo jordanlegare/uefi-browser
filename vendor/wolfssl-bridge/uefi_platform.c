@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <limits.h>
 #include <time.h>
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -144,5 +145,86 @@ time_t uefi_wolfssl_time(time_t *timer)
     if (now < 0) return (time_t)-1;
     result = (time_t)now;
     if (timer != NULL) *timer = result;
+    return result;
+}
+
+static int64_t days_from_civil(int64_t year, unsigned int month, unsigned int day)
+{
+    int64_t era;
+    unsigned int year_of_era;
+    unsigned int day_of_year;
+    unsigned int day_of_era;
+
+    year -= month <= 2U;
+    era = (year >= 0 ? year : year - 399) / 400;
+    year_of_era = (unsigned int)(year - era * 400);
+    day_of_year = (153U * (month + (month > 2U ? (unsigned int)-3 : 9U)) + 2U) / 5U
+                  + day - 1U;
+    day_of_era = year_of_era * 365U + year_of_era / 4U
+                 - year_of_era / 100U + day_of_year;
+    return era * 146097 + (int64_t)day_of_era - 719468;
+}
+
+static void civil_from_days(int64_t days, int64_t *year,
+                            unsigned int *month, unsigned int *day)
+{
+    int64_t era;
+    unsigned int day_of_era;
+    unsigned int year_of_era;
+    unsigned int day_of_year;
+    unsigned int month_prime;
+
+    days += 719468;
+    era = (days >= 0 ? days : days - 146096) / 146097;
+    day_of_era = (unsigned int)(days - era * 146097);
+    year_of_era = (day_of_era - day_of_era / 1460U
+                   + day_of_era / 36524U - day_of_era / 146096U) / 365U;
+    *year = (int64_t)year_of_era + era * 400;
+    day_of_year = day_of_era - (365U * year_of_era + year_of_era / 4U
+                    - year_of_era / 100U);
+    month_prime = (5U * day_of_year + 2U) / 153U;
+    *day = day_of_year - (153U * month_prime + 2U) / 5U + 1U;
+    *month = month_prime + (month_prime < 10U ? 3U : (unsigned int)-9);
+    *year += *month <= 2U;
+}
+
+/* wolfSSL's XGMTIME hook. This avoids a host gmtime_r dependency entirely. */
+struct tm *uefi_wolfssl_gmtime(const time_t *timer, struct tm *result)
+{
+    int64_t seconds;
+    int64_t days;
+    int64_t remainder;
+    int64_t year;
+    int64_t first_day;
+    unsigned int month;
+    unsigned int day;
+    int weekday;
+
+    if (timer == NULL || result == NULL) return NULL;
+    seconds = (int64_t)*timer;
+    days = seconds / 86400;
+    remainder = seconds % 86400;
+    if (remainder < 0) {
+        remainder += 86400;
+        --days;
+    }
+
+    civil_from_days(days, &year, &month, &day);
+    if (year - 1900 < INT_MIN || year - 1900 > INT_MAX) return NULL;
+
+    result->tm_sec = (int)(remainder % 60);
+    result->tm_min = (int)((remainder / 60) % 60);
+    result->tm_hour = (int)(remainder / 3600);
+    result->tm_mday = (int)day;
+    result->tm_mon = (int)month - 1;
+    result->tm_year = (int)(year - 1900);
+    result->tm_isdst = 0;
+
+    weekday = (int)((days + 4) % 7);
+    if (weekday < 0) weekday += 7;
+    result->tm_wday = weekday;
+
+    first_day = days_from_civil(year, 1U, 1U);
+    result->tm_yday = (int)(days - first_day);
     return result;
 }
