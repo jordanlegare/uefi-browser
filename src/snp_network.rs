@@ -587,6 +587,154 @@ impl UdpDnsTransport for SnpNetwork {
     }
 }
 
+impl UdpDnsTransport for SnpNetwork {
+    fn exchange(
+        &mut self,
+        resolver: Ipv4Addr,
+        port: u16,
+        query: &[u8],
+        output: &mut [u8],
+        timeout_ms: u64,
+    ) -> Result<usize, DnsIoError> {
+        if query.is_empty() || query.len() > UDP_BUFFER_SIZE || output.is_empty() || port == 0 {
+            return Err(DnsIoError::InvalidDatagram);
+        }
+        let rx = udp::PacketBuffer::new(
+            vec![udp::PacketMetadata::EMPTY; 4],
+            vec![0u8; UDP_BUFFER_SIZE],
+        );
+        let tx = udp::PacketBuffer::new(
+            vec![udp::PacketMetadata::EMPTY; 4],
+            vec![0u8; UDP_BUFFER_SIZE],
+        );
+        let mut socket = udp::Socket::new(rx, tx);
+        let local_port = self.allocate_local_port();
+        socket.bind(local_port).map_err(|_| DnsIoError::Network)?;
+        let handle = self.sockets.add(socket);
+        if self
+            .sockets
+            .get_mut::<udp::Socket>(handle)
+            .send_slice(query, IpEndpoint::new(IpAddress::Ipv4(resolver), port))
+            .is_err()
+        {
+            let _ = self.sockets.remove(handle);
+            return Err(DnsIoError::Network);
+        }
+        self.device.diagnostics.udp_datagrams_sent =
+            self.device.diagnostics.udp_datagrams_sent.saturating_add(1);
+        let timeout = if timeout_ms == 0 { 3_000 } else { timeout_ms };
+        let mut answer = Err(DnsIoError::Timeout);
+        for _ in 0..timeout {
+            self.wait_step();
+            let socket = self.sockets.get_mut::<udp::Socket>(handle);
+            if socket.can_recv() {
+                match socket.recv_slice(output) {
+                    Ok((n, meta))
+                        if meta.endpoint.addr == IpAddress::Ipv4(resolver)
+                            && meta.endpoint.port == port =>
+                    {
+                        answer = Ok(n);
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(udp::RecvError::Truncated) => {
+                        answer = Err(DnsIoError::InvalidDatagram);
+                        break;
+                    }
+                    Err(udp::RecvError::Exhausted) => {}
+                }
+            }
+        }
+        let _ = self.sockets.remove(handle);
+        match answer {
+            Ok(_) => {
+                self.device.diagnostics.udp_datagrams_received = self
+                    .device
+                    .diagnostics
+                    .udp_datagrams_received
+                    .saturating_add(1);
+            }
+            Err(DnsIoError::Timeout) => {
+                self.device.diagnostics.udp_timeouts =
+                    self.device.diagnostics.udp_timeouts.saturating_add(1);
+            }
+            Err(_) => {}
+        }
+        answer
+    }
+
+    fn exchange_tcp(
+        &mut self,
+        resolver: Ipv4Addr,
+        port: u16,
+        query: &[u8],
+        output: &mut [u8],
+        timeout_ms: u64,
+    ) -> Result<usize, DnsIoError> {
+        if query.is_empty() || query.len() > u16::MAX as usize || output.is_empty() || port == 0 {
+            return Err(DnsIoError::InvalidDatagram);
+        }
+        let handle = self
+            .connect_tcp(resolver, port, timeout_ms)
+            .map_err(|error| match error {
+                SnpNetworkError::TcpConnectTimeout => DnsIoError::Timeout,
+                _ => DnsIoError::Network,
+            })?;
+        let mut stream = SnpTcpStream::new(self, handle, timeout_ms);
+        let length_prefix = (query.len() as u16).to_be_bytes();
+        let mut frame_offset = 0usize;
+        let frame_parts = [&length_prefix[..], query];
+        for part in frame_parts {
+            let mut sent = 0usize;
+            while sent < part.len() {
+                let count = crate::tls::TlsStreamIo::send(&mut stream, &part[sent..])
+                    .map_err(|_| DnsIoError::Timeout)?;
+                if count == 0 || count > part.len() - sent {
+                    return Err(DnsIoError::Network);
+                }
+                sent += count;
+                frame_offset = frame_offset.saturating_add(count);
+            }
+        }
+        let expected_frame = query.len().saturating_add(length_prefix.len());
+        if frame_offset != expected_frame {
+            return Err(DnsIoError::Network);
+        }
+
+        let mut response_prefix = [0u8; 2];
+        let mut prefix_read = 0usize;
+        while prefix_read < response_prefix.len() {
+            let count = crate::tls::TlsStreamIo::receive(
+                &mut stream,
+                &mut response_prefix[prefix_read..],
+            )
+            .map_err(|_| DnsIoError::Timeout)?;
+            if count == 0 || count > response_prefix.len() - prefix_read {
+                return Err(DnsIoError::InvalidDatagram);
+            }
+            prefix_read += count;
+        }
+        let message_length = usize::from(u16::from_be_bytes(response_prefix));
+        if message_length < 12 || message_length > output.len() {
+            return Err(DnsIoError::InvalidDatagram);
+        }
+
+        let mut received = 0usize;
+        while received < message_length {
+            let count = crate::tls::TlsStreamIo::receive(
+                &mut stream,
+                &mut output[received..message_length],
+            )
+            .map_err(|_| DnsIoError::Timeout)?;
+            if count == 0 || count > message_length - received {
+                return Err(DnsIoError::InvalidDatagram);
+            }
+            received += count;
+        }
+        Ok(message_length)
+    }
+}
+
 pub struct SnpTcpStream<'a> {
     network: &'a mut SnpNetwork,
     socket: SocketHandle,
