@@ -111,17 +111,6 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
     let style = InlineStyle::default();
     let mut output = Vec::new();
 
-    let mut push_label = |label: &str| {
-        if !label.is_empty() {
-            let run = InlineRun {
-                text: label.to_string(),
-                style,
-                link: None,
-            };
-            output.extend(wrap_runs(&[run], width, false));
-        }
-    };
-
     match control.kind {
         FormControlKind::Text
         | FormControlKind::Password
@@ -130,7 +119,7 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
         | FormControlKind::Number
         | FormControlKind::TextArea => {
             let label = if control.label.is_empty() { "Input" } else { &control.label };
-            push_label(label);
+            push_label_lines(&mut output, label, width);
 
             let box_width = width.min(36).max(8);
             let inner_width = box_width.saturating_sub(4).max(1);
@@ -142,7 +131,6 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
             } else {
                 control.value.replace(['\r', '\n'], " ")
             };
-            let value_width = value.chars().map(character_width).sum::<usize>();
             let field_chars = inner_width.saturating_sub(1).max(1);
             let field_width = value.chars().map(character_width).sum::<usize>();
             if field_width > field_chars {
@@ -169,10 +157,13 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
             input_line.focusable_control = true;
             output.push(input_line);
             output.push(line_from_text(&border, style));
-            let _ = value_width;
         }
         FormControlKind::Select => {
-            push_label(if control.label.is_empty() { "Select" } else { &control.label });
+            push_label_lines(
+                &mut output,
+                if control.label.is_empty() { "Select" } else { &control.label },
+                width,
+            );
             let box_width = width.min(36).max(8);
             let border = format!("+{}+", "-".repeat(box_width.saturating_sub(2)));
             output.push(line_from_text(&border, style));
@@ -228,6 +219,17 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
         FormControlKind::Hidden => {}
     }
     output
+}
+
+fn push_label_lines(output: &mut Vec<RenderLine>, label: &str, width: usize) {
+    if !label.is_empty() {
+        let run = InlineRun {
+            text: label.to_string(),
+            style: InlineStyle::default(),
+            link: None,
+        };
+        output.extend(wrap_runs(&[run], width, false));
+    }
 }
 
 fn wrap_render_line(line: RenderLine, width: usize) -> Vec<RenderLine> {
