@@ -404,7 +404,6 @@ fn fetch_response(
             {
                 let ca_bundle = uefi_browser::ca_bundle::pem()
                     .ok_or_else(|| String::from("no embedded CA trust bundle"))?;
-                uefi::println!("Starting TLS handshake and X.509 verification...");
                 // The TCP stream's normal navigation timeout is 15 seconds.
                 // Use a shorter per-I/O timeout for TLS so a peer that accepts
                 // TCP but never sends a ServerHello cannot freeze the UI.
@@ -414,13 +413,11 @@ fn fetch_response(
                 let mut tls = connection
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
-                uefi::println!("TLS session initialized; beginning handshake.");
                 if let Err(error) = tls.handshake() {
                     return Err(format!(
                         "TLS handshake / certificate verification failed: {error:?}"
                     ));
                 }
-                uefi::println!("TLS verified. Sending HTTPS request...");
                 let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
                 uefi::println!("HTTPS response received ({} bytes).", response.body.len());
