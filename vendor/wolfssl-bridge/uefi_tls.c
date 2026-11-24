@@ -9,6 +9,7 @@
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfio.h>
+#include <wolfssl/wolfcrypt/sha256.h>
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
 typedef int (*uefi_recv_cb)(void *, unsigned char *, size_t);
@@ -19,22 +20,42 @@ static int uefi_last_ca_cert_index;
 static int64_t uefi_last_time_unix;
 static int uefi_last_verify_error;
 static int uefi_last_verify_depth;
-static int uefi_last_peer_cert_count;
+static unsigned char uefi_last_bad_cert_sha256[32];
 
 int uefi_wolfssl_last_ca_cert_index(void) { return uefi_last_ca_cert_index; }
 int64_t uefi_wolfssl_last_time_unix(void) { return uefi_last_time_unix; }
 int uefi_wolfssl_last_verify_error(void) { return uefi_last_verify_error; }
 int uefi_wolfssl_last_verify_depth(void) { return uefi_last_verify_depth; }
-int uefi_wolfssl_last_peer_cert_count(void) { return uefi_last_peer_cert_count; }
+int uefi_wolfssl_copy_bad_cert_sha256(unsigned char *out, size_t capacity)
+{
+    if (out == NULL || capacity < sizeof(uefi_last_bad_cert_sha256)) return -1;
+    memcpy(out, uefi_last_bad_cert_sha256, sizeof(uefi_last_bad_cert_sha256));
+    return (int)sizeof(uefi_last_bad_cert_sha256);
+}
 
 static int uefi_verify_diagnostic_callback(int preverify_ok,
                                            WOLFSSL_X509_STORE_CTX *store)
 {
-    if (!preverify_ok && store != NULL) {
-        /* Observe the verifier's failure; never convert failure to success. */
-        uefi_last_verify_error = store->error;
-        uefi_last_verify_depth = store->error_depth;
-        uefi_last_peer_cert_count = store->totalCerts;
+    if (!preverify_ok && store != NULL && uefi_last_verify_error == 0) {
+        WOLFSSL_X509 *cert;
+        const unsigned char *der;
+        int der_length = 0;
+        wc_Sha256 hash;
+
+        /* Record only; return the verifier's result unchanged below. */
+        uefi_last_verify_error = wolfSSL_X509_STORE_CTX_get_error(store);
+        uefi_last_verify_depth = wolfSSL_X509_STORE_CTX_get_error_depth(store);
+        cert = wolfSSL_X509_STORE_CTX_get_current_cert(store);
+        if (cert != NULL) {
+            der = wolfSSL_X509_get_der(cert, &der_length);
+            if (der != NULL && der_length > 0 &&
+                wc_InitSha256(&hash) == 0) {
+                if (wc_Sha256Update(&hash, der, (word32)der_length) == 0) {
+                    (void)wc_Sha256Final(&hash, uefi_last_bad_cert_sha256);
+                }
+                wc_Sha256Free(&hash);
+            }
+        }
     }
     return preverify_ok;
 }
@@ -125,7 +146,7 @@ int uefi_wolfssl_client_new(
     uefi_last_time_unix = (int64_t)uefi_wolfssl_time(NULL);
     uefi_last_verify_error = 0;
     uefi_last_verify_depth = -1;
-    uefi_last_peer_cert_count = 0;
+    memset(uefi_last_bad_cert_sha256, 0, sizeof(uefi_last_bad_cert_sha256));
 
     if (!wolfssl_initialized) {
         ret = wolfSSL_Init();
