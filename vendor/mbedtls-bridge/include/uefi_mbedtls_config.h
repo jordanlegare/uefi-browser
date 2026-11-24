@@ -4,6 +4,7 @@
  * Mbed TLS owns the TLS/X.509 configuration. TF-PSA-Crypto has a separate
  * user-configuration hook. UEFI platform hooks are intentionally configured
  * only in uefi_tf_psa_config.h, as required by the 4.x configuration split.
+ * Release builds disable Mbed TLS debug instrumentation entirely.
  */
 #ifndef UEFI_MBEDTLS_CONFIG_H
 #define UEFI_MBEDTLS_CONFIG_H
@@ -17,7 +18,7 @@
 #undef MBEDTLS_NET_C
 #undef MBEDTLS_TIMING_C
 #undef MBEDTLS_FS_IO
-#define MBEDTLS_DEBUG_C
+#undef MBEDTLS_DEBUG_C
 #undef MBEDTLS_SELF_TEST
 
 /* Platform allocator/time hooks are configured only in uefi_tf_psa_config.h. */
