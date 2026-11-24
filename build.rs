@@ -1,10 +1,10 @@
 use std::{env, fs, path::PathBuf};
 
 fn main() {
-    println!("cargo:rustc-check-cfg=cfg(uefi_mbedtls_linked)");
+    println!("cargo:rustc-check-cfg=cfg(uefi_wolfssl_linked)");
     println!("cargo:rustc-check-cfg=cfg(uefi_ca_bundle)");
-    println!("cargo:rerun-if-env-changed=UEFI_MBEDTLS_LIB_DIR");
-    println!("cargo:rerun-if-env-changed=UEFI_MBEDTLS_BRIDGE_DIR");
+    println!("cargo:rerun-if-env-changed=UEFI_WOLFSSL_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=UEFI_WOLFSSL_BRIDGE_DIR");
     println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_PATH");
     println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_SOURCE_DATE");
     println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_SHA256");
@@ -16,31 +16,27 @@ fn main() {
     }
 
     if let (Ok(lib_dir), Ok(bridge_dir)) = (
-        env::var("UEFI_MBEDTLS_LIB_DIR"),
-        env::var("UEFI_MBEDTLS_BRIDGE_DIR"),
+        env::var("UEFI_WOLFSSL_LIB_DIR"),
+        env::var("UEFI_WOLFSSL_BRIDGE_DIR"),
     ) {
         let lib_dir = PathBuf::from(lib_dir);
         let bridge_dir = PathBuf::from(bridge_dir);
-        let bridge_archive = bridge_dir.join("libuefi_mbedtls_bridge.a");
+        let bridge_archive = bridge_dir.join("libuefi_wolfssl_bridge.a");
+        let wolfssl_archive = lib_dir.join("libwolfssl.a");
 
-        for required in [
-            bridge_archive,
-            lib_dir.join("libmbedtls.a"),
-            lib_dir.join("libmbedx509.a"),
-            lib_dir.join("libmbedcrypto.a"),
-        ] {
+        for required in [&bridge_archive, &wolfssl_archive] {
             if !required.is_file() {
-                panic!("Mbed TLS link input is missing: {}", required.display());
+                panic!("wolfSSL link input is missing: {}", required.display());
             }
         }
 
         println!("cargo:rustc-link-search=native={}", bridge_dir.display());
         println!("cargo:rustc-link-search=native={}", lib_dir.display());
-        println!("cargo:rustc-link-lib=static=uefi_mbedtls_bridge");
-        println!("cargo:rustc-link-lib=static=mbedtls");
-        println!("cargo:rustc-link-lib=static=mbedx509");
-        println!("cargo:rustc-link-lib=static=mbedcrypto");
-        println!("cargo:rustc-cfg=uefi_mbedtls_linked");
+        println!("cargo:rustc-link-lib=static=uefi_wolfssl_bridge");
+        println!("cargo:rustc-link-lib=static=wolfssl");
+        // Re-scan the bridge archive for freestanding CRT symbols referenced by wolfSSL.
+        println!("cargo:rustc-link-lib=static=uefi_wolfssl_bridge");
+        println!("cargo:rustc-cfg=uefi_wolfssl_linked");
     }
 
     if let Ok(ca_path) = env::var("UEFI_CA_BUNDLE_PATH") {
@@ -62,9 +58,6 @@ fn main() {
             panic!("CA bundle contains an embedded NUL byte");
         }
 
-        // Mozilla's maintained bundle begins with human-readable metadata.
-        // Locate and embed from the first PEM marker rather than rejecting
-        // that standard preamble.
         let first_certificate = bytes
             .windows(PEM_BEGIN.len())
             .position(|window| window == PEM_BEGIN)

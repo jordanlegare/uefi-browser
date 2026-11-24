@@ -27,22 +27,22 @@ jobs:
       - name: Check UEFI compilation
         run: cargo check --target x86_64-unknown-uefi
 
-  mbedtls-static-efi:
-    name: Build embedded Mbed TLS and standalone EFI image
+  wolfssl-static-efi:
+    name: Build embedded wolfSSL and standalone EFI image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install C cross-build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang llvm lld curl bzip2 mingw-w64-common mingw-w64-x86-64-dev
+          sudo apt-get install -y cmake ninja-build clang llvm lld curl unzip mingw-w64-common mingw-w64-x86-64-dev
       - name: Install stable Rust and UEFI target
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-uefi
       - name: Download and verify embedded CA roots
         run: ./scripts/update-ca-bundle.sh
-      - name: Build Mbed TLS, bridge, and EFI application
+      - name: Build wolfSSL, bridge, and EFI application
         run: ./scripts/build-uefi.sh
       - name: Verify standalone EFI image
         run: |
