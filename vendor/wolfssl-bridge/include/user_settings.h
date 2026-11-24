@@ -92,6 +92,20 @@ extern int uefi_wolfssl_stricmp(const char *left, const char *right);
 #define XGMTIME uefi_wolfssl_gmtime
 
 /*
+ * Override wolfSSL's default wc_ValidateDate() path. The UEFI implementation
+ * parses RFC 5280 certificate times and compares them directly with the
+ * validated firmware UTC epoch, without relying on wolfSSL's struct tm path.
+ * Invalid dates and an unavailable firmware clock fail closed.
+ */
+#ifndef __ASSEMBLER__
+extern int uefi_wolfssl_validate_date(const unsigned char *date,
+                                     unsigned char format,
+                                     int date_type, int length);
+#endif
+#define XVALIDATE_DATE(date, format, date_type, length) \
+    uefi_wolfssl_validate_date((date), (format), (date_type), (length))
+
+/*
  * wolfSSL TLS 1.3 uses TimeNowInMilliseconds for protocol timers.
  * Route it through our firmware clock hook rather than POSIX gettimeofday()
  * or Windows performance-counter APIs.
