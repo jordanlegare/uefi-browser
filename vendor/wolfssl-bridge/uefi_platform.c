@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <wolfssl/wolfcrypt/settings.h>
+#include <wolfssl/wolfcrypt/types.h>
 
 extern void *uefi_browser_alloc(size_t size);
 extern void uefi_browser_free(void *pointer);
@@ -15,6 +16,25 @@ extern int64_t uefi_browser_time_unix(void);
 typedef struct {
     size_t size;
 } uefi_wolfssl_allocation;
+
+void *uefi_wolfssl_malloc(size_t size, void *heap, int type);
+void *uefi_wolfssl_realloc(void *pointer, size_t size, void *heap, int type);
+void uefi_wolfssl_free(void *pointer, void *heap, int type);
+
+void *XMALLOC(size_t size, void *heap, int type)
+{
+    return uefi_wolfssl_malloc(size, heap, type);
+}
+
+void *XREALLOC(void *pointer, size_t size, void *heap, int type)
+{
+    return uefi_wolfssl_realloc(pointer, size, heap, type);
+}
+
+void XFREE(void *pointer, void *heap, int type)
+{
+    uefi_wolfssl_free(pointer, heap, type);
+}
 
 void *uefi_wolfssl_malloc(size_t size, void *heap, int type)
 {
