@@ -45,7 +45,11 @@ pub enum TlsError {
     NotHttps,
     InvalidHostname,
     InvalidCaBundle,
-    Initialization { code: c_int, ca_cert_index: c_int, wolfssl_time_unix: i64 },
+    Initialization {
+        code: c_int,
+        ca_cert_index: c_int,
+        wolfssl_time_unix: i64,
+    },
     Handshake(c_int),
     CertificateVerification(u32),
     Read(c_int),
@@ -84,10 +88,18 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
             )
         };
         if result != 0 {
-            return Err(TlsError::Initialization { code: result, ca_cert_index: unsafe { uefi_wolfssl_last_ca_cert_index() }, wolfssl_time_unix: unsafe { uefi_wolfssl_last_time_unix() } });
+            return Err(TlsError::Initialization {
+                code: result,
+                ca_cert_index: unsafe { uefi_wolfssl_last_ca_cert_index() },
+                wolfssl_time_unix: unsafe { uefi_wolfssl_last_time_unix() },
+            });
         }
         if raw.is_null() {
-            return Err(TlsError::Initialization { code: -1, ca_cert_index: 0, wolfssl_time_unix: -1 });
+            return Err(TlsError::Initialization {
+                code: -1,
+                ca_cert_index: 0,
+                wolfssl_time_unix: -1,
+            });
         }
         Ok(Self {
             raw,
