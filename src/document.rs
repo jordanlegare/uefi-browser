@@ -1137,7 +1137,7 @@ mod tests {
         assert_eq!(page.forms[0].controls[0].label, "Search terms");
         assert_eq!(page.forms[0].controls[0].value, "uefi");
         assert!(page.blocks.iter().any(|block| matches!(
-            block.kind,
+            &block.kind,
             BlockKind::FormControl {
                 form_index: 0,
                 control_index: 0
