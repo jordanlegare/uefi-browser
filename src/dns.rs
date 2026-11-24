@@ -120,7 +120,11 @@ pub fn resolve_a<T: UdpDnsTransport, R: SecureRandom>(
                                 DNS_PORT,
                                 &query,
                                 &mut response,
-                                if timeout_ms == 0 { DEFAULT_TIMEOUT_MS } else { timeout_ms },
+                                if timeout_ms == 0 {
+                                    DEFAULT_TIMEOUT_MS
+                                } else {
+                                    timeout_ms
+                                },
                             )
                             .map_err(map_io_error)?;
                         if tcp_length > response.len() {
@@ -187,7 +191,11 @@ pub fn resolve_aaaa<T: UdpDnsTransport, R: SecureRandom>(
             DNS_PORT,
             &query,
             &mut response,
-            if timeout_ms == 0 { DEFAULT_TIMEOUT_MS } else { timeout_ms },
+            if timeout_ms == 0 {
+                DEFAULT_TIMEOUT_MS
+            } else {
+                timeout_ms
+            },
         ) {
             Ok(length) => {
                 if length > response.len() {
@@ -550,11 +558,7 @@ mod tests {
         let address = Ipv6Addr::LOCALHOST;
         let mut answer = Message::new(0x7A31, MessageType::Response, OpCode::Query);
         answer.add_query(Query::query(name.clone(), RecordType::AAAA));
-        answer.add_answer(Record::from_rdata(
-            name,
-            60,
-            RData::AAAA(AAAA(address)),
-        ));
+        answer.add_answer(Record::from_rdata(name, 60, RData::AAAA(AAAA(address))));
         assert_eq!(
             parse_aaaa_response(&answer.to_vec().unwrap(), 0x7A31, "example.org"),
             Ok(address)
