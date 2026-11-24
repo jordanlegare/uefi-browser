@@ -20,6 +20,7 @@ struct RawTlsSession {
 
 type SendCallback = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> c_int;
 type ReceiveCallback = unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> c_int;
+type ProgressCallback = unsafe extern "C" fn(c_int, c_int, c_int);
 
 unsafe extern "C" {
     fn uefi_wolfssl_client_new(
@@ -30,6 +31,7 @@ unsafe extern "C" {
         io_context: *mut c_void,
         send_callback: Option<SendCallback>,
         receive_callback: Option<ReceiveCallback>,
+        progress_callback: Option<ProgressCallback>,
         output: *mut *mut RawTlsSession,
     ) -> c_int;
     fn uefi_wolfssl_client_free(session: *mut RawTlsSession);
@@ -40,6 +42,8 @@ unsafe extern "C" {
     fn uefi_wolfssl_peer_chain_count() -> c_int;
     fn uefi_wolfssl_copy_peer_chain_sha1(depth: c_int, output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_copy_bad_cert_sha256(output: *mut u8, capacity: usize) -> c_int;
+    fn uefi_wolfssl_bad_cert_der_length() -> c_int;
+    fn uefi_wolfssl_copy_bad_cert_der(output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_handshake(session: *mut RawTlsSession) -> c_int;
     fn uefi_wolfssl_read(session: *mut RawTlsSession, output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_write(session: *mut RawTlsSession, input: *const u8, length: usize) -> c_int;
@@ -95,6 +99,7 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
                 stream as *mut S as *mut c_void,
                 Some(send_callback::<S>),
                 Some(receive_callback::<S>),
+                Some(verification_progress_callback),
                 &mut raw,
             )
         };
@@ -144,6 +149,22 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
             return Err(TlsError::CertificateVerification(verification));
         }
         Ok(())
+    }
+
+    /// Return the exact DER bytes for the certificate rejected by wolfSSL.
+    /// The bridge caps this diagnostic copy at 16 KiB; an oversized certificate
+    /// remains rejected but its parsed field report is unavailable.
+    pub fn failing_certificate_der(&self) -> Option<Vec<u8>> {
+        let length = unsafe { uefi_wolfssl_bad_cert_der_length() };
+        if length <= 0 || length as usize > 16 * 1024 {
+            return None;
+        }
+        let mut der = Vec::new();
+        der.resize(length as usize, 0);
+        let copied = unsafe {
+            uefi_wolfssl_copy_bad_cert_der(der.as_mut_ptr(), der.len())
+        };
+        if copied == length { Some(der) } else { None }
     }
 
     /// Return SHA-1 fingerprints for the peer chain captured by wolfSSL's
@@ -215,6 +236,23 @@ impl<S: TlsStreamIo> Drop for TlsConnection<'_, S> {
             self.raw = core::ptr::null_mut();
         }
     }
+}
+
+unsafe extern "C" fn verification_progress_callback(event: c_int, depth: c_int, error: c_int) {
+    #[cfg(target_os = "uefi")]
+    match event {
+        1 => uefi::println!(
+            "[TLS VERIFY] Certificate at depth {} passed its current X.509 check; wolfSSL is continuing path validation.",
+            depth
+        ),
+        2 => uefi::println!(
+            "[TLS VERIFY] CERTIFICATE REJECTED at depth {} (0 = leaf); wolfSSL X.509 error {}. Capturing the exact rejected certificate.",
+            depth, error
+        ),
+        _ => {}
+    }
+    #[cfg(not(target_os = "uefi"))]
+    let _ = (event, depth, error);
 }
 
 unsafe extern "C" fn send_callback<S: TlsStreamIo>(
