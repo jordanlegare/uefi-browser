@@ -6,6 +6,7 @@ pub mod dns;
 pub mod document;
 pub mod entropy;
 pub mod http;
+pub mod grc_chain;
 pub mod network;
 pub mod tls;
 pub mod url;
