@@ -148,6 +148,21 @@ time_t uefi_wolfssl_time(time_t *timer)
     return result;
 }
 
+/*
+ * wolfSSL TLS 1.3 timer hook. The firmware clock is validated by the Rust
+ * platform layer; use its millisecond representation instead of relying on
+ * host OS timing APIs that do not exist in UEFI.
+ *
+ * wolfSSL's 32-bit millisecond timer intentionally wraps approximately every
+ * 49.7 days. Returning zero on an invalid firmware clock fails closed.
+ */
+uint32_t uefi_wolfssl_time_ms(void)
+{
+    int64_t now = uefi_browser_time_unix();
+    if (now < 0) return 0;
+    return (uint32_t)((uint64_t)now * UINT64_C(1000));
+}
+
 static int64_t days_from_civil(int64_t year, unsigned int month, unsigned int day)
 {
     int64_t era;
