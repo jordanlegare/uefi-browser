@@ -31,7 +31,7 @@ bash "$ROOT/scripts/fetch-wolfssl.sh"
 rm -rf "$BUILD" "$PREFIX" "$BRIDGE_BUILD"
 mkdir -p "$BRIDGE_BUILD"
 
-C_FLAGS="-DNOMINMAX -O2 -ffreestanding -fno-builtin -fshort-wchar -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE"
+C_FLAGS="-U_WIN32 -U_WIN64 -DNOMINMAX -O2 -ffreestanding -fno-builtin -fshort-wchar -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE"
 
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_SYSTEM_NAME=Generic \
@@ -41,7 +41,7 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_C_COMPILER_TARGET="$COFF_TARGET" \
   -DCMAKE_ASM_COMPILER=clang \
   -DCMAKE_ASM_COMPILER_TARGET="$COFF_TARGET" \
-  -DCMAKE_ASM_FLAGS="-DNOMINMAX -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE" \
+  -DCMAKE_ASM_FLAGS="-U_WIN32 -U_WIN64 -DNOMINMAX -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE" \
   -DCMAKE_C_FLAGS="$C_FLAGS" \
   -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
@@ -54,7 +54,7 @@ cmake --build "$BUILD" --parallel
 cmake --install "$BUILD"
 test -s "$PREFIX/lib/libwolfssl.a"
 
-BRIDGE_CFLAGS="-DNOMINMAX -std=c11 -O2 -ffreestanding -fno-builtin -fshort-wchar -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -I$SRC -I$PREFIX/include -isystem $MINGW_INCLUDE"
+BRIDGE_CFLAGS="-U_WIN32 -U_WIN64 -DNOMINMAX -std=c11 -O2 -ffreestanding -fno-builtin -fshort-wchar -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -I$SRC -I$PREFIX/include -isystem $MINGW_INCLUDE"
 
 clang $BRIDGE_CFLAGS --target="$COFF_TARGET" \
   -c "$ROOT/vendor/wolfssl-bridge/uefi_tls.c" \
