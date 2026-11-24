@@ -9,6 +9,8 @@
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfio.h>
+#include <wolfssl/wolfcrypt/sha.h>
+#include <wolfssl/wolfcrypt/sha256.h>
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
 typedef int (*uefi_recv_cb)(void *, unsigned char *, size_t);
@@ -17,9 +19,93 @@ extern time_t uefi_wolfssl_time(time_t *timer);
 
 static int uefi_last_ca_cert_index;
 static int64_t uefi_last_time_unix;
+static int uefi_last_verify_error;
+static int uefi_last_verify_depth;
+#define UEFI_MAX_PEER_CHAIN_CERTS 8
+
+static unsigned char uefi_last_bad_cert_sha256[32];
+static unsigned char uefi_peer_chain_sha1[UEFI_MAX_PEER_CHAIN_CERTS][20];
+static unsigned char uefi_peer_chain_present[UEFI_MAX_PEER_CHAIN_CERTS];
+static int uefi_peer_chain_count;
 
 int uefi_wolfssl_last_ca_cert_index(void) { return uefi_last_ca_cert_index; }
 int64_t uefi_wolfssl_last_time_unix(void) { return uefi_last_time_unix; }
+int uefi_wolfssl_last_verify_error(void) { return uefi_last_verify_error; }
+int uefi_wolfssl_last_verify_depth(void) { return uefi_last_verify_depth; }
+int uefi_wolfssl_peer_chain_count(void) { return uefi_peer_chain_count; }
+int uefi_wolfssl_copy_peer_chain_sha1(int depth, unsigned char *out,
+                                      size_t capacity)
+{
+    if (depth < 0 || depth >= UEFI_MAX_PEER_CHAIN_CERTS ||
+        !uefi_peer_chain_present[depth] || out == NULL || capacity < 20U) {
+        return -1;
+    }
+    memcpy(out, uefi_peer_chain_sha1[depth], 20U);
+    return 20;
+}
+int uefi_wolfssl_copy_bad_cert_sha256(unsigned char *out, size_t capacity)
+{
+    if (out == NULL || capacity < sizeof(uefi_last_bad_cert_sha256)) return -1;
+    memcpy(out, uefi_last_bad_cert_sha256, sizeof(uefi_last_bad_cert_sha256));
+    return (int)sizeof(uefi_last_bad_cert_sha256);
+}
+
+static void uefi_record_peer_certificate(WOLFSSL_X509_STORE_CTX *store)
+{
+    WOLFSSL_X509 *certificate;
+    const unsigned char *der;
+    int der_length = 0;
+    int depth;
+    wc_Sha sha;
+
+    if (store == NULL) return;
+    depth = wolfSSL_X509_STORE_CTX_get_error_depth(store);
+    if (depth < 0 || depth >= UEFI_MAX_PEER_CHAIN_CERTS) return;
+
+    certificate = wolfSSL_X509_STORE_CTX_get_current_cert(store);
+    if (certificate == NULL) return;
+    der = wolfSSL_X509_get_der(certificate, &der_length);
+    if (der == NULL || der_length <= 0) return;
+
+    if (wc_InitSha(&sha) != 0) return;
+    if (wc_ShaUpdate(&sha, der, (word32)der_length) == 0 &&
+        wc_ShaFinal(&sha, uefi_peer_chain_sha1[depth]) == 0) {
+        uefi_peer_chain_present[depth] = 1U;
+        if (uefi_peer_chain_count < depth + 1) {
+            uefi_peer_chain_count = depth + 1;
+        }
+    }
+    wc_ShaFree(&sha);
+}
+
+static int uefi_verify_diagnostic_callback(int preverify_ok,
+                                           WOLFSSL_X509_STORE_CTX *store)
+{
+    /* Collect the verified path by depth, including successful validations. */
+    uefi_record_peer_certificate(store);
+
+    if (!preverify_ok && store != NULL && uefi_last_verify_error == 0) {
+        WOLFSSL_X509 *certificate;
+        const unsigned char *der;
+        int der_length = 0;
+        wc_Sha256 sha256;
+
+        /* Record the exact certificate wolfSSL rejected; never alter the result. */
+        uefi_last_verify_error = wolfSSL_X509_STORE_CTX_get_error(store);
+        uefi_last_verify_depth = wolfSSL_X509_STORE_CTX_get_error_depth(store);
+        certificate = wolfSSL_X509_STORE_CTX_get_current_cert(store);
+        if (certificate != NULL) {
+            der = wolfSSL_X509_get_der(certificate, &der_length);
+            if (der != NULL && der_length > 0 && wc_InitSha256(&sha256) == 0) {
+                if (wc_Sha256Update(&sha256, der, (word32)der_length) == 0) {
+                    (void)wc_Sha256Final(&sha256, uefi_last_bad_cert_sha256);
+                }
+                wc_Sha256Free(&sha256);
+            }
+        }
+    }
+    return preverify_ok;
+}
 
 typedef struct {
     WOLFSSL_CTX *context;
@@ -105,6 +191,12 @@ int uefi_wolfssl_client_new(
     *output = NULL;
     uefi_last_ca_cert_index = 0;
     uefi_last_time_unix = (int64_t)uefi_wolfssl_time(NULL);
+    uefi_last_verify_error = 0;
+    uefi_last_verify_depth = -1;
+    memset(uefi_last_bad_cert_sha256, 0, sizeof(uefi_last_bad_cert_sha256));
+    memset(uefi_peer_chain_sha1, 0, sizeof(uefi_peer_chain_sha1));
+    memset(uefi_peer_chain_present, 0, sizeof(uefi_peer_chain_present));
+    uefi_peer_chain_count = 0;
 
     if (!wolfssl_initialized) {
         ret = wolfSSL_Init();
@@ -128,7 +220,7 @@ int uefi_wolfssl_client_new(
     }
 
     /* Peer verification is mandatory. No VERIFY_NONE mode is exposed. */
-    wolfSSL_CTX_set_verify(session->context, WOLFSSL_VERIFY_PEER, NULL);
+    wolfSSL_CTX_set_verify(session->context, WOLFSSL_VERIFY_PEER, uefi_verify_diagnostic_callback);
     /*
      * Load roots individually so ASN_AFTER_DATE_E can be tied to the exact
      * certificate position in the filtered bundle. Each successful call adds
