@@ -1238,10 +1238,12 @@ fn focus_targets(page: &BrowserPage, lines: &[RenderLine]) -> Vec<(usize, FocusT
         let BlockKind::FormControl {
             form_index,
             control_index,
-        } = block.kind
+        } = &block.kind
         else {
             continue;
         };
+        let form_index = *form_index;
+        let control_index = *control_index;
         let Some(control) = page
             .document
             .forms
@@ -2008,6 +2010,7 @@ fn run_browser_ui(
                 first_line = 0;
                 anchor_pending = true;
                 selected_link = None;
+                selected_control = None;
                 last_search.clear();
                 status = format!("Loaded HTTP {}", page.status);
             }
@@ -2152,9 +2155,9 @@ fn render_terminal_page(
                 let focused_control = line
                     .block_index
                     .and_then(|index| page.document.blocks.get(index))
-                    .is_some_and(|block| match block.kind {
+                    .is_some_and(|block| match &block.kind {
                         BlockKind::FormControl { form_index, control_index } => {
-                            selected_control == Some((form_index, control_index))
+                            selected_control == Some((*form_index, *control_index))
                         }
                         _ => false,
                     });
