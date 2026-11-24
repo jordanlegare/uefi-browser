@@ -429,7 +429,7 @@ fn parse_declarations(input: &str) -> Vec<Declaration> {
             escaped = false;
             continue;
         }
-        if character == '\\\\' && quote.is_some() {
+        if character == '\\' && quote.is_some() {
             escaped = true;
             continue;
         }
@@ -440,7 +440,7 @@ fn parse_declarations(input: &str) -> Vec<Declaration> {
             continue;
         }
         match character {
-            '\\'' | '"' => quote = Some(character),
+            '\'' | '"' => quote = Some(character),
             '(' => parentheses = parentheses.saturating_add(1),
             ')' => parentheses = parentheses.saturating_sub(1),
             ';' if parentheses == 0 => {
@@ -693,7 +693,7 @@ fn matches_compound(dom: &Dom, node: NodeId, selector: &CompoundSelector) -> boo
                 PseudoClass::NthChild(index) => position + 1 == *index,
                 PseudoClass::Empty => {
                     dom.children(node).iter().all(|child| {
-                        matches!(dom.nodes[*child].kind, crate::html5::NodeKind::Comment)
+                        matches!(&dom.nodes[*child].kind, crate::html5::NodeKind::Comment)
                     })
                 }
             };
