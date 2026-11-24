@@ -10,14 +10,14 @@ UEFI Browser is a standalone Rust application for x86-64 UEFI firmware. It is a 
 |---|---|
 | Firmware application | Rust `no_std` x86-64 UEFI application, packaged as a PE32+ EFI executable |
 | Ethernet and IP | Firmware Simple Network Protocol (SNP) NIC driver with smoltcp Ethernet, ARP, IPv4, DHCPv4, UDP and TCP |
-| DNS and time | Hickory DNS A/IN queries over UDP; SNTP bootstrap over UDP |
-| HTTP and HTTPS | HTTP/1.1 GET/POST, bounded response parsing, redirects, wolfSSL 5.9.4 TLS |
+| DNS and time | Hickory A/AAAA queries, bounded CNAME traversal, UDP with DNS/TCP retry for truncated replies; SNTP bootstrap over UDP |
+| HTTP and HTTPS | HTTP/1.1 GET/POST, bounded response parsing, redirects, ETag/Last-Modified conditional GET revalidation, wolfSSL 5.9.4 TLS |
 | TLS trust | Mandatory peer-chain and host-identity verification against embedded CA roots; no certificate bypass |
 | HTML | Bounded tokenizer and HTML5-style tree construction, including implied document/table nodes and common omitted-tag repair |
-| CSS and layout | Limited selector/cascade engine, terminal-oriented styles, width-aware text reflow and measured tables |
+| CSS and layout | Terminal CSS subset with type/class/ID/descendant, attribute and basic structural selectors, `!important` cascade, reflow and measured tables |
 | Navigation | Link focus/following, history, in-page search, same-document fragment navigation |
 | Forms | URL-encoded GET and POST controls; password input is masked and POST requires confirmation |
-| Persistence | Boot-volume bookmarks and an eight-entry, six-hour HTML/text page cache |
+| Persistence | Boot-volume bookmarks, 100-entry recent history, and an eight-entry HTML/text cache with conditional validators |
 
 This is a deliberately bounded HTML5/CSS subset. It does not implement the complete WHATWG HTML parsing algorithm, full CSS layout, JavaScript, or ELinks feature parity.
 
@@ -83,17 +83,17 @@ That script fetches and checksum-verifies the pinned wolfSSL source, builds the 
 
 The parser uses bounded token and tree storage. It handles quoted and unquoted attributes, text and character references, raw-text/RCDATA elements, implied html/head/body nodes, common optional end tags, and common table repairs such as implied table sections and rows. The document builder retains semantic blocks, inline formatting, links, anchors, forms and table-cell structure.
 
-The parser is not a complete WHATWG HTML implementation. Full insertion-mode behaviour, adoption-agency formatting repair, foster parenting, and the complete named character-reference set are not implemented. Resource limits prevent unbounded remote documents from consuming arbitrary memory: the tree is capped at 16,384 nodes, nesting at 128 levels, attributes at 64 per element, and token storage is bounded. Remote scripts are inert; they are never executed.
+The parser is not a complete WHATWG HTML implementation. It includes common implied-node and optional-tag repairs plus basic table foster parenting for misplaced text/elements, but full insertion-mode behaviour, adoption-agency formatting repair, and the complete named character-reference set are not implemented. Resource limits prevent unbounded remote documents from consuming arbitrary memory: the tree is capped at 16,384 nodes, nesting at 128 levels, attributes at 64 per element, and token storage is bounded. Remote scripts are inert; they are never executed.
 
 ### CSS and terminal layout
 
 The style engine applies rules from embedded style elements, up to four linked external stylesheets, and inline style attributes. External stylesheets are limited to 32 KiB each. An HTTPS document does not load an HTTP stylesheet.
 
-Supported selector forms include type, class, ID and descendant combinations. Supported terminal-relevant properties include display, font weight/style, text decoration, foreground/background colors, whitespace handling, margins, indentation, text alignment and percentage width. Colors are mapped to the UEFI 16-color console palette.
+Supported selector forms include type, universal, class, ID, descendant, attribute-presence/equality, and basic structural pseudo-classes (`:first-child`, `:last-child`, `:only-child`, `:empty`, and numeric `:nth-child(n)`). Normal and `!important` declarations participate in the implemented author-style cascade, including inline declarations. Supported terminal-relevant properties include display, font weight/style, text decoration, foreground/background colors, whitespace handling, margins, indentation, text alignment and percentage width. Colors are mapped to the UEFI 16-color console palette.
 
 The renderer reflows text to the active console width and measures table columns from cell contents. Long cells wrap, colspan contributes to column sizing, and bounded rowspan placement reserves columns across subsequent rows so the spanning cell remains vertically continuous. This is a text-console table model, not the full HTML table layout algorithm.
 
-Not implemented: full CSS cascade semantics (including complete !important handling), pseudo-classes/elements, media queries, @import, floats, positioned layout, flexbox, grid, browser font metrics, and complete table algorithms.
+Not implemented: the complete CSS cascade and selector grammar, pseudo-elements, most pseudo-classes/combinators, media queries, @import, floats, positioned layout, flexbox, grid, browser font metrics, and complete HTML table algorithms. The new selectors and cascade rules are deliberate bounded subsets, not browser-grade CSS conformance.
 
 ### Navigation, fragments and forms
 
@@ -109,11 +109,13 @@ Persistent records are stored in the **UEFI_BROWSER** directory on the filesyste
 
 - Bookmarks: up to 64 saved entries.
 - Page cache: up to 8 URL-hashed entries, with a maximum body size of 256 KiB per entry.
-- Expiry: cached pages expire after six hours, evaluated using the validated UEFI UTC clock.
+- Expiry: entries without validators use a six-hour local freshness window, evaluated using the validated UEFI UTC clock.
+- Revalidation: cached entries carrying ETag or Last-Modified are checked with conditional GET requests; a 304 response reuses the stored body.
 - Cached content: successful HTML/plain-text GET responses only.
+- Browsing history: up to 100 recent URLs/titles/timestamps, with duplicate URLs moved to the newest position.
 - Exclusions: responses marked no-store, no-cache or private, and responses containing Set-Cookie, are not persisted.
 
-Pages served from disk cache are visibly marked in the browser status/header. If the EFI image's filesystem is unavailable or read-only, the browser continues without persistent storage.
+Pages served from disk cache are visibly marked in the browser status/header. The `history` command lists persistent visits, `open-history N` reopens an entry, and `clear-history` removes the history file. If the EFI image's filesystem is unavailable or read-only, the browser continues without persistent storage.
 
 ## Keyboard and command reference
 
@@ -249,9 +251,10 @@ Current limitations include:
 - No file uploads, multipart forms, downloads or full HTML form validation.
 - No complete HTML Living Standard parser or complete CSS layout engine.
 - Basic rowspan-aware table cell placement is implemented; the full HTML table layout algorithm, flexbox, grid, floats and positioned elements remain unsupported.
-- DNS uses IPv4 A queries and follows bounded CNAME chains in the answer section; AAAA, DNSSEC and DNS-over-TCP fallback are not implemented.
-- The page cache does not perform conditional revalidation.
-- Firmware boot/runtime interoperability has not yet been demonstrated across OVMF and physical machines.
+- DNS supports A and AAAA query construction/answer parsing with bounded CNAME traversal, and retries truncated UDP answers over DNS/TCP. DNS transport to the configured resolver and browser TCP sockets are still IPv4-only; IPv6-only destinations are not yet reachable. DNSSEC and DNS-over-TLS/HTTPS are not implemented.
+- Conditional HTTP cache revalidation supports ETag and Last-Modified with 304 reuse; full RFC 9111 freshness, Vary, heuristic caching and cache-control semantics are not implemented.
+- Table layout supports measured columns, colspan and bounded rowspan placement; row-group-aware rowspan=0 and the full HTML table layout algorithm remain incomplete.
+- Firmware boot/runtime interoperability has not yet been demonstrated across OVMF and physical machines. See [Firmware Runtime Test Plan](docs/FIRMWARE-TESTING.md).
 
 The SNTP bootstrap is not authenticated time. Packet validation helps reject unrelated or malformed replies but does not prevent an on-path attacker from forging a response. TLS validation remains mandatory; the browser does not disable certificate date checks when time is unavailable.
 
@@ -261,26 +264,29 @@ The project is a clean-room Rust implementation inspired by ELinks' text-browser
 
 ## Roadmap
 
-- [x] Standalone Rust no_std x86-64 UEFI application.
+- [x] Standalone Rust no_std x86-64 UEFI application and PE32+ EFI image.
 - [x] SNP-backed Ethernet and in-application smoltcp IPv4/DHCP/UDP/TCP stack.
-- [x] Hickory DNS and SNTP bootstrap.
-- [x] wolfSSL TLS with mandatory certificate and hostname validation.
-- [x] Bounded HTML5-style tree construction and terminal-oriented CSS subset.
-- [x] Width-aware reflow, measured table columns, colspan sizing and bounded rowspan layout.
+- [x] Hickory DNS A queries, bounded CNAME chains and SNTP bootstrap.
+- [x] DNS AAAA query/answer parsing and bounded CNAME traversal.
+- [x] DNS-over-TCP retry when a UDP answer is marked truncated.
+- [x] wolfSSL TLS with mandatory certificate-chain, validity-time and hostname validation.
+- [x] Bounded HTML tree construction, implied nodes, optional end-tag repairs and basic table foster parenting.
+- [ ] Complete WHATWG HTML parsing, adoption-agency formatting repair and full character-reference coverage.
+- [x] Terminal CSS type/class/ID/descendant, attribute-presence/equality and basic structural selectors.
+- [x] Normal/important cascade ordering for the supported CSS declarations.
+- [ ] Complete CSS grammar, pseudo-elements, flexbox, grid, floats, positioned layout and media queries.
+- [x] Width-aware text reflow, measured table columns, colspan and bounded rowspan placement.
+- [ ] Complete table row-group semantics, rowspan=0 and full HTML table layout algorithms.
 - [x] Fragment navigation and URL-encoded GET/POST forms.
-- [x] Inline visible form controls, direct keyboard editing, checkbox/radio/select interaction, and Enter submission.
-- [x] Arrow-key focus movement across links and form controls.
-- [x] Visible ASCII input widgets with a focusable interior and insertion marker, rendered in source HTML order.
-- [x] Persistent bookmarks and bounded disk page cache.
-- [ ] Expand HTML parsing toward complete WHATWG insertion-mode and error-recovery behaviour.
-- [x] Add basic rowspan-aware cell placement and vertical cell layout.
-- [ ] Complete remaining HTML table algorithms and complex width/row-group handling.
-- [ ] Extend CSS support where useful for a text-console browser.
-- [x] Follow bounded CNAME chains in DNS A responses.
-- [ ] Add DNS AAAA handling and DNS-over-TCP fallback.
-- [ ] Add cache revalidation and persistent browsing history.
-- [ ] Add OVMF and physical-firmware runtime test coverage.
+- [x] Visible ASCII form controls, direct editing, focus movement and Enter submission.
+- [x] Persistent bookmarks, bounded page cache, ETag/Last-Modified revalidation and 304 body reuse.
+- [x] Persistent bounded browsing history with list, reopen and clear commands.
+- [ ] Full RFC 9111 caching semantics, including Vary and complete Cache-Control handling.
+- [ ] IPv6 network configuration and IPv6 TCP/HTTPS connections (DNS AAAA answers alone do not provide IPv6 reachability).
+- [ ] Automated OVMF boot/network/form smoke testing.
+- [ ] Physical-firmware and NIC interoperability testing.
 
+The current branch implements a substantially broader, tested terminal-browser subset, but this project is not yet a fully conformant WHATWG browser. Firmware runtime checks remain separate from compile-time CI and must be completed in OVMF and on target hardware.
 ## References
 
 - [Hickory DNS protocol crate](https://docs.rs/hickory-proto/0.26.3/hickory_proto/)
