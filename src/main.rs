@@ -1538,6 +1538,7 @@ fn run_browser_ui(
                         .and_then(|form| form.controls.get_mut(control))
                     {
                         if control_accepts_text(field.kind)
+                            && !field.read_only
                             && !character.is_control()
                             && field.value.len().saturating_add(character.len_utf8())
                                 <= MAX_INPUT_BYTES
@@ -1559,7 +1560,7 @@ fn run_browser_ui(
                         .get_mut(form)
                         .and_then(|form| form.controls.get_mut(control))
                     {
-                        if control_accepts_text(field.kind) {
+                        if control_accepts_text(field.kind) && !field.read_only {
                             field.value.pop();
                             status = format!("Editing {}", field.label);
                         }
