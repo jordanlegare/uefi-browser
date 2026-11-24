@@ -5,12 +5,21 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfio.h>
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
 typedef int (*uefi_recv_cb)(void *, unsigned char *, size_t);
+
+extern time_t uefi_wolfssl_time(time_t *timer);
+
+static int uefi_last_ca_cert_index;
+static int64_t uefi_last_time_unix;
+
+int uefi_wolfssl_last_ca_cert_index(void) { return uefi_last_ca_cert_index; }
+int64_t uefi_wolfssl_last_time_unix(void) { return uefi_last_time_unix; }
 
 typedef struct {
     WOLFSSL_CTX *context;
@@ -94,6 +103,8 @@ int uefi_wolfssl_client_new(
         return -1;
     }
     *output = NULL;
+    uefi_last_ca_cert_index = 0;
+    uefi_last_time_unix = (int64_t)uefi_wolfssl_time(NULL);
 
     if (!wolfssl_initialized) {
         ret = wolfSSL_Init();
@@ -118,9 +129,50 @@ int uefi_wolfssl_client_new(
 
     /* Peer verification is mandatory. No VERIFY_NONE mode is exposed. */
     wolfSSL_CTX_set_verify(session->context, WOLFSSL_VERIFY_PEER, NULL);
-    ret = wolfSSL_CTX_load_verify_buffer(
-        session->context, ca_pem, (long)ca_pem_len, WOLFSSL_FILETYPE_PEM);
-    if (ret != WOLFSSL_SUCCESS) goto fail;
+    /*
+     * Load roots individually so ASN_AFTER_DATE_E can be tied to the exact
+     * certificate position in the filtered bundle. Each successful call adds
+     * a root to the same wolfSSL certificate store.
+     */
+    {
+        static const char begin_marker[] = "-----BEGIN CERTIFICATE-----";
+        static const char end_marker[] = "-----END CERTIFICATE-----";
+        const char *cursor = (const char *)ca_pem;
+        const char *limit = cursor + ca_pem_len;
+        int cert_index = 0;
+
+        while (cursor < limit) {
+            const char *begin = strstr(cursor, begin_marker);
+            const char *end;
+            const char *after_end;
+            size_t pem_len;
+
+            if (begin == NULL || begin >= limit) break;
+            end = strstr(begin, end_marker);
+            if (end == NULL || end >= limit) {
+                ret = -4;
+                goto fail;
+            }
+            after_end = end + sizeof(end_marker) - 1U;
+            if (after_end > limit) {
+                ret = -4;
+                goto fail;
+            }
+            pem_len = (size_t)(after_end - begin);
+            ++cert_index;
+            uefi_last_ca_cert_index = cert_index;
+            ret = wolfSSL_CTX_load_verify_buffer(
+                session->context, (const unsigned char *)begin,
+                (long)pem_len, WOLFSSL_FILETYPE_PEM);
+            if (ret != WOLFSSL_SUCCESS) goto fail;
+            cursor = after_end;
+        }
+        if (cert_index == 0) {
+            ret = -4;
+            goto fail;
+        }
+        uefi_last_ca_cert_index = 0;
+    }
 
     wolfSSL_CTX_SetIORecv(session->context, bio_recv);
     wolfSSL_CTX_SetIOSend(session->context, bio_send);

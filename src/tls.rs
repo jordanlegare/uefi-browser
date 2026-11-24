@@ -32,6 +32,8 @@ unsafe extern "C" {
         output: *mut *mut RawTlsSession,
     ) -> c_int;
     fn uefi_wolfssl_client_free(session: *mut RawTlsSession);
+    fn uefi_wolfssl_last_ca_cert_index() -> c_int;
+    fn uefi_wolfssl_last_time_unix() -> i64;
     fn uefi_wolfssl_handshake(session: *mut RawTlsSession) -> c_int;
     fn uefi_wolfssl_read(session: *mut RawTlsSession, output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_write(session: *mut RawTlsSession, input: *const u8, length: usize) -> c_int;
@@ -43,7 +45,11 @@ pub enum TlsError {
     NotHttps,
     InvalidHostname,
     InvalidCaBundle,
-    Initialization(c_int),
+    Initialization {
+        code: c_int,
+        ca_cert_index: c_int,
+        wolfssl_time_unix: i64,
+    },
     Handshake(c_int),
     CertificateVerification(u32),
     Read(c_int),
@@ -82,10 +88,18 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
             )
         };
         if result != 0 {
-            return Err(TlsError::Initialization(result));
+            return Err(TlsError::Initialization {
+                code: result,
+                ca_cert_index: unsafe { uefi_wolfssl_last_ca_cert_index() },
+                wolfssl_time_unix: unsafe { uefi_wolfssl_last_time_unix() },
+            });
         }
         if raw.is_null() {
-            return Err(TlsError::Initialization(-1));
+            return Err(TlsError::Initialization {
+                code: -1,
+                ca_cert_index: 0,
+                wolfssl_time_unix: -1,
+            });
         }
         Ok(Self {
             raw,
