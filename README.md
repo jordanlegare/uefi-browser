@@ -8,7 +8,7 @@ UEFI Browser is a standalone Rust application for x86-64 UEFI firmware. It is a 
 
 | Area | Current implementation |
 |---|---|
-| Firmware application | Rust \`no_std\` x86-64 UEFI application, packaged as a PE32+ EFI executable |
+| Firmware application | Rust `no_std` x86-64 UEFI application, packaged as a PE32+ EFI executable |
 | Ethernet and IP | Firmware Simple Network Protocol (SNP) NIC driver with smoltcp Ethernet, ARP, IPv4, DHCPv4, UDP and TCP |
 | DNS and time | Hickory DNS A/IN queries over UDP; SNTP bootstrap over UDP |
 | HTTP and HTTPS | HTTP/1.1 GET/POST, bounded response parsing, redirects, wolfSSL 5.9.4 TLS |
@@ -146,7 +146,7 @@ The command prompt supports URL opening, opening a numbered link or bookmark, bo
     clear-cache
     search WORD
 
-Use \`form N\` to interact with a numbered form. The browser asks for confirmation before sending a POST request.
+Use `form N` to interact with a numbered form. The browser asks for confirmation before sending a POST request.
 
 ## Build and test
 
