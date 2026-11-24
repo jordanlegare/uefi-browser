@@ -627,11 +627,9 @@ impl UdpDnsTransport for SnpNetwork {
         let mut response_prefix = [0u8; 2];
         let mut prefix_read = 0usize;
         while prefix_read < response_prefix.len() {
-            let count = crate::tls::TlsStreamIo::receive(
-                &mut stream,
-                &mut response_prefix[prefix_read..],
-            )
-            .map_err(|_| DnsIoError::Timeout)?;
+            let count =
+                crate::tls::TlsStreamIo::receive(&mut stream, &mut response_prefix[prefix_read..])
+                    .map_err(|_| DnsIoError::Timeout)?;
             if count == 0 || count > response_prefix.len() - prefix_read {
                 return Err(DnsIoError::InvalidDatagram);
             }
