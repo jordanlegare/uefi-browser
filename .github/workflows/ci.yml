@@ -56,3 +56,4 @@ jobs:
           path: |
             target/x86_64-unknown-uefi/release/uefi-browser.efi
             dist/EFI/BOOT/BOOTX64.EFI
+            build/cacert-uefi.manifest
