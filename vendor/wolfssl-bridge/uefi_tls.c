@@ -24,6 +24,32 @@ typedef struct {
 extern void *uefi_wolfssl_malloc(size_t size, void *heap, int type);
 extern void uefi_wolfssl_free(void *pointer, void *heap, int type);
 
+static int is_ipv4_literal(const char *hostname)
+{
+    unsigned int octet = 0;
+    unsigned int digits = 0;
+    unsigned int dots = 0;
+    const unsigned char *cursor = (const unsigned char *)hostname;
+
+    if (hostname == NULL || *hostname == '\\0') return 0;
+    for (;;) {
+        if (*cursor >= '0' && *cursor <= '9') {
+            octet = octet * 10U + (unsigned int)(*cursor - '0');
+            if (++digits > 3 || octet > 255U) return 0;
+        } else if (*cursor == '.' || *cursor == '\\0') {
+            if (digits == 0) return 0;
+            ++dots;
+            if (*cursor == '\\0') break;
+            octet = 0;
+            digits = 0;
+        } else {
+            return 0;
+        }
+        ++cursor;
+    }
+    return dots == 4;
+}
+
 static int bio_send(WOLFSSL *ssl, char *data, int length, void *context)
 {
     uefi_wolfssl_session *session = (uefi_wolfssl_session *)context;
@@ -112,7 +138,11 @@ int uefi_wolfssl_client_new(
     ret = wolfSSL_UseSNI(session->ssl, WOLFSSL_SNI_HOST_NAME,
                          hostname, (unsigned short)hostname_len);
     if (ret != WOLFSSL_SUCCESS) goto fail;
-    ret = wolfSSL_check_domain_name(session->ssl, (const char *)hostname);
+    if (is_ipv4_literal((const char *)hostname)) {
+        ret = wolfSSL_check_ip_address(session->ssl, (const char *)hostname);
+    } else {
+        ret = wolfSSL_check_domain_name(session->ssl, (const char *)hostname);
+    }
     if (ret != WOLFSSL_SUCCESS) goto fail;
 
     *output = session;
