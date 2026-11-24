@@ -8,15 +8,11 @@
 #ifndef __ASSEMBLER__
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <time.h>
 #endif
 
-/*
- * The EFI image uses the x86-64 Windows PE/COFF ABI, so _WIN32/_WIN64
- * must remain defined by the MinGW target. The firmware is not Windows,
- * however: suppress wolfSSL's Windows API backend and use the UEFI
- * platform hooks below instead.
- */
+/* Keep the x86-64 PE/COFF ABI, but do not use Windows OS APIs. */
 #define WOLFSSL_NOT_WINDOWS_API
 
 #define SINGLE_THREADED
@@ -75,11 +71,20 @@
 #define XTIME uefi_wolfssl_time
 #define XGMTIME uefi_wolfssl_gmtime
 
+/*
+ * wolfSSL TLS 1.3 uses TimeNowInMilliseconds for protocol timers.
+ * Route it through our firmware clock hook rather than POSIX gettimeofday()
+ * or Windows performance-counter APIs.
+ */
+#define WOLFSSL_32BIT_MILLI_TIME
+#define XTIME_MS uefi_wolfssl_time_ms
+
 #define XSNPRINTF uefi_wolfssl_snprintf
 #define XVSNPRINTF uefi_wolfssl_vsnprintf
 #ifndef __ASSEMBLER__
 extern int uefi_wolfssl_rng(unsigned char *output, unsigned int size);
 extern time_t uefi_wolfssl_time(time_t *timer);
+extern uint32_t uefi_wolfssl_time_ms(void);
 extern struct tm *uefi_wolfssl_gmtime(const time_t *timer, struct tm *result);
 extern int uefi_wolfssl_snprintf(char *buffer, size_t size, const char *format, ...);
 extern int uefi_wolfssl_vsnprintf(char *buffer, size_t size, const char *format, va_list args);
