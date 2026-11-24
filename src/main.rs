@@ -436,7 +436,9 @@ fn describe_tls_failure(error: &uefi_browser::tls::TlsError) -> String {
             };
             let reason = match *code {
                 188 => "No trusted issuer could be found for a certificate in the presented chain.",
-                _ => "wolfSSL rejected the peer certificate chain; see the raw verifier code below.",
+                _ => {
+                    "wolfSSL rejected the peer certificate chain; see the raw verifier code below."
+                }
             };
             let suspicion = if *code == 188 {
                 "SECURITY ASSESSMENT: Possible TLS interception, but MITM is NOT proven. An intercepting proxy can present a certificate signed by an untrusted local CA; a missing intermediate or incomplete trust bundle can produce the same failure."
