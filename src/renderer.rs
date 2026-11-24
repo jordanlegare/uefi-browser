@@ -935,6 +935,10 @@ mod tests {
             lines.iter().filter(|line| line.focusable_control).count(),
             2
         );
+        let username_focus = line_for_control(&lines, 0).unwrap();
+        let password_focus = line_for_control(&lines, 1).unwrap();
+        assert!(lines[username_focus].plain_text().contains("alice_"));
+        assert!(lines[password_focus].plain_text().contains("******_"));
         assert!(lines.iter().all(|line| line.width <= 60));
     }
 
