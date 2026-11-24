@@ -157,14 +157,20 @@ impl StyleSheet {
         }
 
         matched.sort_by_key(|(specificity, order, _)| (*specificity, *order));
-        let inline = dom.attr(node, "style").map(parse_declarations).unwrap_or_default();
+        let inline = dom
+            .attr(node, "style")
+            .map(parse_declarations)
+            .unwrap_or_default();
 
         // Normal declarations cascade first; important declarations cascade
         // in a second pass so a lower-specificity !important rule still wins
         // over a normal inline declaration.
         for important in [false, true] {
             for (_, _, declarations) in &matched {
-                for declaration in declarations.iter().filter(|item| item.important == important) {
+                for declaration in declarations
+                    .iter()
+                    .filter(|item| item.important == important)
+                {
                     apply_declaration(&mut result, &declaration.property, &declaration.value);
                 }
             }
@@ -504,13 +510,15 @@ fn parse_selector(input: &str) -> Option<Selector> {
         let mut compound = CompoundSelector::default();
         let bytes = token.as_bytes();
         let mut cursor = 0usize;
-        if cursor < bytes.len() && bytes[cursor] != b'#'
-            && bytes[cursor] != b'.' && bytes[cursor] != b'[' && bytes[cursor] != b':'
+        if cursor < bytes.len()
+            && bytes[cursor] != b'#'
+            && bytes[cursor] != b'.'
+            && bytes[cursor] != b'['
+            && bytes[cursor] != b':'
             && bytes[cursor] != b'*'
         {
             let start = cursor;
-            while cursor < bytes.len()
-                && !matches!(bytes[cursor], b'#' | b'.' | b'[' | b':' | b'*')
+            while cursor < bytes.len() && !matches!(bytes[cursor], b'#' | b'.' | b'[' | b':' | b'*')
             {
                 cursor += 1;
             }
@@ -691,11 +699,9 @@ fn matches_compound(dom: &Dom, node: NodeId, selector: &CompoundSelector) -> boo
                 PseudoClass::LastChild => position + 1 == siblings.len(),
                 PseudoClass::OnlyChild => siblings.len() == 1,
                 PseudoClass::NthChild(index) => position + 1 == *index,
-                PseudoClass::Empty => {
-                    dom.children(node).iter().all(|child| {
-                        matches!(&dom.nodes[*child].kind, crate::html5::NodeKind::Comment)
-                    })
-                }
+                PseudoClass::Empty => dom.children(node).iter().all(|child| {
+                    matches!(&dom.nodes[*child].kind, crate::html5::NodeKind::Comment)
+                }),
             };
             if !matches {
                 return false;
