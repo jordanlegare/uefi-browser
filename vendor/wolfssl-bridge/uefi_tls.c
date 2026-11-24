@@ -14,6 +14,7 @@
 
 typedef int (*uefi_send_cb)(void *, const unsigned char *, size_t);
 typedef int (*uefi_recv_cb)(void *, unsigned char *, size_t);
+typedef void (*uefi_tls_progress_cb)(int, int, int);
 
 extern time_t uefi_wolfssl_time(time_t *timer);
 
@@ -22,6 +23,12 @@ static int64_t uefi_last_time_unix;
 static int uefi_last_verify_error;
 static int uefi_last_verify_depth;
 #define UEFI_MAX_PEER_CHAIN_CERTS 8
+#define UEFI_MAX_BAD_CERT_DER_BYTES 16384U
+
+static uefi_tls_progress_cb uefi_progress_callback;
+static unsigned int uefi_peer_chain_reported_mask;
+static unsigned char uefi_last_bad_cert_der[UEFI_MAX_BAD_CERT_DER_BYTES];
+static int uefi_last_bad_cert_der_length;
 
 static unsigned char uefi_last_bad_cert_sha256[32];
 static unsigned char uefi_peer_chain_sha1[UEFI_MAX_PEER_CHAIN_CERTS][20];
@@ -33,6 +40,17 @@ int64_t uefi_wolfssl_last_time_unix(void) { return uefi_last_time_unix; }
 int uefi_wolfssl_last_verify_error(void) { return uefi_last_verify_error; }
 int uefi_wolfssl_last_verify_depth(void) { return uefi_last_verify_depth; }
 int uefi_wolfssl_peer_chain_count(void) { return uefi_peer_chain_count; }
+int uefi_wolfssl_bad_cert_der_length(void)
+{
+    return uefi_last_bad_cert_der_length;
+}
+int uefi_wolfssl_copy_bad_cert_der(unsigned char *out, size_t capacity)
+{
+    if (out == NULL || uefi_last_bad_cert_der_length <= 0 ||
+        capacity < (size_t)uefi_last_bad_cert_der_length) return -1;
+    memcpy(out, uefi_last_bad_cert_der, (size_t)uefi_last_bad_cert_der_length);
+    return uefi_last_bad_cert_der_length;
+}
 int uefi_wolfssl_copy_peer_chain_sha1(int depth, unsigned char *out,
                                       size_t capacity)
 {
@@ -67,6 +85,11 @@ static void uefi_record_peer_certificate(WOLFSSL_X509_STORE_CTX *store)
     der = wolfSSL_X509_get_der(certificate, &der_length);
     if (der == NULL || der_length <= 0) return;
 
+    if ((uefi_peer_chain_reported_mask & (1U << (unsigned int)depth)) == 0U) {
+        uefi_peer_chain_reported_mask |= (1U << (unsigned int)depth);
+        if (uefi_progress_callback != NULL) uefi_progress_callback(1, depth, 0);
+    }
+
     if (wc_InitSha(&sha) != 0) return;
     if (wc_ShaUpdate(&sha, der, (word32)der_length) == 0 &&
         wc_ShaFinal(&sha, uefi_peer_chain_sha1[depth]) == 0) {
@@ -96,12 +119,20 @@ static int uefi_verify_diagnostic_callback(int preverify_ok,
         certificate = wolfSSL_X509_STORE_CTX_get_current_cert(store);
         if (certificate != NULL) {
             der = wolfSSL_X509_get_der(certificate, &der_length);
+            if (der != NULL && der_length > 0 &&
+                (unsigned int)der_length <= UEFI_MAX_BAD_CERT_DER_BYTES) {
+                memcpy(uefi_last_bad_cert_der, der, (size_t)der_length);
+                uefi_last_bad_cert_der_length = der_length;
+            }
             if (der != NULL && der_length > 0 && wc_InitSha256(&sha256) == 0) {
                 if (wc_Sha256Update(&sha256, der, (word32)der_length) == 0) {
                     (void)wc_Sha256Final(&sha256, uefi_last_bad_cert_sha256);
                 }
                 wc_Sha256Free(&sha256);
             }
+        }
+        if (uefi_progress_callback != NULL) {
+            uefi_progress_callback(2, uefi_last_verify_depth, uefi_last_verify_error);
         }
     }
     return preverify_ok;
@@ -177,7 +208,7 @@ int uefi_wolfssl_client_new(
     const unsigned char *hostname, size_t hostname_len,
     const unsigned char *ca_pem, size_t ca_pem_len,
     void *io_context, uefi_send_cb send_cb, uefi_recv_cb recv_cb,
-    uefi_wolfssl_session **output)
+    uefi_tls_progress_cb progress_cb, uefi_wolfssl_session **output)
 {
     static int wolfssl_initialized;
     uefi_wolfssl_session *session;
@@ -197,6 +228,9 @@ int uefi_wolfssl_client_new(
     memset(uefi_peer_chain_sha1, 0, sizeof(uefi_peer_chain_sha1));
     memset(uefi_peer_chain_present, 0, sizeof(uefi_peer_chain_present));
     uefi_peer_chain_count = 0;
+    uefi_peer_chain_reported_mask = 0U;
+    uefi_last_bad_cert_der_length = 0;
+    uefi_progress_callback = progress_cb;
 
     if (!wolfssl_initialized) {
         ret = wolfSSL_Init();
@@ -359,6 +393,7 @@ uint32_t uefi_wolfssl_verify_result(uefi_wolfssl_session *session)
 void uefi_wolfssl_client_free(uefi_wolfssl_session *session)
 {
     if (session == NULL) return;
+    uefi_progress_callback = NULL;
     if (session->ssl != NULL) wolfSSL_free(session->ssl);
     if (session->context != NULL) wolfSSL_CTX_free(session->context);
     uefi_wolfssl_free(session, NULL, 0);
