@@ -2,7 +2,7 @@
 
 A standalone Rust application for x86-64 UEFI firmware, intended to grow into a full terminal web browser in the style of ELinks. It is packaged as a PE32+ EFI application and designed to run before an operating system.
 
-> **Status: wolfSSL replacement in progress; wolfSSL build and runtime firmware/network tests pending.** The source includes an EFI Simple Network Protocol (SNP) Ethernet adapter, an in-application smoltcp IPv4/DHCP/UDP/TCP stack, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. The wolfSSL 5.9.4 replacement is being integrated on a feature branch; its complete PE32+ x86-64 build is pending CI. It has not yet been boot-tested under OVMF or on physical firmware, and it is not feature-equivalent to ELinks.
+> **Status: wolfSSL-linked EFI image build is CI-verified; this renderer expansion is awaiting its own CI and firmware runtime test.** The browser includes SNP Ethernet, smoltcp IPv4/DHCP/UDP/TCP, Hickory DNS, mandatory wolfSSL 5.9.4 certificate validation, a bounded HTML tree builder, a CSS subset, width-aware table layout, GET/POST forms, fragments, boot-volume bookmarks, and an eight-slot persistent page cache. This is not full HTML5/CSS conformance or ELinks feature parity. Boot and interactive rendering of this new engine still require OVMF and physical-firmware testing.
 
 ## TLS certificate failure diagnostics
 
@@ -68,7 +68,7 @@ Hickory DNS over UDP         NTP over UDP/123
               HTTP/1.1 client
                     |
                     v
-HTML text/link parser -> firmware-console renderer -> keyboard navigation
+bounded HTML tree -> CSS cascade -> table/block layout -> firmware-console renderer -> keyboard navigation
 ~~~
 
 The firmware path is implemented in src/snp_network.rs. It locates an EFI_SIMPLE_NETWORK_PROTOCOL handle, starts and initializes the NIC, enables unicast/broadcast/multicast reception, and exposes complete Ethernet frames through smoltcp's Device trait. smoltcp performs ARP, IPv4 routing, DHCPv4, UDP, and TCP in the EFI application. DHCP configuration supplies the address, default route, and DNS resolver; no EFI IPv4 Config2 protocol is consulted. The browser creates the SNP/smoltcp stack once at startup, acquires its DHCP lease, synchronizes the clock, and retains the interface for the entire navigation session. Each connect_firmware_url() call resolves the requested hostname with Hickory over a smoltcp UDP socket and opens a smoltcp TCP socket on that already-configured interface. The returned FirmwareConnection temporarily borrows the persistent stack while HTTP/TLS I/O runs; dropping the connection closes only its TCP socket, not the DHCP lease or NIC state. The original URL hostname remains available for TLS SNI and certificate identity checks.
@@ -93,7 +93,12 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | x86-64 UEFI target configuration | Present |
 | Firmware console startup and interactive input | Implemented |
 | HTTP/HTTPS URL parser and relative URL resolution | Implemented in portable core |
-| HTML title/text/anchor extraction | Implemented in portable core |
+| Bounded HTML5-style tokenization and DOM tree construction | Implemented in portable core; not full WHATWG conformance |
+| CSS cascade and console-oriented layout subset | Implemented for internal/linked stylesheets and inline declarations |
+| Width-calculated terminal tables | Implemented for columns and colspan; rowspan layout is not yet implemented |
+| Fragment navigation | Implemented without an extra HTTP request for same-document fragments |
+| GET/POST URL-encoded forms | Implemented with masked password input and explicit POST confirmation |
+| Persistent bookmarks and bounded page cache | Implemented on the EFI image's boot volume |
 | Hickory DNS message encoding/decoding | Implemented with default std features disabled |
 | DNS A-query client and response validation | Implemented with bounded retries and response checks |
 | SNP Ethernet driver adapter | Implemented using EFI_SIMPLE_NETWORK_PROTOCOL |
@@ -116,8 +121,11 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | HTTP fetch over smoltcp TCP | Integrated in the browser loop |
 | HTTPS fetch over wolfSSL | Adapter integrated; end-to-end firmware test pending |
 | Terminal navigation loop | Implemented: open URL, links, back, forward, reload, search, help, quit |
-| Reflowing ELinks-style viewport, keyboard link focus and scrolling controls | Not yet implemented |
-| CSS, JavaScript, forms, cookies, bookmarks and downloads | Not implemented |
+| ELinks-style viewport, keyboard link focus and scrolling controls | Implemented |
+| HTML5-style DOM construction and CSS-aware layout | Implemented subset; no full browser conformance |
+| Forms (GET/POST URL-encoded) and fragment navigation | Implemented; file uploads, multipart and JavaScript are not supported |
+| Bookmarks and persistent page cache | Implemented on the UEFI boot volume; cache is bounded and time-limited |
+| Cookies, JavaScript, downloads and full CSS layout | Not implemented |
 | QEMU/OVMF network integration test | Not yet run |
 | EFI image | Produced and uploaded as a CI artifact; OVMF/physical-firmware validation remains pending |
 
@@ -129,8 +137,12 @@ The SNP adapter and smoltcp integration are concrete implementations, not just t
 |---|---|
 | src/main.rs | UEFI entry point, interactive terminal navigation, redirect policy and page rendering |
 | src/url.rs | HTTP/HTTPS URL parsing, default ports, authority validation and relative URL resolution |
-| src/document.rs | Structured HTML block/inline parser, link targets, and public-domain ELinks named-entity data |
-| src/renderer.rs | Width-aware terminal line layout, wrapping, Unicode cell widths, and rendered-link positions |
+| src/html5.rs | Bounded HTML tokenizer and HTML5-style DOM construction with implied document/table nodes |
+| src/css.rs | Bounded stylesheet parser, selector matching and inherited terminal-oriented computed styles |
+| src/document.rs | DOM-to-document conversion, links, anchors, forms, tables and public-domain ELinks named entities |
+| src/renderer.rs | Width-aware reflow, computed text styles, measurable table columns and link/anchor line positions |
+| src/persistence.rs | Versioned bookmark and page-cache records, expiry, size limits and storage abstraction |
+| src/uefi_storage.rs | Persistent storage adapter for the EFI image's boot-volume filesystem |
 | src/http.rs | HTTP/1.1 GET builder, response parsing, chunked decoding and stream exchange |
 | src/dns.rs | Hickory DNS A-query construction, bounded UDP exchange contract and response validation |
 | src/entropy.rs | Secure-random provider interface used by DNS; TLS uses wolfCrypt's EFI_RNG entropy driver |
@@ -216,18 +228,45 @@ The repository does not commit a periodically refreshed CA bundle by default. HT
 7. Bounded network operations and correct release of TCP and TLS resources.
 8. A maintained wolfSSL release with security fixes.
 
-## ELinks-inspired terminal renderer
+## ELinks-inspired HTML and terminal engine
 
-The terminal frontend and layout engine are implemented in native Rust for the UEFI text console. The document parser now retains semantic blocks (headings, paragraphs, lists, quotations, preformatted text, definition lists and table rows), inline emphasis/code, and link identity. The renderer reflows content to the active console width, accounts for common double-width and combining Unicode ranges, and keeps links addressable after wrapping.
+This is a clean-room Rust implementation inspired by the behaviour of ELinks. The upstream GPLv2-only C application is not linked into the GPL-3.0-only EFI image; the separately public-domain entity table remains the only ELinks source data reused.
 
-The browser screen provides a fixed title/address/status chrome, a scrollable document viewport, colored inline links, focused-link highlighting, and keyboard navigation:
+### HTML tree construction
 
-- **Up / Down** or **j / k**: scroll one line; **Page Up / Page Down** or **Space**: scroll a screen; **Home / End**: jump to document boundaries.
-- **Tab / [**: focus next / previous link; **Enter**: follow the focused link; **l**: list links.
-- **g / o**: open a URL; **b / f / r**: back, forward, reload; **/** and **n**: search and find the next match.
-- **:** opens the command prompt; **h / ?** shows help; **q** returns to firmware.
+The html5 module implements a bounded tokenizer and tree builder. It constructs implied html, head, and body nodes, preserves attributes and text nodes, handles quoted and unquoted attribute values, decodes character references, consumes raw-text/RCDATA elements, inserts table sections for common table markup, and repairs common omitted end tags for paragraphs, list items, headings, table rows/cells, and options.
 
-This is an independent ELinks-inspired renderer, not the ELinks C renderer copied into Rust. It is an initial rendering foundation, not full ELinks or browser-engine parity: CSS cascade/layout, JavaScript, interactive forms, cookies, downloads, persistent cache/bookmarks, complete HTML5 parsing, and full Unicode terminal-width tables are not implemented. The network and TLS pipeline is unchanged; HTTPS still requires successful wolfSSL peer-chain, validity-time and hostname verification.
+Resource limits are explicit: 16,384 nodes, 128 stack levels, 64 attributes per element, and bounded token storage. Remote script contents are retained only as inert raw text and are never executed. This is an HTML5-style tree-building subset, not a full implementation of the WHATWG parsing algorithm: adoption-agency formatting repair, foster parenting, complete insertion modes, all named references, and many obscure error-recovery cases remain unsupported.
+
+### CSS and layout
+
+The CSS engine applies internal style rules, up to four linked external stylesheets, and inline style attributes. Supported selectors are type, class, ID, and descendant combinations. Supported declarations include display, font weight/style, text decoration, foreground/background colors, whitespace preservation, margins, left indentation, text alignment, and percentage width. CSS colors are quantized to UEFI's 16-color palette.
+
+The layout engine renders semantic blocks and reflows text to the active console width. Tables measure cell content, allocate bounded column widths, wrap long cells, and account for colspan. Rowspan is parsed and retained but does not yet merge cells across rendered rows. CSS floats, positioned layout, flex/grid algorithms, pseudo-classes/elements, media queries, @import, font metrics, and full cascade details such as !important are not implemented.
+
+### Navigation and forms
+
+Element IDs and legacy named anchors are retained as fragment targets. Following a same-document #fragment scrolls locally instead of issuing another HTTP request. Browser history stores fragments as part of the URL while HTTP request targets omit them.
+
+Forms expose text, password, email, search, number, checkbox, radio, select, textarea, hidden, and submit controls. GET and POST use application/x-www-form-urlencoded; POST requires explicit confirmation, password entry is masked, and request bodies are capped at 8 KiB. File uploads, multipart encoding, script-driven form behaviour, cookie/session handling, and full HTML constraint validation are not implemented.
+
+### Persistent bookmarks and cache
+
+Persistent data is stored in the UEFI_BROWSER directory on the same UEFI filesystem volume from which the EFI application was loaded. Bookmark records and cache records are versioned, size-bounded, written to a temporary file and renamed into place. The cache holds at most eight URL-hashed entries, each at most 256 KiB, and expires entries after six hours using the validated UEFI UTC clock.
+
+The cache stores only successful HTML/plain-text GET responses. Cache-Control no-store, no-cache, or private and Set-Cookie responses are not persisted. Responses served from the disk cache are visibly marked in the browser header. If the boot volume is unavailable or read-only, the browser continues without persistent features.
+
+Keyboard and command interface:
+
+- **Up / Down**, **j / k**: scroll one line; **Page Up / Page Down**, **Space**: scroll a page; **Home / End**: document boundaries.
+- **Tab / [**, **Enter**: focus and follow links; **l**: list links.
+- **g / o**, **b / f / r**: URL entry, back, forward and reload.
+- **/** and **n**: in-page search; **m / v**: save current bookmark and list bookmarks.
+- **:** opens the command prompt. Commands include open URL, open N, open-bookmark N, bookmark, bookmarks, delete-bookmark N, form N, cache-stats, clear-cache, and search WORD.
+- **q** returns to firmware.
+
+HTTPS continues to use the existing wolfSSL path. DNS, smoltcp, TCP, SNI, peer-chain verification, validity-time checks, hostname verification, and HTTPS downgrade rejection are unchanged. External stylesheets and form submissions use that same verified HTTPS path; no certificate override is available.
+
 ## URL and HTML core
 
 ELinks reuse is intentionally limited to its public-domain SGML/Unicode named-entity mapping table. The build generates a compact Rust decoder from `assets/elinks-entities.txt`; the EFI image does not link the ELinks GPLv2-only C application. See [ELinks reuse and UEFI porting boundary](docs/ELINKS-COMPATIBILITY.md) for the licensing and runtime rationale.
@@ -357,30 +396,22 @@ Copying a binary to this path does not guarantee network access. Firmware must e
 ## Roadmap
 
 - [x] Establish a Rust no_std UEFI application crate and x86-64 EFI target.
-- [x] Add portable HTTP/HTTPS URL parsing and relative URL resolution.
-- [x] Add basic HTML visible-text extraction and numbered links.
-- [x] Add Hickory DNS protocol support without default std features.
-- [x] Implement DNS A-query construction, response validation and bounded retries.
-- [x] Implement an SNP-backed Ethernet device for smoltcp.
-- [x] Implement in-application DHCPv4, IPv4 routing, UDP DNS/NTP, and TCP stream sockets with smoltcp.
-- [x] Implement EFI_RNG_PROTOCOL and UEFI UTC clock adapters with fail-closed policy.
-- [x] Initialize SNP directly and acquire DHCPv4 configuration with smoltcp before TLS initialization.
-- [x] Connect Hickory DNS -> smoltcp UDP -> smoltcp TCP -> wolfSSL while retaining the server hostname for SNI.
-- [x] Add wolfSSL 5.9.4 source pin and archive checksum verification.
-- [x] Add UEFI allocator, platform time/gmtime hooks, and static COFF build/link scaffolding for wolfSSL.
-- [x] Add optional CA-bundle update and build-time embedding support.
-- [x] Implement HTTP/1.1 GET, header/status parsing, Content-Length, chunked and close-delimited responses.
-- [x] Implement a keyboard-driven terminal navigation loop with links, history, back/forward, reload and search.
-- [x] Implement bounded redirects and reject HTTPS-to-HTTP redirect downgrade.
-- [ ] Run and verify the complete wolfSSL 5.9.4 C cross-build and final PE/COFF link in CI.
-- [ ] Build and inspect an EFI binary containing the CA roots and wolfSSL libraries.
-- [ ] Run the browser under OVMF with SNP Ethernet and DHCPv4 networking and test real HTTP/HTTPS sites.
-- [ ] Test on multiple physical UEFI implementations and NIC drivers.
-- [ ] Add DNS CNAME/AAAA, DNS-over-TCP fallback, and cache.
-- [ ] Add terminal viewport scrolling, reflow, heading/list/table rendering, and keyboard link focus.
-- [ ] Add forms, bookmarks, downloads, persisted history, and cache storage.
-- [ ] Add character-set handling and more complete HTML parsing.
-- [ ] Evaluate mature text-browser feature parity; CSS layout and JavaScript are out of scope unless separately designed.
+- [x] Add portable HTTP/HTTPS URL parsing, relative URL resolution and fragments.
+- [x] Add a bounded HTML tokenizer and HTML5-style DOM construction.
+- [x] Add CSS cascade subset, external stylesheet fetching and terminal-oriented computed layout.
+- [x] Add width-aware block reflow and measured table columns with colspan.
+- [x] Add links, heading/ID anchors, GET/POST URL-encoded forms and form confirmation.
+- [x] Add boot-volume bookmarks and a bounded persistent HTML/text page cache.
+- [x] Add Hickory DNS, SNP/smoltcp networking and mandatory wolfSSL certificate validation.
+- [x] Add HTTP/1.1 GET/POST request construction, response parsing and downgrade-safe redirects.
+- [ ] Complete HTML5 insertion modes, formatting adoption-agency repair, foster parenting and complete entity references.
+- [ ] Implement table rowspan layout and more complex table border/column algorithms.
+- [ ] Extend CSS support with proper !important, selector pseudo-classes, media queries, and layout algorithms where useful in a text terminal.
+- [ ] Add file uploads/multipart only with an explicit UEFI file-picker model.
+- [ ] Add cookies/session policy, conditional cache revalidation and persistent history.
+- [ ] Add downloads and bookmarks import/export.
+- [ ] Run the new HTML/CSS/forms/cache engine under OVMF and physical UEFI firmware across multiple console modes and filesystems.
+- [ ] Add DNS CNAME/AAAA, DNS-over-TCP fallback and answer caching.
 
 ## Security and scope
 

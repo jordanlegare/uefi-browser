@@ -11,20 +11,30 @@ use core::fmt::Write as _;
 use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::{Status, helpers, system};
 
-use uefi_browser::document::{Document, Link, parse_html};
+use uefi_browser::document::{
+    Document, Form, FormControlKind, FormMethod, Link, TermColor, external_stylesheet_urls,
+    parse_html, parse_html_with_styles,
+};
 use uefi_browser::http::{self, HttpResponse};
 use uefi_browser::network::connect_firmware_url;
+use uefi_browser::persistence::{CachedPage, PersistentStore};
 use uefi_browser::renderer::{self, RenderLine};
+use uefi_browser::uefi_storage::UefiFileStore;
 use uefi_browser::url::{Scheme, Url};
 
 const MAX_BODY_BYTES: usize = 256 * 1024;
+const MAX_STYLESHEET_BYTES: usize = 32 * 1024;
 const MAX_REDIRECTS: usize = 5;
 const MAX_INPUT_BYTES: usize = 2048;
+const MAX_FORM_BODY_BYTES: usize = 8 * 1024;
+
+type BrowserStore = Option<PersistentStore<UefiFileStore>>;
 
 struct BrowserPage {
     url: Url,
     status: u16,
     document: Document,
+    from_cache: bool,
 }
 
 #[uefi::entry]
@@ -124,9 +134,20 @@ fn main() -> Status {
         }
     };
 
+    let mut storage: BrowserStore = match UefiFileStore::open(uefi::boot::image_handle()) {
+        Ok(file_store) => {
+            uefi::println!("Persistent bookmarks and page cache: boot volume\\UEFI_BROWSER");
+            Some(PersistentStore::new(file_store))
+        }
+        Err(error) => {
+            uefi::println!("Persistent storage unavailable: {error}");
+            None
+        }
+    };
+
     let mut history = Vec::new();
     let (mut page, mut history_index) = loop {
-        match fetch_document(&first_url, network) {
+        match fetch_document(&first_url, network, &mut storage) {
             Ok(page) => {
                 history.push(first_url.clone());
                 break (page, 0usize);
@@ -150,25 +171,91 @@ fn main() -> Status {
             }
         }
     };
-    run_browser_ui(&mut page, &mut history, &mut history_index, network);
+    run_browser_ui(
+        &mut page,
+        &mut history,
+        &mut history_index,
+        &mut storage,
+        network,
+    );
 
     uefi::println!("\nLeaving UEFI Browser and returning to firmware.");
     Status::SUCCESS
 }
 
+fn cache_key(url: &Url) -> String {
+    format!("{}{}", url.origin(), url.path_and_query)
+}
+
+fn cache_clock() -> i64 {
+    uefi_browser::firmware_time::unix_time_utc().unwrap_or(0)
+}
+
+fn build_browser_page(
+    url: Url,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+    external_css: &[String],
+    from_cache: bool,
+) -> BrowserPage {
+    let text = String::from_utf8_lossy(body).into_owned();
+    let document = if content_type.to_ascii_lowercase().starts_with("text/html") {
+        if external_css.is_empty() {
+            parse_html(&text, &url)
+        } else {
+            parse_html_with_styles(&text, &url, external_css)
+        }
+    } else if content_type.to_ascii_lowercase().starts_with("text/plain") {
+        Document::from_plain(&url.host, &text)
+    } else {
+        Document::from_plain(
+            &url.host,
+            &format!(
+                "This text browser does not render Content-Type: {content_type}\n{} bytes received.",
+                body.len()
+            ),
+        )
+    };
+
+    BrowserPage {
+        url,
+        status,
+        document,
+        from_cache,
+    }
+}
+
 fn fetch_document(
     initial_url: &Url,
     network: &mut uefi_browser::snp_network::SnpNetwork,
+    storage: &mut BrowserStore,
 ) -> Result<BrowserPage, String> {
-    let mut current = initial_url.clone();
+    let key = cache_key(initial_url);
+    let now = cache_clock();
+    if now > 0 {
+        if let Some(store) = storage.as_mut() {
+            if let Some(cached) = store.cached_page(&key, now) {
+                let css = fetch_stylesheets(&cached.body, initial_url, network);
+                return Ok(build_browser_page(
+                    initial_url.clone(),
+                    200,
+                    &cached.content_type,
+                    &cached.body,
+                    &css,
+                    true,
+                ));
+            }
+        }
+    }
 
+    let mut current = initial_url.clone();
     for redirect_index in 0..=MAX_REDIRECTS {
-        let response = fetch_response(&current, network)?;
+        let response = fetch_response_with_method(&current, network, "GET", &[], MAX_BODY_BYTES)?;
         if response.is_redirect() {
             if redirect_index == MAX_REDIRECTS {
                 return Err(String::from("redirect limit exceeded"));
             }
-
             let location = response
                 .location()
                 .ok_or_else(|| String::from("redirect response has no Location header"))?
@@ -180,41 +267,177 @@ fn fetch_document(
             if current.scheme == Scheme::Https && next.scheme == Scheme::Http {
                 return Err(String::from("refusing HTTPS-to-HTTP redirect downgrade"));
             }
-
             current = next;
             continue;
         }
 
-        let content_type = response.content_type().unwrap_or("text/plain");
-        let body = String::from_utf8_lossy(&response.body).into_owned();
+        let content_type = response.content_type().unwrap_or("text/plain").to_string();
+        let cache_control = response
+            .header("cache-control")
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let content_type_lower = content_type.to_ascii_lowercase();
+        let cacheable = response.status == 200
+            && (content_type_lower.starts_with("text/html")
+                || content_type_lower.starts_with("text/plain"))
+            && !cache_control.contains("no-store")
+            && !cache_control.contains("no-cache")
+            && !cache_control.contains("private")
+            && response.header("set-cookie").is_none()
+            && response.body.len() <= MAX_BODY_BYTES;
 
-        let document = if content_type.to_ascii_lowercase().starts_with("text/html") {
-            parse_html(&body, &current)
-        } else if content_type.to_ascii_lowercase().starts_with("text/plain") {
-            Document::from_plain(&current.host, &body)
+        let css = if content_type_lower.starts_with("text/html") {
+            fetch_stylesheets(&response.body, &current, network)
         } else {
-            Document::from_plain(
-                &current.host,
-                &format!(
-                    "This text browser does not render Content-Type: {content_type}\n{} bytes received.",
-                    response.body.len()
-                ),
-            )
+            Vec::new()
         };
 
-        return Ok(BrowserPage {
-            url: current,
-            status: response.status,
-            document,
-        });
+        if cacheable && now > 0 {
+            if let Some(store) = storage.as_mut() {
+                let cached = CachedPage {
+                    url: cache_key(&current),
+                    content_type: content_type.clone(),
+                    stored_at: now,
+                    body: response.body.clone(),
+                };
+                let _ = store.cache_page(&cached);
+            }
+        }
+
+        return Ok(build_browser_page(
+            current,
+            response.status,
+            &content_type,
+            &response.body,
+            &css,
+            false,
+        ));
     }
 
     Err(String::from("redirect limit exceeded"))
 }
 
-fn fetch_response(
+fn fetch_stylesheets(
+    html: &[u8],
+    page_url: &Url,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Vec<String> {
+    let source = String::from_utf8_lossy(html);
+    let urls = external_stylesheet_urls(&source, page_url);
+    let mut sheets = Vec::new();
+
+    for initial in urls {
+        let mut current = initial;
+        for redirect_index in 0..=3 {
+            let response = match fetch_response_with_method(
+                &current,
+                network,
+                "GET",
+                &[],
+                MAX_STYLESHEET_BYTES,
+            ) {
+                Ok(response) => response,
+                Err(_) => break,
+            };
+            if response.is_redirect() {
+                if redirect_index == 3 {
+                    break;
+                }
+                let Some(location) = response.location() else {
+                    break;
+                };
+                let Ok(next) = current.resolve(location) else {
+                    break;
+                };
+                if current.scheme == Scheme::Https && next.scheme == Scheme::Http {
+                    break;
+                }
+                current = next;
+                continue;
+            }
+            if response.status == 200
+                && response
+                    .content_type()
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .starts_with("text/css")
+                && response.body.len() <= MAX_STYLESHEET_BYTES
+            {
+                sheets.push(String::from_utf8_lossy(&response.body).into_owned());
+            }
+            break;
+        }
+    }
+    sheets
+}
+
+fn fetch_form_document(
+    initial_url: &Url,
+    method: &str,
+    body: &[u8],
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Result<BrowserPage, String> {
+    let mut current = initial_url.clone();
+    let mut current_method = method;
+    let mut current_body = body;
+
+    for redirect_index in 0..=MAX_REDIRECTS {
+        let response = fetch_response_with_method(
+            &current,
+            network,
+            current_method,
+            current_body,
+            MAX_BODY_BYTES,
+        )?;
+        if response.is_redirect() {
+            if redirect_index == MAX_REDIRECTS {
+                return Err(String::from("form redirect limit exceeded"));
+            }
+            let location = response
+                .location()
+                .ok_or_else(|| String::from("form redirect has no Location header"))?
+                .to_string();
+            let next = current
+                .resolve(&location)
+                .map_err(|error| format!("invalid form redirect target: {error}"))?;
+            if current.scheme == Scheme::Https && next.scheme == Scheme::Http {
+                return Err(String::from(
+                    "refusing HTTPS-to-HTTP form redirect downgrade",
+                ));
+            }
+            if matches!(response.status, 301 | 302 | 303) && current_method == "POST" {
+                current_method = "GET";
+                current_body = &[];
+            }
+            current = next;
+            continue;
+        }
+
+        let content_type = response.content_type().unwrap_or("text/plain").to_string();
+        let css = if content_type.to_ascii_lowercase().starts_with("text/html") {
+            fetch_stylesheets(&response.body, &current, network)
+        } else {
+            Vec::new()
+        };
+        return Ok(build_browser_page(
+            current,
+            response.status,
+            &content_type,
+            &response.body,
+            &css,
+            false,
+        ));
+    }
+
+    Err(String::from("form redirect limit exceeded"))
+}
+
+fn fetch_response_with_method(
     url: &Url,
     network: &mut uefi_browser::snp_network::SnpNetwork,
+    method: &str,
+    body: &[u8],
+    max_body: usize,
 ) -> Result<HttpResponse, String> {
     #[cfg(not(all(target_os = "uefi", uefi_wolfssl_linked, uefi_ca_bundle)))]
     if url.scheme == Scheme::Https {
@@ -261,8 +484,9 @@ fn fetch_response(
     match url.scheme {
         Scheme::Http => {
             uefi::println!("Sending HTTP request...");
-            let response = http::exchange_get(&mut connection.peer.stream, url, MAX_BODY_BYTES)
-                .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
+            let response =
+                http::exchange_request(&mut connection.peer.stream, url, method, body, max_body)
+                    .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
             uefi::println!("HTTP response received ({} bytes).", response.body.len());
             Ok(response)
         }
@@ -332,7 +556,7 @@ fn fetch_response(
                 uefi::println!(
                     "[TLS] Certificate path, validity, and hostname checks passed. HTTPS data may now flow."
                 );
-                let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
+                let response = http::exchange_request(&mut tls, url, method, body, max_body)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
                 uefi::println!("HTTPS response received ({} bytes).", response.body.len());
                 Ok(response)
@@ -773,12 +997,277 @@ enum BrowserAction {
     PreviousLink,
     ActivateLink,
     FindNext,
+    Bookmark,
+    Bookmarks,
+}
+
+fn same_resource(left: &Url, right: &Url) -> bool {
+    left.origin() == right.origin() && left.path_and_query == right.path_and_query
+}
+
+fn url_encode_component(input: &str) -> String {
+    let mut output = String::new();
+    for byte in input.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            output.push(byte as char);
+        } else if byte == b' ' {
+            output.push('+');
+        } else {
+            output.push('%');
+            output.push_str(&format!("{:02X}", byte));
+        }
+    }
+    output
+}
+
+fn form_query_string(fields: &[(String, String)]) -> Result<String, String> {
+    let mut query = String::new();
+    for (index, (name, value)) in fields.iter().enumerate() {
+        if name.is_empty() {
+            continue;
+        }
+        if index > 0 {
+            query.push('&');
+        }
+        query.push_str(&url_encode_component(name));
+        query.push('=');
+        query.push_str(&url_encode_component(value));
+        if query.len() > MAX_FORM_BODY_BYTES {
+            return Err(String::from("form data exceeds the 8 KiB submission limit"));
+        }
+    }
+    Ok(query)
+}
+
+fn submit_form(
+    form: &Form,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Result<(Url, &'static str, Vec<u8>), String> {
+    let mut fields: Vec<(String, String)> = Vec::new();
+    let mut selected_radio_names: Vec<String> = Vec::new();
+    let mut submit_button_used = false;
+
+    for control in &form.controls {
+        if control.disabled {
+            continue;
+        }
+        if control.name.is_empty() && control.kind != FormControlKind::Submit {
+            continue;
+        }
+        let value = match control.kind {
+            FormControlKind::Hidden => Some(control.value.clone()),
+            FormControlKind::Submit => {
+                if submit_button_used {
+                    None
+                } else {
+                    submit_button_used = true;
+                    Some(control.value.clone())
+                }
+            }
+            FormControlKind::Reset | FormControlKind::Button => None,
+            FormControlKind::File => {
+                return Err(String::from(
+                    "file uploads are not supported by this firmware browser",
+                ));
+            }
+            FormControlKind::Checkbox => {
+                let prompt = format!(
+                    "{} [{}] (y/n, ENTER keeps default): ",
+                    control.label,
+                    if control.checked { "Y" } else { "n" }
+                );
+                let Some(answer) = read_line(&prompt, network) else {
+                    return Err(String::from("form cancelled"));
+                };
+                let checked = match answer.trim().to_ascii_lowercase().as_str() {
+                    "" => control.checked,
+                    "y" | "yes" | "1" | "on" => true,
+                    "n" | "no" | "0" | "off" => false,
+                    _ => return Err(format!("invalid checkbox answer for {}", control.label)),
+                };
+                if checked {
+                    Some(if control.value.is_empty() {
+                        String::from("on")
+                    } else {
+                        control.value.clone()
+                    })
+                } else {
+                    None
+                }
+            }
+            FormControlKind::Radio => {
+                if selected_radio_names
+                    .iter()
+                    .any(|name| name == &control.name)
+                {
+                    None
+                } else {
+                    let prompt = format!(
+                        "{} — choose this option? [{}] (y/n): ",
+                        control.label,
+                        if control.checked { "Y" } else { "n" }
+                    );
+                    let Some(answer) = read_line(&prompt, network) else {
+                        return Err(String::from("form cancelled"));
+                    };
+                    let selected = match answer.trim().to_ascii_lowercase().as_str() {
+                        "" => control.checked,
+                        "y" | "yes" | "1" => true,
+                        "n" | "no" | "0" => false,
+                        _ => return Err(format!("invalid radio answer for {}", control.label)),
+                    };
+                    if selected {
+                        selected_radio_names.push(control.name.clone());
+                        Some(control.value.clone())
+                    } else {
+                        None
+                    }
+                }
+            }
+            FormControlKind::Select => {
+                if control.options.is_empty() {
+                    Some(control.value.clone())
+                } else {
+                    uefi::println!("{}:", control.label);
+                    for (index, option) in control.options.iter().enumerate() {
+                        uefi::println!(
+                            "  {}. {}{}",
+                            index + 1,
+                            option.label,
+                            if option.value == control.value {
+                                " [selected]"
+                            } else {
+                                ""
+                            }
+                        );
+                    }
+                    let default = control
+                        .options
+                        .iter()
+                        .position(|option| option.value == control.value)
+                        .map(|index| index + 1)
+                        .unwrap_or(1);
+                    let prompt = format!("Selection [{}]: ", default);
+                    let Some(answer) = read_line(&prompt, network) else {
+                        return Err(String::from("form cancelled"));
+                    };
+                    let selected = if answer.trim().is_empty() {
+                        default
+                    } else {
+                        answer.trim().parse::<usize>().unwrap_or(0)
+                    };
+                    let Some(option) = selected
+                        .checked_sub(1)
+                        .and_then(|index| control.options.get(index))
+                    else {
+                        return Err(format!("invalid selection for {}", control.label));
+                    };
+                    Some(option.value.clone())
+                }
+            }
+            FormControlKind::Password => {
+                let prompt = format!("{} (password): ", control.label);
+                let Some(answer) = read_line_masked(&prompt, network) else {
+                    return Err(String::from("form cancelled"));
+                };
+                Some(if answer.is_empty() {
+                    control.value.clone()
+                } else {
+                    answer
+                })
+            }
+            FormControlKind::Text
+            | FormControlKind::Email
+            | FormControlKind::Search
+            | FormControlKind::Number
+            | FormControlKind::TextArea => {
+                let prompt = if control.value.is_empty() {
+                    format!("{}: ", control.label)
+                } else {
+                    format!("{} [{}]: ", control.label, control.value)
+                };
+                let Some(answer) = read_line(&prompt, network) else {
+                    return Err(String::from("form cancelled"));
+                };
+                Some(if answer.is_empty() {
+                    control.value.clone()
+                } else {
+                    answer
+                })
+            }
+        };
+
+        if let Some(value) = value {
+            if control.required && value.trim().is_empty() {
+                return Err(format!("{} is required", control.label));
+            }
+            if !control.name.is_empty() {
+                fields.push((control.name.clone(), value));
+            }
+        } else if control.required && control.kind == FormControlKind::Checkbox {
+            return Err(format!("{} is required", control.label));
+        }
+    }
+
+    for control in form
+        .controls
+        .iter()
+        .filter(|control| control.required && control.kind == FormControlKind::Radio)
+    {
+        if !fields.iter().any(|(name, _)| name == &control.name) {
+            return Err(format!("{} requires one selected option", control.label));
+        }
+    }
+
+    let query = form_query_string(&fields)?;
+    let action =
+        Url::parse(&form.action).map_err(|error| format!("invalid form action: {error}"))?;
+    match form.method {
+        FormMethod::Get => {
+            let target = if query.is_empty() {
+                action
+            } else {
+                action
+                    .resolve(&format!("?{query}"))
+                    .map_err(|error| format!("invalid GET form URL: {error}"))?
+            };
+            Ok((target, "GET", Vec::new()))
+        }
+        FormMethod::Post => {
+            uefi::println!("POST sends entered form data to:");
+            uefi::println!("{}", action.as_string());
+            let Some(confirm) = read_line("Confirm POST? Type 'yes' to send: ", network) else {
+                return Err(String::from("form cancelled"));
+            };
+            if !confirm.trim().eq_ignore_ascii_case("yes") {
+                return Err(String::from("POST cancelled; form data was not sent"));
+            }
+            Ok((action, "POST", query.into_bytes()))
+        }
+    }
+}
+
+fn display_bookmarks(store: &mut BrowserStore) {
+    let Some(store) = store.as_mut() else {
+        uefi::println!("Persistent storage is unavailable.");
+        return;
+    };
+    let entries = store.bookmarks();
+    if entries.is_empty() {
+        uefi::println!("No saved bookmarks.");
+        return;
+    }
+    uefi::println!("Saved bookmarks:");
+    for (index, entry) in entries.iter().enumerate() {
+        uefi::println!("  {}. {} — {}", index + 1, entry.title, entry.url);
+    }
 }
 
 fn run_browser_ui(
     page: &mut BrowserPage,
     history: &mut Vec<Url>,
     history_index: &mut usize,
+    storage: &mut BrowserStore,
     network: &mut uefi_browser::snp_network::SnpNetwork,
 ) {
     let mut first_line = 0usize;
@@ -786,12 +1275,20 @@ fn run_browser_ui(
     let mut navigation_error: Option<String> = None;
     let mut status = String::from("Ready");
     let mut last_search = String::new();
+    let mut anchor_pending = true;
 
     loop {
         let (columns, rows) = terminal_dimensions();
         let content_width = columns.saturating_sub(2).max(8);
         let content_height = rows.saturating_sub(5).max(1);
         let lines = renderer::layout_document(&page.document, content_width);
+        if anchor_pending {
+            if let Some(fragment) = page.url.fragment.as_deref() {
+                first_line =
+                    renderer::line_for_anchor(&page.document, &lines, fragment).unwrap_or(0);
+            }
+            anchor_pending = false;
+        }
         let max_first = lines.len().saturating_sub(content_height);
         first_line = first_line.min(max_first);
 
@@ -936,6 +1433,8 @@ fn run_browser_ui(
             BrowserAction::Back => String::from("back"),
             BrowserAction::Forward => String::from("forward"),
             BrowserAction::Reload => String::from("reload"),
+            BrowserAction::Bookmark => String::from("bookmark"),
+            BrowserAction::Bookmarks => String::from("bookmarks"),
             BrowserAction::Help => {
                 print_help();
                 let _ = read_line("Press ENTER to return: ", network);
@@ -950,7 +1449,24 @@ fn run_browser_ui(
             }
         };
 
-        let command = command.trim();
+        let mut command = command.trim().to_string();
+        if let Some(number) = command.strip_prefix("open-bookmark ") {
+            let index = number
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|value| value.checked_sub(1));
+            let bookmark = storage
+                .as_mut()
+                .and_then(|store| index.and_then(|i| store.bookmarks().get(i).cloned()));
+            if let Some(bookmark) = bookmark {
+                command = format!("open {}", bookmark.url);
+            } else {
+                status = String::from("Bookmark not found, or persistent storage is unavailable");
+                continue;
+            }
+        }
+        let command = command.as_str();
         if command.is_empty() {
             continue;
         }
@@ -970,6 +1486,98 @@ fn run_browser_ui(
         if command == "clear" {
             continue;
         }
+        if command == "bookmark" {
+            if let Some(store) = storage.as_mut() {
+                match store.add_bookmark(&page.url.as_string(), &page.document.title) {
+                    Ok(true) => status = String::from("Bookmark saved to the UEFI boot volume"),
+                    Ok(false) => status = String::from("Bookmark updated"),
+                    Err(_) => status = String::from("Unable to save bookmark"),
+                }
+            } else {
+                status = String::from("Persistent storage is unavailable");
+            }
+            continue;
+        }
+        if command == "bookmarks" {
+            display_bookmarks(storage);
+            let _ = read_line("Press ENTER to return: ", network);
+            continue;
+        }
+        if let Some(number) = command.strip_prefix("delete-bookmark ") {
+            let removed = number
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|value| value.checked_sub(1))
+                .and_then(|index| {
+                    storage
+                        .as_mut()
+                        .and_then(|store| store.remove_bookmark(index).ok())
+                })
+                .unwrap_or(false);
+            status = if removed {
+                String::from("Bookmark deleted")
+            } else {
+                String::from("Bookmark not found or storage unavailable")
+            };
+            continue;
+        }
+        if command == "clear-cache" {
+            if let Some(store) = storage.as_mut() {
+                store.clear_cache();
+                status = String::from("Persistent page cache cleared");
+            } else {
+                status = String::from("Persistent storage is unavailable");
+            }
+            continue;
+        }
+        if command == "cache-stats" {
+            if let Some(store) = storage.as_mut() {
+                let stats = store.cache_stats();
+                status = format!("Disk cache: {} pages, {} bytes", stats.entries, stats.bytes);
+            } else {
+                status = String::from("Persistent storage is unavailable");
+            }
+            continue;
+        }
+        if let Some(number) = command.strip_prefix("form ") {
+            let index = number
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|value| value.checked_sub(1));
+            let form = index.and_then(|index| page.document.forms.get(index).cloned());
+            let Some(form) = form else {
+                status = String::from("Form not found on this page");
+                continue;
+            };
+            match submit_form(&form, network) {
+                Ok((target, method, body)) => {
+                    status = format!("Submitting {} form to {}", method, target.as_string());
+                    match fetch_form_document(&target, method, &body, network) {
+                        Ok(next_page) => {
+                            history.truncate(*history_index + 1);
+                            history.push(next_page.url.clone());
+                            *history_index = history.len() - 1;
+                            *page = next_page;
+                            first_line = 0;
+                            anchor_pending = true;
+                            selected_link = None;
+                            navigation_error = None;
+                            last_search.clear();
+                            status = format!("Form response: HTTP {}", page.status);
+                        }
+                        Err(error) => {
+                            navigation_error = Some(error);
+                            status = String::from("Form submission failed");
+                        }
+                    }
+                }
+                Err(error) => status = error,
+            }
+            continue;
+        }
+
         if let Some(query) = command.strip_prefix("search ") {
             let found = renderer::find_line(&lines, query, first_line.saturating_add(1))
                 .or_else(|| renderer::find_line(&lines, query, 0));
@@ -1038,6 +1646,31 @@ fn run_browser_ui(
             continue;
         };
 
+        if same_resource(&page.url, &target)
+            && (target_index.is_some() || (add_history && target.fragment.is_some()))
+        {
+            let anchor_line = match target.fragment.as_deref() {
+                Some(fragment) => renderer::line_for_anchor(&page.document, &lines, fragment),
+                None => Some(0),
+            };
+            if let Some(line) = anchor_line {
+                if let Some(index) = target_index {
+                    *history_index = index;
+                } else if add_history {
+                    history.truncate(*history_index + 1);
+                    history.push(target.clone());
+                    *history_index = history.len() - 1;
+                }
+                page.url = target;
+                first_line = line.min(max_first);
+                navigation_error = None;
+                status = String::from("Moved to page fragment");
+            } else {
+                status = String::from("Fragment target not found on this page");
+            }
+            continue;
+        }
+
         status = format!("Loading {}", target.as_string());
         render_terminal_page(
             page,
@@ -1048,7 +1681,7 @@ fn run_browser_ui(
             None,
             &status,
         );
-        match fetch_document(&target, network) {
+        match fetch_document(&target, network, storage) {
             Ok(next_page) => {
                 if let Some(index) = target_index {
                     *history_index = index;
@@ -1060,6 +1693,7 @@ fn run_browser_ui(
                 *page = next_page;
                 navigation_error = None;
                 first_line = 0;
+                anchor_pending = true;
                 selected_link = None;
                 last_search.clear();
                 status = format!("Loaded HTTP {}", page.status);
@@ -1101,6 +1735,8 @@ fn read_browser_action(
                     'r' => return Some(BrowserAction::Reload),
                     'h' | '?' => return Some(BrowserAction::Help),
                     'l' => return Some(BrowserAction::Links),
+                    'm' => return Some(BrowserAction::Bookmark),
+                    'v' => return Some(BrowserAction::Bookmarks),
                     'n' => return Some(BrowserAction::FindNext),
                     'j' => return Some(BrowserAction::ScrollDown),
                     'k' => return Some(BrowserAction::ScrollUp),
@@ -1152,8 +1788,10 @@ fn render_terminal_page(
     let content_height = content_height.min(height.saturating_sub(5).max(1));
 
     let header = format!(
-        " UEFI BROWSER  |  HTTP {}  |  {}",
-        page.status, page.document.title
+        " UEFI BROWSER  |  HTTP {}{}  |  {}",
+        page.status,
+        if page.from_cache { " [DISK CACHE]" } else { "" },
+        page.document.title
     );
     let address = format!(" URL  {}", page.url.as_string());
     let status_line = navigation_error.unwrap_or(status);
@@ -1245,6 +1883,41 @@ fn write_console_row(
     }
 }
 
+fn uefi_color(color: TermColor) -> Color {
+    match color {
+        TermColor::Black => Color::Black,
+        TermColor::DarkRed => Color::Red,
+        TermColor::DarkGreen => Color::Green,
+        TermColor::Brown => Color::Brown,
+        TermColor::DarkBlue => Color::Blue,
+        TermColor::DarkMagenta => Color::Magenta,
+        TermColor::DarkCyan => Color::Cyan,
+        TermColor::LightGray => Color::LightGray,
+        TermColor::DarkGray => Color::DarkGray,
+        TermColor::LightRed => Color::LightRed,
+        TermColor::LightGreen => Color::LightGreen,
+        TermColor::Yellow => Color::Yellow,
+        TermColor::LightBlue => Color::LightBlue,
+        TermColor::LightMagenta => Color::LightMagenta,
+        TermColor::LightCyan => Color::LightCyan,
+        TermColor::White => Color::White,
+    }
+}
+
+fn uefi_background_color(color: TermColor) -> Color {
+    match color {
+        TermColor::Black => Color::Black,
+        TermColor::DarkRed => Color::Red,
+        TermColor::DarkGreen => Color::Green,
+        TermColor::Brown => Color::Brown,
+        TermColor::DarkBlue => Color::Blue,
+        TermColor::DarkMagenta => Color::Magenta,
+        TermColor::DarkCyan => Color::Cyan,
+        TermColor::LightGray => Color::LightGray,
+        _ => Color::Black,
+    }
+}
+
 fn write_render_line(
     output: &mut uefi::proto::console::text::Output,
     line: &RenderLine,
@@ -1257,18 +1930,32 @@ fn write_render_line(
             break;
         }
         let selected = span.link.is_some() && span.link == selected_link;
-        let (foreground, background) = if selected {
-            (Color::Black, Color::Cyan)
-        } else if span.link.is_some() {
-            (Color::LightCyan, Color::Black)
+        let default_foreground = if span.link.is_some() {
+            Color::LightCyan
         } else if span.style.code {
-            (Color::LightGreen, Color::Black)
+            Color::LightGreen
         } else if span.style.strong {
-            (Color::Yellow, Color::Black)
+            Color::Yellow
         } else if span.style.emphasis {
-            (Color::LightMagenta, Color::Black)
+            Color::LightMagenta
         } else {
-            (Color::LightGray, Color::Black)
+            Color::LightGray
+        };
+        let foreground = if selected {
+            Color::Black
+        } else {
+            span.style
+                .foreground
+                .map(uefi_color)
+                .unwrap_or(default_foreground)
+        };
+        let background = if selected {
+            Color::Cyan
+        } else {
+            span.style
+                .background
+                .map(uefi_background_color)
+                .unwrap_or(Color::Black)
         };
         let _ = output.set_color(foreground, background);
         let remaining = width.saturating_sub(used);
@@ -1333,9 +2020,13 @@ fn print_help() {
     uefi::println!("  /               Search the rendered document; n finds next");
     uefi::println!("  :               Open the command prompt");
     uefi::println!("  b / f / r       Back / forward / reload");
+    uefi::println!("  m / v           Save bookmark / show saved bookmarks");
     uefi::println!("  l               List links; q quits to firmware");
     uefi::println!(
-        "  Commands: open URL, open N, back, forward, reload, links, search WORD, help, quit"
+        "  Commands: open URL, open N, open-bookmark N, bookmark, bookmarks, delete-bookmark N"
+    );
+    uefi::println!(
+        "            form N, cache-stats, clear-cache, search WORD, back, forward, reload, quit"
     );
     uefi::println!("");
 }
@@ -1345,6 +2036,21 @@ fn clear_screen() {
 }
 
 fn read_line(prompt: &str, network: &mut uefi_browser::snp_network::SnpNetwork) -> Option<String> {
+    read_line_with_echo(prompt, network, false)
+}
+
+fn read_line_masked(
+    prompt: &str,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Option<String> {
+    read_line_with_echo(prompt, network, true)
+}
+
+fn read_line_with_echo(
+    prompt: &str,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+    mask: bool,
+) -> Option<String> {
     uefi::print!("{prompt}");
     let mut line = String::new();
 
@@ -1371,7 +2077,11 @@ fn read_line(prompt: &str, network: &mut uefi_browser::snp_network::SnpNetwork) 
                     value if !value.is_control() => {
                         if line.len() < MAX_INPUT_BYTES {
                             line.push(value);
-                            uefi::print!("{value}");
+                            if mask {
+                                uefi::print!("*");
+                            } else {
+                                uefi::print!("{value}");
+                            }
                         }
                     }
                     _ => {}

@@ -15,6 +15,7 @@ pub struct Url {
     pub host: String,
     pub port: u16,
     pub path_and_query: String,
+    pub fragment: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,7 +44,10 @@ impl Url {
             return Err(UrlError::Empty);
         }
 
-        let without_fragment = input.split('#').next().unwrap_or(input);
+        let (without_fragment, fragment) = input
+            .split_once('#')
+            .map(|(before, after)| (before, Some(after.to_string())))
+            .unwrap_or((input, None));
         let (scheme, rest) = if let Some(value) = without_fragment.strip_prefix("https://") {
             (Scheme::Https, value)
         } else if let Some(value) = without_fragment.strip_prefix("http://") {
@@ -83,6 +87,7 @@ impl Url {
             host,
             port,
             path_and_query,
+            fragment,
         })
     }
 
@@ -99,7 +104,12 @@ impl Url {
     }
 
     pub fn as_string(&self) -> String {
-        format!("{}{}", self.origin(), self.path_and_query)
+        let mut output = format!("{}{}", self.origin(), self.path_and_query);
+        if let Some(fragment) = &self.fragment {
+            output.push('#');
+            output.push_str(fragment);
+        }
+        output
     }
 
     pub fn scheme_text(&self) -> &'static str {
@@ -111,12 +121,24 @@ impl Url {
 
     pub fn resolve(&self, reference: &str) -> Result<Self, UrlError> {
         let reference = reference.trim();
-        if reference.is_empty() || reference.starts_with('#') {
+        if reference.is_empty() {
             return Ok(self.clone());
         }
+        if let Some(fragment) = reference.strip_prefix('#') {
+            let mut target = self.clone();
+            target.fragment = Some(fragment.to_string());
+            return Ok(target);
+        }
+
+        let (reference, fragment) = reference
+            .split_once('#')
+            .map(|(before, after)| (before, Some(after)))
+            .unwrap_or((reference, None));
 
         if reference.starts_with("http://") || reference.starts_with("https://") {
-            return Self::parse(reference);
+            let mut target = Self::parse(reference)?;
+            target.fragment = fragment.map(ToString::to_string);
+            return Ok(target);
         }
         if reference.contains("://") {
             return Err(UrlError::UnsupportedScheme);
@@ -143,6 +165,11 @@ impl Url {
             format!("{}{}", self.origin(), normalize_path(&joined))
         };
 
+        let mut absolute = absolute;
+        if let Some(fragment) = fragment {
+            absolute.push('#');
+            absolute.push_str(fragment);
+        }
         Self::parse(&absolute)
     }
 }
@@ -220,6 +247,7 @@ mod tests {
         assert_eq!(url.scheme, Scheme::Https);
         assert_eq!(url.port, 443);
         assert_eq!(url.as_string(), "https://example.org/docs");
+        assert_eq!(url.fragment, None);
     }
 
     #[test]
@@ -244,6 +272,24 @@ mod tests {
         assert_eq!(
             base.resolve("//cdn.example.org/x").unwrap().as_string(),
             "https://cdn.example.org/x"
+        );
+    }
+
+    #[test]
+    fn preserves_and_resolves_fragments_without_sending_them_in_the_request_target() {
+        let base = Url::parse("https://example.org/docs/page.html?mode=1#old").unwrap();
+        assert_eq!(
+            base.as_string(),
+            "https://example.org/docs/page.html?mode=1#old"
+        );
+        assert_eq!(base.path_and_query, "/docs/page.html?mode=1");
+        assert_eq!(
+            base.resolve("#section-2").unwrap().as_string(),
+            "https://example.org/docs/page.html?mode=1#section-2"
+        );
+        assert_eq!(
+            base.resolve("../guide#install").unwrap().as_string(),
+            "https://example.org/guide#install"
         );
     }
 

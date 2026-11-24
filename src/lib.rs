@@ -2,12 +2,15 @@
 
 extern crate alloc;
 
+pub mod css;
 pub mod dns;
 pub mod document;
 pub mod entropy;
 pub mod grc_chain;
+pub mod html5;
 pub mod http;
 pub mod network;
+pub mod persistence;
 pub mod renderer;
 pub mod tls;
 pub mod url;
@@ -25,6 +28,8 @@ pub mod firmware_time;
 pub mod snp_network;
 #[cfg(target_os = "uefi")]
 pub mod uefi_memory;
+#[cfg(target_os = "uefi")]
+pub mod uefi_storage;
 
 #[cfg(test)]
 extern crate std;
