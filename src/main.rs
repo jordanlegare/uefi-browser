@@ -265,7 +265,9 @@ fn fetch_document(
                 &[],
                 MAX_BODY_BYTES,
                 cached.as_ref().and_then(|entry| entry.etag.as_deref()),
-                cached.as_ref().and_then(|entry| entry.last_modified.as_deref()),
+                cached
+                    .as_ref()
+                    .and_then(|entry| entry.last_modified.as_deref()),
             )?
         } else {
             fetch_response_with_method(&current, network, "GET", &[], MAX_BODY_BYTES)?
@@ -273,7 +275,9 @@ fn fetch_document(
 
         if response.status == 304 {
             let Some(mut entry) = cached.clone() else {
-                return Err(String::from("server returned 304 without a matching cached page"));
+                return Err(String::from(
+                    "server returned 304 without a matching cached page",
+                ));
             };
             entry.stored_at = now.max(entry.stored_at);
             if let Some(etag) = response.header("etag") {
@@ -541,17 +545,16 @@ fn fetch_response_with_validators(
     match url.scheme {
         Scheme::Http => {
             uefi::println!("Sending HTTP request...");
-            let response =
-                http::exchange_request_with_validators(
-                    &mut connection.peer.stream,
-                    url,
-                    method,
-                    body,
-                    max_body,
-                    etag,
-                    last_modified,
-                )
-                .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
+            let response = http::exchange_request_with_validators(
+                &mut connection.peer.stream,
+                url,
+                method,
+                body,
+                max_body,
+                etag,
+                last_modified,
+            )
+            .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
             uefi::println!("HTTP response received ({} bytes).", response.body.len());
             Ok(response)
         }
@@ -1933,7 +1936,8 @@ fn run_browser_ui(
             if let Some(entry) = entry {
                 command = format!("open {}", entry.url);
             } else {
-                status = String::from("History entry not found, or persistent storage is unavailable");
+                status =
+                    String::from("History entry not found, or persistent storage is unavailable");
                 continue;
             }
         }
