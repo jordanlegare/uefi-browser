@@ -1,6 +1,74 @@
 use std::{env, fs, path::PathBuf};
 
+
+fn generate_elinks_entity_decoder() {
+    use std::collections::BTreeMap;
+
+    const SOURCE: &str = "assets/elinks-entities.txt";
+    println!("cargo:rerun-if-changed={SOURCE}");
+
+    let source = fs::read_to_string(SOURCE)
+        .unwrap_or_else(|error| panic!("cannot read ELinks entity table {SOURCE}: {error}"));
+    let mut entities = BTreeMap::<String, u32>::new();
+
+    for line in source.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let mut columns = line.split('\t');
+        let Some(name) = columns.next() else {
+            continue;
+        };
+        let _public_set = columns.next();
+        let Some(codepoint) = columns.next() else {
+            continue;
+        };
+        let Some(hex) = codepoint.strip_prefix("0x") else {
+            // ELinks marks legacy multi-character entities without a single
+            // Unicode scalar as 0x????. Leave those undecoded rather than guess.
+            continue;
+        };
+        let Ok(value) = u32::from_str_radix(hex, 16) else {
+            continue;
+        };
+        if char::from_u32(value).is_none() {
+            continue;
+        }
+
+        // The upstream table contains one duplicate name ("loz") with two
+        // values. Keep the first canonical mapping (U+25CA LOZENGE).
+        entities.entry(name.to_string()).or_insert(value);
+    }
+
+    if entities.is_empty() {
+        panic!("the ELinks public-domain entity table contains no usable entries");
+    }
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
+    let generated = out_dir.join("elinks_entities.rs");
+    let mut code = String::from(
+        "// Generated from assets/elinks-entities.txt. Do not edit by hand.\n\
+         pub fn decode_named_entity(name: &str) -> Option<char> {\n\
+             match name {\n",
+    );
+    for (name, value) in &entities {
+        code.push_str(&format!(
+            "        {name:?} => char::from_u32(0x{value:X}),\n"
+        ));
+    }
+    code.push_str("        _ => None,\n    }\n}\n");
+    fs::write(&generated, code)
+        .unwrap_or_else(|error| panic!("cannot write {}: {error}", generated.display()));
+
+    println!(
+        "cargo:warning=generated {} public-domain ELinks named HTML entity mappings",
+        entities.len()
+    );
+}
+
 fn main() {
+    generate_elinks_entity_decoder();
     println!("cargo:rustc-check-cfg=cfg(uefi_wolfssl_linked)");
     println!("cargo:rustc-check-cfg=cfg(uefi_ca_bundle)");
     println!("cargo:rerun-if-env-changed=UEFI_WOLFSSL_LIB_DIR");
