@@ -3,6 +3,7 @@
  * Entropy and time come only from EFI_RNG_PROTOCOL and UEFI Runtime Services.
  */
 #include <stddef.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <time.h>
 #include <wolfssl/wolfcrypt/settings.h>
@@ -12,6 +13,25 @@ extern void *uefi_browser_alloc(size_t size);
 extern void uefi_browser_free(void *pointer);
 extern int uefi_browser_fill_random(unsigned char *output, size_t output_size);
 extern int64_t uefi_browser_time_unix(void);
+
+int uefi_wolfssl_vsnprintf(char *buffer, size_t size,
+                           const char *format, va_list args)
+{
+    (void)format;
+    (void)args;
+    if (buffer != NULL && size != 0) buffer[0] = '\0';
+    return -1;
+}
+
+int uefi_wolfssl_snprintf(char *buffer, size_t size, const char *format, ...)
+{
+    va_list args;
+    int result;
+    va_start(args, format);
+    result = uefi_wolfssl_vsnprintf(buffer, size, format, args);
+    va_end(args);
+    return result;
+}
 
 typedef struct {
     size_t size;
