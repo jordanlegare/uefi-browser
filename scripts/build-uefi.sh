@@ -83,9 +83,16 @@ export UEFI_WOLFSSL_BRIDGE_DIR="$BRIDGE_BUILD"
 
 bash "$ROOT/scripts/update-ca-bundle.sh"
 if [[ -f "$ROOT/assets/cacert.pem" ]]; then
+  # Validate the untouched Mozilla/curl bundle against its published checksum
+  # before adding the separately pinned GlobalSign trust anchor.
   source "$ROOT/scripts/check-ca-bundle.sh"
+
+  UEFI_CA_INPUT="$ROOT/build/cacert-uefi-input.pem"
   FILTERED_CA_BUNDLE="$ROOT/build/cacert-uefi.pem"
-  bash "$ROOT/scripts/filter-ca-bundle.sh" "$ROOT/assets/cacert.pem" "$FILTERED_CA_BUNDLE"
+  bash "$ROOT/scripts/prepare-globalsign-r1.sh" \
+    "$ROOT/assets/cacert.pem" "$UEFI_CA_INPUT"
+  bash "$ROOT/scripts/filter-ca-bundle.sh" \
+    "$UEFI_CA_INPUT" "$FILTERED_CA_BUNDLE"
   export UEFI_CA_BUNDLE_PATH="$FILTERED_CA_BUNDLE"
 else
   echo "CA bundle not found: run scripts/update-ca-bundle.sh to prepare HTTPS trust roots." >&2
