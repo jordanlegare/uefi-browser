@@ -28,6 +28,21 @@ A difference between the browser's chain and GRC's chain is a warning signal. It
 
 8. **Apply a second fail-closed guard.** Rust checks the handshake result and then checks wolfSSL's verification result before allowing HTTP data to flow. A successful TCP connection or completed server hello is not sufficient; certificate verification must also succeed.
 
+## Live UEFI verification trace and rejected-certificate report
+
+While the TLS handshake is running, the wolfSSL verification callback sends progress events to the UEFI console:
+
+- The browser reports that it is loading the embedded CA bundle, enabling mandatory peer verification, binding SNI/hostname validation to the requested host, and starting the TLS 1.3 handshake.
+- As wolfSSL invokes the certificate callback, the console reports each newly observed chain depth that passed its current X.509 check. Depth 0 is the server/leaf certificate; higher depths are issuer certificates. Passing one depth is not a statement that the entire path is trusted: a later certificate or path constraint can still fail.
+- On the first reported verification failure, the callback prints the failing depth and raw wolfSSL X.509 error. It copies the exact rejected certificate DER (up to 16 KiB) and the SHA-256 fingerprint while preserving the callback's original `preverify_ok` return value.
+- Rust then copies the captured DER before dropping the TLS object. The failed original TLS session and TCP connection are closed before any GRC request is attempted. No HTTP request is sent to the rejected site.
+- The browser parses the captured DER locally and prints a field-by-field summary. If the callback did not expose the DER or the certificate exceeds the 16 KiB diagnostic cap, the report explicitly says the fields are unavailable instead of substituting guessed data.
+- Only after the original connection is closed does the browser attempt the separately verified GRC HTTPS lookup. The live console trace reports that reference connection and comparison separately.
+
+The certificate summary includes the X.509 version, serial number, signature algorithm, issuer, validity bounds, subject, subject-public-key algorithm/parameters/bit length, basic constraints, key usage, extended key usage, subject alternative names, subject and authority key identifiers, certificate policies, authority-information-access locations, CRL distribution-point URIs, every extension OID and critical flag, signature-value length, and DER length. The SHA-256 fingerprint is reported in the verifier-failure header. The local SHA-1 fingerprint is included only for compatibility with GRC's published fingerprint format.
+
+This is a diagnostic decoder, not a second trust engine. It does not validate signatures, rebuild the path, or override wolfSSL. Unknown extension values are not interpreted; their OIDs and critical flags are still listed. A malformed certificate structure results in a parse-unavailable message while the original verification failure remains final.
+
 ## What is captured during certificate verification
 
 The C callback in `vendor/wolfssl-bridge/uefi_tls.c` records:
@@ -103,7 +118,8 @@ The current comparison checks fingerprint membership and leaf identity; it does 
 - `src/main.rs`: HTTPS navigation, fail-closed handshake handling, user-facing failure report, GRC HTTPS fetch, and comparison report.
 - `src/tls.rs`: Rust TLS session wrapper and access to wolfSSL diagnostic values.
 - `src/grc_chain.rs`: GRC page parser, hostname check, fingerprint formatting, and comparison logic.
-- `vendor/wolfssl-bridge/uefi_tls.c`: mandatory peer-verification configuration, hostname/IP identity configuration, certificate callback diagnostics, CA loading, and TLS handshake.
+- `src/x509_summary.rs`: bounded DER decoder for the rejected certificate's human-readable field summary.
+- `vendor/wolfssl-bridge/uefi_tls.c`: mandatory peer-verification configuration, hostname/IP identity configuration, live certificate callback events, rejected-certificate DER/fingerprint capture, CA loading, and TLS handshake.
 - `vendor/wolfssl-bridge/uefi_date.c`: strict certificate validity-date parsing and comparison with UEFI time.
 - `vendor/wolfssl-bridge/include/user_settings.h`: wolfSSL UEFI configuration.
 - `build.rs` and `scripts/build-uefi.sh`: build-time CA bundle generation and wolfSSL/EFI integration.
