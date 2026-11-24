@@ -1674,7 +1674,29 @@ fn run_browser_ui(
             }
             BrowserAction::ActivateLink => {
                 if let Some((form, control)) = selected_control {
-                    format!("form-submit {} {}", form + 1, control + 1)
+                    let kind = page
+                        .document
+                        .forms
+                        .get(form)
+                        .and_then(|form| form.controls.get(control))
+                        .map(|control| control.kind);
+                    match kind {
+                        Some(FormControlKind::Reset) => {
+                            status = String::from("Reset buttons are not supported yet");
+                            continue;
+                        }
+                        Some(FormControlKind::Button) => {
+                            status = String::from(
+                                "This button requires JavaScript, which is disabled in firmware",
+                            );
+                            continue;
+                        }
+                        Some(FormControlKind::File) => {
+                            status = String::from("File uploads are not supported");
+                            continue;
+                        }
+                        _ => format!("form-submit {} {}", form + 1, control + 1),
+                    }
                 } else if let Some(index) = selected_link {
                     format!("open {}", index + 1)
                 } else {
