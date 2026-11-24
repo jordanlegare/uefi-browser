@@ -242,6 +242,7 @@ The recorded validation for the HTML/CSS/persistence implementation passed **45 
 | vendor/wolfssl-bridge/ | wolfSSL TLS, platform, date and freestanding C bridges |
 | scripts/ | wolfSSL retrieval/build and CA bundle preparation |
 | docs/TLS-CHAIN-VERIFICATION.md | TLS verification and certificate-failure diagnostics |
+| docs/FIRMWARE-TESTING.md | OVMF and physical UEFI runtime test procedures and evidence checklist |
 | docs/ELINKS-COMPATIBILITY.md | ELinks behavioural reference and licensing boundary |
 
 ## Scope and security limitations
