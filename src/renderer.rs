@@ -1,10 +1,11 @@
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::css::{ComputedStyle, DisplayMode, TextAlign};
 use crate::document::{
     Block, BlockKind, Document, FormControl, FormControlKind, InlineRun, InlineStyle, Table,
-    TableCell, TermColor,
+    TableCell,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
