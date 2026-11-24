@@ -11,6 +11,14 @@
 #include <time.h>
 #endif
 
+/*
+ * The EFI image uses the x86-64 Windows PE/COFF ABI, so _WIN32/_WIN64
+ * must remain defined by the MinGW target. The firmware is not Windows,
+ * however: suppress wolfSSL's Windows API backend and use the UEFI
+ * platform hooks below instead.
+ */
+#define WOLFSSL_NOT_WINDOWS_API
+
 #define SINGLE_THREADED
 #define NO_FILESYSTEM
 #define NO_WRITEV
