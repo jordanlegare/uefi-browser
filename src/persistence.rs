@@ -170,7 +170,9 @@ impl<B: StorageBackend> PersistentStore<B> {
         for index in 0..MAX_CACHED_PAGES {
             let name = cache_name(index);
             if let Ok(Some(bytes)) = self.backend.read(&name) {
-                if bytes.len() <= MAX_CACHE_ENTRY_BYTES + 16 * 1024 && decode_cache(&bytes).is_some() {
+                if bytes.len() <= MAX_CACHE_ENTRY_BYTES + 16 * 1024
+                    && decode_cache(&bytes).is_some()
+                {
                     stats.entries += 1;
                     stats.bytes = stats.bytes.saturating_add(bytes.len());
                 }
@@ -299,7 +301,11 @@ mod tests {
 
     impl StorageBackend for MemoryStorage {
         fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>, ()> {
-            Ok(self.files.iter().find(|(key, _)| key == name).map(|(_, data)| data.clone()))
+            Ok(self
+                .files
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, data)| data.clone()))
         }
 
         fn write_atomic(&mut self, name: &str, bytes: &[u8]) -> Result<(), ()> {
@@ -319,8 +325,16 @@ mod tests {
     #[test]
     fn bookmarks_round_trip_and_replace_duplicate_urls() {
         let mut store = PersistentStore::new(MemoryStorage::default());
-        assert!(store.add_bookmark("https://example.org/a?q=x&y=z", "Example | docs").unwrap());
-        assert!(!store.add_bookmark("https://example.org/a?q=x&y=z", "Updated").unwrap());
+        assert!(
+            store
+                .add_bookmark("https://example.org/a?q=x&y=z", "Example | docs")
+                .unwrap()
+        );
+        assert!(
+            !store
+                .add_bookmark("https://example.org/a?q=x&y=z", "Updated")
+                .unwrap()
+        );
         let bookmarks = store.bookmarks();
         assert_eq!(bookmarks.len(), 1);
         assert_eq!(bookmarks[0].title, "Updated");
@@ -340,7 +354,10 @@ mod tests {
         };
         store.cache_page(&page).unwrap();
         assert_eq!(store.cached_page(&page.url, 1001), Some(page.clone()));
-        assert_eq!(store.cached_page(&page.url, 1000 + CACHE_TTL_SECONDS + 1), None);
+        assert_eq!(
+            store.cached_page(&page.url, 1000 + CACHE_TTL_SECONDS + 1),
+            None
+        );
         assert_eq!(store.cache_stats().entries, 1);
         store.clear_cache();
         assert_eq!(store.cache_stats().entries, 0);

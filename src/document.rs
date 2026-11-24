@@ -65,9 +65,17 @@ pub enum BlockKind {
     Heading(u8),
     Preformatted,
     Quote,
-    ListItem { depth: u8, ordered: bool, ordinal: u16 },
-    TableRow { header: bool },
-    Table { table_index: usize },
+    ListItem {
+        depth: u8,
+        ordered: bool,
+        ordinal: u16,
+    },
+    TableRow {
+        header: bool,
+    },
+    Table {
+        table_index: usize,
+    },
     DefinitionTerm,
     DefinitionDescription,
     HorizontalRule,
@@ -210,15 +218,25 @@ pub fn external_stylesheet_urls(source: &str, base: &Url) -> Vec<Url> {
     let mut urls = Vec::new();
     for node in dom.find_by_tag(dom.root, "link") {
         let rel = dom.attr(node, "rel").unwrap_or("");
-        if !rel.split_ascii_whitespace().any(|token| token.eq_ignore_ascii_case("stylesheet")) {
+        if !rel
+            .split_ascii_whitespace()
+            .any(|token| token.eq_ignore_ascii_case("stylesheet"))
+        {
             continue;
         }
-        let Some(href) = dom.attr(node, "href") else { continue; };
-        let Ok(url) = base.resolve(href) else { continue; };
+        let Some(href) = dom.attr(node, "href") else {
+            continue;
+        };
+        let Ok(url) = base.resolve(href) else {
+            continue;
+        };
         if base.scheme == crate::url::Scheme::Https && url.scheme == crate::url::Scheme::Http {
             continue;
         }
-        if !urls.iter().any(|existing: &Url| existing.as_string() == url.as_string()) {
+        if !urls
+            .iter()
+            .any(|existing: &Url| existing.as_string() == url.as_string())
+        {
             urls.push(url);
         }
         if urls.len() >= 4 {
@@ -273,12 +291,9 @@ impl DocumentBuilder<'_> {
         let mut inline = Vec::new();
         for child in self.dom.children(parent).iter().copied() {
             match &self.dom.nodes[child].kind {
-                NodeKind::Text(text) => push_run(
-                    &mut inline,
-                    text,
-                    inline_style(&parent_style),
-                    None,
-                ),
+                NodeKind::Text(text) => {
+                    push_run(&mut inline, text, inline_style(&parent_style), None)
+                }
                 NodeKind::Comment | NodeKind::Document => {}
                 NodeKind::Element { .. } => {
                     let style = self.computed(child, &parent_style);
@@ -302,7 +317,10 @@ impl DocumentBuilder<'_> {
 
     fn emit_block(&mut self, node: NodeId, style: ComputedStyle, list_depth: u8) {
         let tag = self.dom.tag(node).unwrap_or("");
-        if matches!(tag, "script" | "style" | "noscript" | "template" | "svg" | "head") {
+        if matches!(
+            tag,
+            "script" | "style" | "noscript" | "template" | "svg" | "head"
+        ) {
             return;
         }
 
@@ -332,7 +350,11 @@ impl DocumentBuilder<'_> {
                 );
                 for child in self.dom.children(node).iter().copied() {
                     if matches!(self.dom.tag(child), Some("ul" | "ol")) {
-                        self.emit_block(child, self.computed(child, &style), list_depth.saturating_add(1));
+                        self.emit_block(
+                            child,
+                            self.computed(child, &style),
+                            list_depth.saturating_add(1),
+                        );
                     }
                 }
             }
@@ -452,7 +474,12 @@ impl DocumentBuilder<'_> {
         }
         if tag == "img" {
             let alt = self.dom.attr(node, "alt").unwrap_or("image");
-            push_run(output, &format!("[image: {alt}]"), inline_style(&style), link);
+            push_run(
+                output,
+                &format!("[image: {alt}]"),
+                inline_style(&style),
+                link,
+            );
             return;
         }
 
@@ -474,7 +501,12 @@ impl DocumentBuilder<'_> {
             if let Some(item) = self.document.links.get_mut(index) {
                 item.label = label;
             }
-            push_run(output, &format!(" [{}]", index + 1), InlineStyle::default(), None);
+            push_run(
+                output,
+                &format!(" [{}]", index + 1),
+                InlineStyle::default(),
+                None,
+            );
         }
     }
 
@@ -541,8 +573,20 @@ impl DocumentBuilder<'_> {
                     let cell_style = self.computed(cell, &style);
                     let mut runs = Vec::new();
                     self.collect_inline_children(cell, cell_style, None, &mut runs, false);
-                    let colspan = self.dom.attr(cell, "colspan").and_then(|v| v.parse::<u8>().ok()).filter(|v| *v > 0).unwrap_or(1).min(8);
-                    let rowspan = self.dom.attr(cell, "rowspan").and_then(|v| v.parse::<u8>().ok()).filter(|v| *v > 0).unwrap_or(1).min(8);
+                    let colspan = self
+                        .dom
+                        .attr(cell, "colspan")
+                        .and_then(|v| v.parse::<u8>().ok())
+                        .filter(|v| *v > 0)
+                        .unwrap_or(1)
+                        .min(8);
+                    let rowspan = self
+                        .dom
+                        .attr(cell, "rowspan")
+                        .and_then(|v| v.parse::<u8>().ok())
+                        .filter(|v| *v > 0)
+                        .unwrap_or(1)
+                        .min(8);
                     for run in &runs {
                         self.document.text.push_str(&run.text);
                     }
@@ -555,7 +599,11 @@ impl DocumentBuilder<'_> {
                 }
                 if !cells.is_empty() {
                     rows.push(TableRow {
-                        header: self.dom.children(child).iter().any(|id| self.dom.tag(*id) == Some("th")),
+                        header: self
+                            .dom
+                            .children(child)
+                            .iter()
+                            .any(|id| self.dom.tag(*id) == Some("th")),
                         cells,
                     });
                     self.document.text.push('\n');
@@ -570,22 +618,38 @@ impl DocumentBuilder<'_> {
         if self.document.forms.len() >= MAX_FORMS {
             return;
         }
-        let action = self.dom.attr(node, "action")
+        let action = self
+            .dom
+            .attr(node, "action")
             .and_then(|value| self.base.resolve(value).ok())
             .map(|url| url.as_string())
             .unwrap_or_else(|| self.base.as_string());
-        let method = match self.dom.attr(node, "method").unwrap_or("get").to_ascii_lowercase().as_str() {
+        let method = match self
+            .dom
+            .attr(node, "method")
+            .unwrap_or("get")
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "post" => FormMethod::Post,
             _ => FormMethod::Get,
         };
         let mut controls = Vec::new();
         self.collect_form_controls(node, &mut controls);
         let index = self.document.forms.len();
-        self.document.forms.push(Form { action, method, controls });
+        self.document.forms.push(Form {
+            action,
+            method,
+            controls,
+        });
         let mut runs = Vec::new();
         push_run(
             &mut runs,
-            &format!("[Form {} — use 'form {}' to fill and submit]", index + 1, index + 1),
+            &format!(
+                "[Form {} — use 'form {}' to fill and submit]",
+                index + 1,
+                index + 1
+            ),
             InlineStyle::default(),
             None,
         );
@@ -599,7 +663,11 @@ impl DocumentBuilder<'_> {
             }
             let tag = self.dom.tag(child).unwrap_or("");
             if tag == "input" {
-                let input_type = self.dom.attr(child, "type").unwrap_or("text").to_ascii_lowercase();
+                let input_type = self
+                    .dom
+                    .attr(child, "type")
+                    .unwrap_or("text")
+                    .to_ascii_lowercase();
                 let kind = match input_type.as_str() {
                     "password" => FormControlKind::Password,
                     "email" => FormControlKind::Email,
@@ -616,7 +684,9 @@ impl DocumentBuilder<'_> {
                 };
                 controls.push(FormControl {
                     name: self.dom.attr(child, "name").unwrap_or("").to_string(),
-                    label: self.dom.attr(child, "aria-label")
+                    label: self
+                        .dom
+                        .attr(child, "aria-label")
                         .or_else(|| self.dom.attr(child, "placeholder"))
                         .or_else(|| self.dom.attr(child, "title"))
                         .or_else(|| self.dom.attr(child, "name"))
@@ -632,7 +702,9 @@ impl DocumentBuilder<'_> {
             } else if tag == "textarea" {
                 controls.push(FormControl {
                     name: self.dom.attr(child, "name").unwrap_or("").to_string(),
-                    label: self.dom.attr(child, "aria-label")
+                    label: self
+                        .dom
+                        .attr(child, "aria-label")
                         .or_else(|| self.dom.attr(child, "placeholder"))
                         .or_else(|| self.dom.attr(child, "name"))
                         .unwrap_or("text")
@@ -647,11 +719,17 @@ impl DocumentBuilder<'_> {
             } else if tag == "select" {
                 let mut options = Vec::new();
                 self.collect_options(child, &mut options);
-                let selected = options.iter().find(|option| option.selected).map(|option| option.value.clone())
-                    .or_else(|| options.first().map(|option| option.value.clone())).unwrap_or_default();
+                let selected = options
+                    .iter()
+                    .find(|option| option.selected)
+                    .map(|option| option.value.clone())
+                    .or_else(|| options.first().map(|option| option.value.clone()))
+                    .unwrap_or_default();
                 controls.push(FormControl {
                     name: self.dom.attr(child, "name").unwrap_or("").to_string(),
-                    label: self.dom.attr(child, "aria-label")
+                    label: self
+                        .dom
+                        .attr(child, "aria-label")
                         .or_else(|| self.dom.attr(child, "name"))
                         .unwrap_or("choice")
                         .to_string(),
@@ -705,17 +783,25 @@ impl DocumentBuilder<'_> {
         while let Some(parent) = current {
             match self.dom.tag(parent) {
                 Some("ol") => {
-                    let ordinal = self.dom.children(parent).iter()
+                    let ordinal = self
+                        .dom
+                        .children(parent)
+                        .iter()
                         .filter(|child| self.dom.tag(**child) == Some("li"))
                         .position(|child| **child == node)
-                        .unwrap_or(0) as u16 + 1;
+                        .unwrap_or(0) as u16
+                        + 1;
                     return (true, ordinal);
                 }
                 Some("ul") => {
-                    let ordinal = self.dom.children(parent).iter()
+                    let ordinal = self
+                        .dom
+                        .children(parent)
+                        .iter()
                         .filter(|child| self.dom.tag(**child) == Some("li"))
                         .position(|child| **child == node)
-                        .unwrap_or(0) as u16 + 1;
+                        .unwrap_or(0) as u16
+                        + 1;
                     return (false, ordinal);
                 }
                 _ => current = self.dom.nodes.get(parent).and_then(|item| item.parent),
@@ -738,7 +824,11 @@ impl DocumentBuilder<'_> {
     fn add_anchor_name(&mut self, name: &str, block_index: usize) {
         if !name.is_empty()
             && name.len() <= 256
-            && !self.document.anchors.iter().any(|anchor| anchor.name == name)
+            && !self
+                .document
+                .anchors
+                .iter()
+                .any(|anchor| anchor.name == name)
         {
             self.document.anchors.push(Anchor {
                 name: name.to_string(),
@@ -762,20 +852,71 @@ fn inline_style(style: &ComputedStyle) -> InlineStyle {
 fn is_inline_tag(tag: &str) -> bool {
     matches!(
         tag,
-        "a" | "abbr" | "b" | "bdi" | "bdo" | "cite" | "code" | "data" | "del"
-            | "dfn" | "em" | "i" | "ins" | "kbd" | "mark" | "q" | "s" | "samp"
-            | "small" | "span" | "strong" | "sub" | "sup" | "time" | "u" | "var"
-            | "img" | "br" | "input" | "label" | "select" | "textarea"
+        "a" | "abbr"
+            | "b"
+            | "bdi"
+            | "bdo"
+            | "cite"
+            | "code"
+            | "data"
+            | "del"
+            | "dfn"
+            | "em"
+            | "i"
+            | "ins"
+            | "kbd"
+            | "mark"
+            | "q"
+            | "s"
+            | "samp"
+            | "small"
+            | "span"
+            | "strong"
+            | "sub"
+            | "sup"
+            | "time"
+            | "u"
+            | "var"
+            | "img"
+            | "br"
+            | "input"
+            | "label"
+            | "select"
+            | "textarea"
     )
 }
 
 fn is_block_tag(tag: &str) -> bool {
     matches!(
         tag,
-        "address" | "article" | "aside" | "blockquote" | "div" | "dl" | "fieldset"
-            | "footer" | "form" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
-            | "header" | "hr" | "main" | "nav" | "ol" | "p" | "pre" | "section"
-            | "table" | "ul" | "li" | "dt" | "dd"
+        "address"
+            | "article"
+            | "aside"
+            | "blockquote"
+            | "div"
+            | "dl"
+            | "fieldset"
+            | "footer"
+            | "form"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "hr"
+            | "main"
+            | "nav"
+            | "ol"
+            | "p"
+            | "pre"
+            | "section"
+            | "table"
+            | "ul"
+            | "li"
+            | "dt"
+            | "dd"
     )
 }
 
@@ -863,7 +1004,9 @@ fn decode_entity(entity: &str) -> Option<char> {
             if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
                 return None;
             }
-            u32::from_str_radix(digits, 16).ok().and_then(char::from_u32)
+            u32::from_str_radix(digits, 16)
+                .ok()
+                .and_then(char::from_u32)
         }
         _ if entity.starts_with('#') => {
             let digits = entity.get(1..)?;
@@ -901,10 +1044,27 @@ mod tests {
         assert!(page.text.contains("Welcome"));
         assert_eq!(page.links[0].target, "https://example.org/guide");
         assert_eq!(page.anchor_block("top"), Some(0));
-        assert!(page.blocks.iter().any(|block| matches!(&block.kind, BlockKind::Heading(1))));
-        assert!(page.blocks.iter().any(|block| matches!(&block.kind, BlockKind::ListItem { .. })));
-        assert!(page.blocks.iter().flat_map(|block| &block.runs).any(|run| run.style.strong));
-        assert!(page.blocks.iter().any(|block| matches!(&block.kind, BlockKind::Preformatted)));
+        assert!(
+            page.blocks
+                .iter()
+                .any(|block| matches!(&block.kind, BlockKind::Heading(1)))
+        );
+        assert!(
+            page.blocks
+                .iter()
+                .any(|block| matches!(&block.kind, BlockKind::ListItem { .. }))
+        );
+        assert!(
+            page.blocks
+                .iter()
+                .flat_map(|block| &block.runs)
+                .any(|run| run.style.strong)
+        );
+        assert!(
+            page.blocks
+                .iter()
+                .any(|block| matches!(&block.kind, BlockKind::Preformatted))
+        );
     }
 
     #[test]

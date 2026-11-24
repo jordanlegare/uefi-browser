@@ -27,9 +27,9 @@ pub mod firmware_time;
 #[cfg(target_os = "uefi")]
 pub mod snp_network;
 #[cfg(target_os = "uefi")]
-pub mod uefi_storage;
-#[cfg(target_os = "uefi")]
 pub mod uefi_memory;
+#[cfg(target_os = "uefi")]
+pub mod uefi_storage;
 
 #[cfg(test)]
 extern crate std;

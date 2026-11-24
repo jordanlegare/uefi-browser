@@ -11,7 +11,10 @@ pub type NodeId = usize;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NodeKind {
     Document,
-    Element { tag: String, attributes: Vec<Attribute> },
+    Element {
+        tag: String,
+        attributes: Vec<Attribute>,
+    },
     Text(String),
     Comment,
 }
@@ -73,13 +76,18 @@ impl Dom {
     }
 
     pub fn attr(&self, id: NodeId, name: &str) -> Option<&str> {
-        self.element(id)?.1.iter()
+        self.element(id)?
+            .1
+            .iter()
             .find(|attribute| attribute.name.eq_ignore_ascii_case(name))
             .map(|attribute| attribute.value.as_str())
     }
 
     pub fn children(&self, id: NodeId) -> &[NodeId] {
-        self.nodes.get(id).map(|node| node.children.as_slice()).unwrap_or(&[])
+        self.nodes
+            .get(id)
+            .map(|node| node.children.as_slice())
+            .unwrap_or(&[])
     }
 
     pub fn text_content(&self, id: NodeId) -> String {
@@ -89,7 +97,9 @@ impl Dom {
     }
 
     fn append_text(&self, id: NodeId, output: &mut String) {
-        let Some(node) = self.nodes.get(id) else { return; };
+        let Some(node) = self.nodes.get(id) else {
+            return;
+        };
         if let NodeKind::Text(value) = &node.kind {
             output.push_str(value);
             return;
@@ -119,7 +129,10 @@ impl Dom {
     }
 
     fn collect_by_tag(&self, root: NodeId, tag: &str, found: &mut Vec<NodeId>) {
-        if self.tag(root).is_some_and(|name| name.eq_ignore_ascii_case(tag)) {
+        if self
+            .tag(root)
+            .is_some_and(|name| name.eq_ignore_ascii_case(tag))
+        {
             found.push(root);
         }
         for child in self.children(root) {
@@ -185,15 +198,17 @@ impl<'a> Tokenizer<'a> {
             return Some(Token::Text("<".to_string()));
         }
 
-        if rest.starts_with('<')
-            && rest.as_bytes().get(1).is_some_and(u8::is_ascii_alphabetic)
-        {
+        if rest.starts_with('<') && rest.as_bytes().get(1).is_some_and(u8::is_ascii_alphabetic) {
             if let Some(end) = find_tag_end(self.source, self.cursor) {
                 let inner = &self.source[self.cursor + 1..end];
                 self.cursor = end + 1;
                 let (name, attributes, self_closing) = parse_start_tag(inner);
                 if !name.is_empty() {
-                    return Some(Token::StartTag { name, attributes, self_closing });
+                    return Some(Token::StartTag {
+                        name,
+                        attributes,
+                        self_closing,
+                    });
                 }
             }
         }
@@ -255,7 +270,9 @@ fn find_markup_end(source: &str, start: usize) -> Option<usize> {
 }
 
 fn parse_name(source: &str) -> String {
-    let end = source.find(|ch: char| ch.is_ascii_whitespace() || ch == '/' || ch == '>').unwrap_or(source.len());
+    let end = source
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/' || ch == '>')
+        .unwrap_or(source.len());
     source[..end].to_ascii_lowercase()
 }
 
@@ -318,30 +335,85 @@ fn parse_start_tag(source: &str) -> (String, Vec<Attribute>, bool) {
                 }
             } else {
                 let value_start = cursor;
-                while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'>' {
+                while cursor < bytes.len()
+                    && !bytes[cursor].is_ascii_whitespace()
+                    && bytes[cursor] != b'>'
+                {
                     cursor += 1;
                 }
                 value = crate::document::decode_html_entities(&source[value_start..cursor]);
             }
         }
 
-        if !attributes.iter().any(|attribute: &Attribute| attribute.name == attribute_name) {
-            attributes.push(Attribute { name: attribute_name, value });
+        if !attributes
+            .iter()
+            .any(|attribute: &Attribute| attribute.name == attribute_name)
+        {
+            attributes.push(Attribute {
+                name: attribute_name,
+                value,
+            });
         }
     }
     (name, attributes, self_closing)
 }
 
 fn is_void(name: &str) -> bool {
-    matches!(name, "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta" | "param" | "source" | "track" | "wbr")
+    matches!(
+        name,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
 }
 
 fn is_head_tag(name: &str) -> bool {
-    matches!(name, "base" | "link" | "meta" | "title" | "style" | "script" | "noscript")
+    matches!(
+        name,
+        "base" | "link" | "meta" | "title" | "style" | "script" | "noscript"
+    )
 }
 
 fn is_block_start(name: &str) -> bool {
-    matches!(name, "address" | "article" | "aside" | "blockquote" | "div" | "dl" | "fieldset" | "footer" | "form" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "header" | "hr" | "main" | "nav" | "ol" | "p" | "pre" | "section" | "table" | "ul")
+    matches!(
+        name,
+        "address"
+            | "article"
+            | "aside"
+            | "blockquote"
+            | "div"
+            | "dl"
+            | "fieldset"
+            | "footer"
+            | "form"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "hr"
+            | "main"
+            | "nav"
+            | "ol"
+            | "p"
+            | "pre"
+            | "section"
+            | "table"
+            | "ul"
+    )
 }
 
 fn close_open(stack: &mut Vec<NodeId>, dom: &Dom, target: &str) {
@@ -357,16 +429,19 @@ fn current_tag(stack: &[NodeId], dom: &Dom) -> Option<&str> {
 fn ensure_table_section(stack: &mut Vec<NodeId>, dom: &mut Dom) {
     let table_position = stack.iter().rposition(|id| dom.tag(*id) == Some("table"));
     if let Some(position) = table_position {
-        let has_section = stack[position + 1..].iter().any(|id| {
-            matches!(dom.tag(*id), Some("tbody" | "thead" | "tfoot"))
-        });
+        let has_section = stack[position + 1..]
+            .iter()
+            .any(|id| matches!(dom.tag(*id), Some("tbody" | "thead" | "tfoot")));
         if !has_section {
             stack.truncate(position + 1);
             if let Some(table) = stack.last().copied() {
-                if let Some(section) = dom.append(table, NodeKind::Element {
-                    tag: "tbody".to_string(),
-                    attributes: Vec::new(),
-                }) {
+                if let Some(section) = dom.append(
+                    table,
+                    NodeKind::Element {
+                        tag: "tbody".to_string(),
+                        attributes: Vec::new(),
+                    },
+                ) {
                     stack.push(section);
                 }
             }
@@ -376,9 +451,33 @@ fn ensure_table_section(stack: &mut Vec<NodeId>, dom: &mut Dom) {
 
 pub fn build_tree(source: &str) -> Dom {
     let mut dom = Dom::new();
-    let html = dom.append(0, NodeKind::Element { tag: "html".to_string(), attributes: Vec::new() }).unwrap_or(0);
-    let head = dom.append(html, NodeKind::Element { tag: "head".to_string(), attributes: Vec::new() }).unwrap_or(html);
-    let body = dom.append(html, NodeKind::Element { tag: "body".to_string(), attributes: Vec::new() }).unwrap_or(html);
+    let html = dom
+        .append(
+            0,
+            NodeKind::Element {
+                tag: "html".to_string(),
+                attributes: Vec::new(),
+            },
+        )
+        .unwrap_or(0);
+    let head = dom
+        .append(
+            html,
+            NodeKind::Element {
+                tag: "head".to_string(),
+                attributes: Vec::new(),
+            },
+        )
+        .unwrap_or(html);
+    let body = dom
+        .append(
+            html,
+            NodeKind::Element {
+                tag: "body".to_string(),
+                attributes: Vec::new(),
+            },
+        )
+        .unwrap_or(html);
 
     let mut stack = alloc::vec![html, head];
     let mut body_started = false;
@@ -403,7 +502,15 @@ pub fn build_tree(source: &str) -> Dom {
                     stack.push(body);
                 }
                 if let Some(parent) = stack.last().copied() {
-                    if let Some(Node { kind: NodeKind::Text(previous), .. }) = stack.last().and_then(|parent| dom.nodes.get(*parent)).and_then(|node| node.children.last()).and_then(|child| dom.nodes.get(*child)) {
+                    if let Some(Node {
+                        kind: NodeKind::Text(previous),
+                        ..
+                    }) = stack
+                        .last()
+                        .and_then(|parent| dom.nodes.get(*parent))
+                        .and_then(|node| node.children.last())
+                        .and_then(|child| dom.nodes.get(*child))
+                    {
                         let mut combined = previous.clone();
                         combined.push_str(&text);
                         if let Some(child) = dom.nodes[parent].children.last().copied() {
@@ -414,14 +521,22 @@ pub fn build_tree(source: &str) -> Dom {
                     }
                 }
             }
-            Token::StartTag { name, attributes, self_closing } => {
+            Token::StartTag {
+                name,
+                attributes,
+                self_closing,
+            } => {
                 if name == "html" || name == "head" || name == "body" {
                     if name == "body" {
                         body_started = true;
                         stack.clear();
                         stack.push(html);
                         stack.push(body);
-                        if let Some(NodeKind::Element { attributes: existing, .. }) = dom.nodes.get_mut(body).map(|node| &mut node.kind) {
+                        if let Some(NodeKind::Element {
+                            attributes: existing,
+                            ..
+                        }) = dom.nodes.get_mut(body).map(|node| &mut node.kind)
+                        {
                             existing.extend(attributes);
                         }
                     }
@@ -442,7 +557,9 @@ pub fn build_tree(source: &str) -> Dom {
                 if name == "p" && stack.iter().any(|id| dom.tag(*id) == Some("p")) {
                     close_open(&mut stack, &dom, "p");
                 }
-                if name == "li" { close_open(&mut stack, &dom, "li"); }
+                if name == "li" {
+                    close_open(&mut stack, &dom, "li");
+                }
                 if name == "dt" || name == "dd" {
                     close_open(&mut stack, &dom, "dt");
                     close_open(&mut stack, &dom, "dd");
@@ -452,15 +569,26 @@ pub fn build_tree(source: &str) -> Dom {
                         close_open(&mut stack, &dom, heading);
                     }
                 }
-                if name == "option" { close_open(&mut stack, &dom, "option"); }
-                if name == "optgroup" { close_open(&mut stack, &dom, "option"); close_open(&mut stack, &dom, "optgroup"); }
+                if name == "option" {
+                    close_open(&mut stack, &dom, "option");
+                }
+                if name == "optgroup" {
+                    close_open(&mut stack, &dom, "option");
+                    close_open(&mut stack, &dom, "optgroup");
+                }
                 if name == "td" || name == "th" {
                     close_open(&mut stack, &dom, "td");
                     close_open(&mut stack, &dom, "th");
                     if !stack.iter().any(|id| dom.tag(*id) == Some("tr")) {
                         ensure_table_section(&mut stack, &mut dom);
                         let parent = stack.last().copied().unwrap_or(body);
-                        if let Some(row) = dom.append(parent, NodeKind::Element { tag: "tr".to_string(), attributes: Vec::new() }) {
+                        if let Some(row) = dom.append(
+                            parent,
+                            NodeKind::Element {
+                                tag: "tr".to_string(),
+                                attributes: Vec::new(),
+                            },
+                        ) {
                             stack.push(row);
                         }
                     }
@@ -472,15 +600,25 @@ pub fn build_tree(source: &str) -> Dom {
                     ensure_table_section(&mut stack, &mut dom);
                 }
                 if name == "p" || is_block_start(&name) {
-                    if name != "p" { close_open(&mut stack, &dom, "p"); }
+                    if name != "p" {
+                        close_open(&mut stack, &dom, "p");
+                    }
                 }
 
                 let parent = stack.last().copied().unwrap_or(body);
-                let Some(id) = dom.append(parent, NodeKind::Element { tag: name.clone(), attributes }) else {
+                let Some(id) = dom.append(
+                    parent,
+                    NodeKind::Element {
+                        tag: name.clone(),
+                        attributes,
+                    },
+                ) else {
                     break;
                 };
 
-                if !self_closing && matches!(name.as_str(), "script" | "style" | "title" | "textarea") {
+                if !self_closing
+                    && matches!(name.as_str(), "script" | "style" | "title" | "textarea")
+                {
                     let decode = matches!(name.as_str(), "title" | "textarea");
                     if let Some(raw) = tokenizer.consume_raw_text(&name, decode) {
                         if !raw.is_empty() {
@@ -530,7 +668,10 @@ mod tests {
         assert_eq!(body.len(), 1);
         assert_eq!(tbody.len(), 1);
         assert_eq!(cells.len(), 2);
-        assert_eq!(dom.attr(dom.find_by_tag(dom.root, "h1")[0], "id"), Some("top"));
+        assert_eq!(
+            dom.attr(dom.find_by_tag(dom.root, "h1")[0], "id"),
+            Some("top")
+        );
     }
 
     #[test]

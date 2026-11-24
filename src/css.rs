@@ -163,13 +163,44 @@ impl StyleSheet {
 fn default_style(tag: &str, parent: &ComputedStyle) -> ComputedStyle {
     let block = matches!(
         tag,
-        "address" | "article" | "aside" | "blockquote" | "body" | "div" | "dl"
-            | "dt" | "dd" | "fieldset" | "figcaption" | "figure" | "footer" | "form"
-            | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "header" | "hr" | "html"
-            | "main" | "nav" | "ol" | "p" | "pre" | "section" | "ul" | "li"
+        "address"
+            | "article"
+            | "aside"
+            | "blockquote"
+            | "body"
+            | "div"
+            | "dl"
+            | "dt"
+            | "dd"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "footer"
+            | "form"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "hr"
+            | "html"
+            | "main"
+            | "nav"
+            | "ol"
+            | "p"
+            | "pre"
+            | "section"
+            | "ul"
+            | "li"
     );
     let mut style = ComputedStyle {
-        display: if block { DisplayMode::Block } else { DisplayMode::Inline },
+        display: if block {
+            DisplayMode::Block
+        } else {
+            DisplayMode::Inline
+        },
         bold: parent.bold,
         italic: parent.italic,
         underline: parent.underline,
@@ -201,7 +232,9 @@ fn default_style(tag: &str, parent: &ComputedStyle) -> ComputedStyle {
         "table" => style.display = DisplayMode::Table,
         "tr" => style.display = DisplayMode::TableRow,
         "td" | "th" => style.display = DisplayMode::TableCell,
-        "script" | "style" | "head" | "meta" | "link" | "template" => style.display = DisplayMode::None,
+        "script" | "style" | "head" | "meta" | "link" | "template" => {
+            style.display = DisplayMode::None
+        }
         _ => {}
     }
     style
@@ -222,7 +255,10 @@ fn apply_declaration(style: &mut ComputedStyle, property: &str, value: &str) {
             };
         }
         "font-weight" => {
-            if matches!(value.as_str(), "bold" | "bolder" | "600" | "700" | "800" | "900") {
+            if matches!(
+                value.as_str(),
+                "bold" | "bolder" | "600" | "700" | "800" | "900"
+            ) {
                 style.bold = true;
             } else if matches!(value.as_str(), "normal" | "400") {
                 style.bold = false;
@@ -283,11 +319,7 @@ fn parse_cells(value: &str) -> u8 {
         .trim_end_matches("px")
         .trim_end_matches("rem")
         .trim_end_matches("em");
-    numeric
-        .parse::<u16>()
-        .unwrap_or(0)
-        .div_ceil(8)
-        .min(12) as u8
+    numeric.parse::<u16>().unwrap_or(0).div_ceil(8).min(12) as u8
 }
 
 fn parse_color(value: &str) -> Option<TermColor> {
@@ -304,9 +336,7 @@ fn parse_color(value: &str) -> Option<TermColor> {
                 let b = expand(bytes[2])?;
                 (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
             }
-            6 if bytes.iter().all(u8::is_ascii_hexdigit) => {
-                u32::from_str_radix(hex, 16).ok()?
-            }
+            6 if bytes.iter().all(u8::is_ascii_hexdigit) => u32::from_str_radix(hex, 16).ok()?,
             _ => return None,
         };
         let r = ((rgb >> 16) & 0xff) as u8;
@@ -443,12 +473,17 @@ fn parse_selector(input: &str) -> Option<Selector> {
     if compounds.is_empty() {
         None
     } else {
-        Some(Selector { compounds, specificity })
+        Some(Selector {
+            compounds,
+            specificity,
+        })
     }
 }
 
 fn matches_selector(dom: &Dom, node: NodeId, selector: &Selector) -> bool {
-    let Some(last) = selector.compounds.last() else { return false; };
+    let Some(last) = selector.compounds.last() else {
+        return false;
+    };
     if !matches_compound(dom, node, last) {
         return false;
     }
@@ -472,7 +507,10 @@ fn matches_selector(dom: &Dom, node: NodeId, selector: &Selector) -> bool {
 
 fn matches_compound(dom: &Dom, node: NodeId, selector: &CompoundSelector) -> bool {
     if let Some(tag) = &selector.tag {
-        if !dom.tag(node).is_some_and(|name| name.eq_ignore_ascii_case(tag)) {
+        if !dom
+            .tag(node)
+            .is_some_and(|name| name.eq_ignore_ascii_case(tag))
+        {
             return false;
         }
     }
@@ -483,7 +521,11 @@ fn matches_compound(dom: &Dom, node: NodeId, selector: &CompoundSelector) -> boo
     }
     if !selector.classes.is_empty() {
         let classes = dom.attr(node, "class").unwrap_or("");
-        if selector.classes.iter().any(|wanted| !classes.split_ascii_whitespace().any(|class| class == wanted)) {
+        if selector.classes.iter().any(|wanted| {
+            !classes
+                .split_ascii_whitespace()
+                .any(|class| class == wanted)
+        }) {
             return false;
         }
     }
@@ -518,11 +560,21 @@ mod tests {
 
     #[test]
     fn supports_table_display_and_hidden_elements() {
-        let dom = build_tree("<style>.gone{display:none} table{display:table}</style><div class=gone>x</div><table></table>");
+        let dom = build_tree(
+            "<style>.gone{display:none} table{display:table}</style><div class=gone>x</div><table></table>",
+        );
         let div = dom.find_by_tag(dom.root, "div")[0];
         let table = dom.find_by_tag(dom.root, "table")[0];
         let sheet = StyleSheet::from_dom(&dom);
-        assert_eq!(sheet.compute(&dom, div, &ComputedStyle::default()).display, DisplayMode::None);
-        assert_eq!(sheet.compute(&dom, table, &ComputedStyle::default()).display, DisplayMode::Table);
+        assert_eq!(
+            sheet.compute(&dom, div, &ComputedStyle::default()).display,
+            DisplayMode::None
+        );
+        assert_eq!(
+            sheet
+                .compute(&dom, table, &ComputedStyle::default())
+                .display,
+            DisplayMode::Table
+        );
     }
 }

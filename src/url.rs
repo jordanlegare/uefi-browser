@@ -278,7 +278,10 @@ mod tests {
     #[test]
     fn preserves_and_resolves_fragments_without_sending_them_in_the_request_target() {
         let base = Url::parse("https://example.org/docs/page.html?mode=1#old").unwrap();
-        assert_eq!(base.as_string(), "https://example.org/docs/page.html?mode=1#old");
+        assert_eq!(
+            base.as_string(),
+            "https://example.org/docs/page.html?mode=1#old"
+        );
         assert_eq!(base.path_and_query, "/docs/page.html?mode=1");
         assert_eq!(
             base.resolve("#section-2").unwrap().as_string(),

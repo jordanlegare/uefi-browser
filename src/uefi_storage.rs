@@ -2,7 +2,7 @@ use alloc::format;
 use alloc::string::String;
 
 use uefi::fs::FileSystem;
-use uefi::{boot, CString16, Handle};
+use uefi::{CString16, Handle, boot};
 
 use crate::persistence::StorageBackend;
 

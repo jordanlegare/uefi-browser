@@ -2,8 +2,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::document::{
-    Block, BlockKind, ComputedStyle, Document, InlineRun, InlineStyle, Table, TableCell,
-    TermColor, TextAlign,
+    Block, BlockKind, ComputedStyle, Document, InlineRun, InlineStyle, Table, TableCell, TermColor,
+    TextAlign,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -46,7 +46,12 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
         let block_width = block
             .style
             .width_percent
-            .map(|percent| width.saturating_mul(percent as usize).saturating_div(100).max(8))
+            .map(|percent| {
+                width
+                    .saturating_mul(percent as usize)
+                    .saturating_div(100)
+                    .max(8)
+            })
             .unwrap_or(width)
             .min(width);
         let indent = block.style.padding_left.min(8) as usize;
@@ -99,8 +104,8 @@ fn layout_block(block: &Block, width: usize) -> Vec<RenderLine> {
         background: block.style.background,
         ..InlineStyle::default()
     };
-    let preserve_whitespace = block.style.white_space_pre
-        || matches!(&block.kind, BlockKind::Preformatted);
+    let preserve_whitespace =
+        block.style.white_space_pre || matches!(&block.kind, BlockKind::Preformatted);
 
     match &block.kind {
         BlockKind::Paragraph => {}
@@ -112,7 +117,11 @@ fn layout_block(block: &Block, width: usize) -> Vec<RenderLine> {
         }
         BlockKind::Preformatted => prefix.push_str("  "),
         BlockKind::Quote => prefix.push_str("| "),
-        BlockKind::ListItem { depth, ordered, ordinal } => {
+        BlockKind::ListItem {
+            depth,
+            ordered,
+            ordinal,
+        } => {
             for _ in 0..(*depth).min(8) {
                 prefix.push_str("  ");
             }
@@ -157,7 +166,12 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
     let column_count = table
         .rows
         .iter()
-        .map(|row| row.cells.iter().map(|cell| cell.colspan.max(1) as usize).sum::<usize>())
+        .map(|row| {
+            row.cells
+                .iter()
+                .map(|cell| cell.colspan.max(1) as usize)
+                .sum::<usize>()
+        })
         .max()
         .unwrap_or(0)
         .min(16)
@@ -175,7 +189,9 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
                 continue;
             }
             let measured = max_run_width(&cell.runs).min(width);
-            let available = span.saturating_mul(3).saturating_add(span.saturating_sub(1) * 2);
+            let available = span
+                .saturating_mul(3)
+                .saturating_add(span.saturating_sub(1) * 2);
             if span == 1 {
                 widths[column] = widths[column].max(measured.min(width));
             } else if measured > available {
@@ -213,8 +229,12 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
             if column >= column_count {
                 break;
             }
-            let span = (cell.colspan.max(1) as usize).min(column_count.saturating_sub(column)).max(1);
-            let inner = widths[column..column + span].iter().sum::<usize>()
+            let span = (cell.colspan.max(1) as usize)
+                .min(column_count.saturating_sub(column))
+                .max(1);
+            let inner = widths[column..column + span]
+                .iter()
+                .sum::<usize>()
                 .saturating_add(span.saturating_sub(1) * 2)
                 .max(1);
             let mut lines = wrap_runs(&cell.runs, inner, false);
@@ -258,7 +278,12 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
                 }
                 let padding = inner.saturating_sub(used);
                 if padding > 0 {
-                    append_text(&mut line, &" ".repeat(padding), InlineStyle::default(), None);
+                    append_text(
+                        &mut line,
+                        &" ".repeat(padding),
+                        InlineStyle::default(),
+                        None,
+                    );
                 }
                 if cell_index + 1 == cell_lines.len() {
                     append_text(&mut line, " |", InlineStyle::default(), None);
@@ -277,7 +302,12 @@ fn table_border(widths: &[usize]) -> RenderLine {
     let mut line = RenderLine::default();
     append_text(&mut line, "+", InlineStyle::default(), None);
     for width in widths {
-        append_text(&mut line, &"-".repeat(width.saturating_add(2)), InlineStyle::default(), None);
+        append_text(
+            &mut line,
+            &"-".repeat(width.saturating_add(2)),
+            InlineStyle::default(),
+            None,
+        );
         append_text(&mut line, "+", InlineStyle::default(), None);
     }
     line
@@ -518,9 +548,10 @@ pub fn line_for_link(lines: &[RenderLine], link_index: usize) -> Option<usize> {
 
 pub fn line_for_anchor(document: &Document, lines: &[RenderLine], name: &str) -> Option<usize> {
     let block = document.anchor_block(name)?;
-    lines.iter().enumerate().find_map(|(index, line)| {
-        (line.block_index == Some(block)).then_some(index)
-    })
+    lines
+        .iter()
+        .enumerate()
+        .find_map(|(index, line)| (line.block_index == Some(block)).then_some(index))
 }
 
 #[cfg(test)]
@@ -559,7 +590,11 @@ mod tests {
         let lines = layout_document(&document, 12);
         assert!(lines.len() > 1);
         assert!(lines.iter().all(|line| line.width <= 12));
-        assert!(lines.iter().any(|line| line.spans.iter().any(|span| span.link == Some(0))));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.spans.iter().any(|span| span.link == Some(0)))
+        );
         assert_eq!(line_for_link(&lines, 0), Some(2));
     }
 
@@ -577,15 +612,51 @@ mod tests {
                 TableRow {
                     header: true,
                     cells: alloc::vec![
-                        TableCell { runs: alloc::vec![InlineRun { text: "Name".to_string(), style: InlineStyle::default(), link: None }], colspan: 1, rowspan: 1, style: ComputedStyle::default() },
-                        TableCell { runs: alloc::vec![InlineRun { text: "Value".to_string(), style: InlineStyle::default(), link: None }], colspan: 1, rowspan: 1, style: ComputedStyle::default() },
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "Name".to_string(),
+                                style: InlineStyle::default(),
+                                link: None
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            style: ComputedStyle::default()
+                        },
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "Value".to_string(),
+                                style: InlineStyle::default(),
+                                link: None
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            style: ComputedStyle::default()
+                        },
                     ],
                 },
                 TableRow {
                     header: false,
                     cells: alloc::vec![
-                        TableCell { runs: alloc::vec![InlineRun { text: "port".to_string(), style: InlineStyle::default(), link: None }], colspan: 1, rowspan: 1, style: ComputedStyle::default() },
-                        TableCell { runs: alloc::vec![InlineRun { text: "443".to_string(), style: InlineStyle::default(), link: None }], colspan: 1, rowspan: 1, style: ComputedStyle::default() },
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "port".to_string(),
+                                style: InlineStyle::default(),
+                                link: None
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            style: ComputedStyle::default()
+                        },
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "443".to_string(),
+                                style: InlineStyle::default(),
+                                link: None
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            style: ComputedStyle::default()
+                        },
                     ],
                 },
             ],

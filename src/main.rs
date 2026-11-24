@@ -12,8 +12,8 @@ use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::{Status, helpers, system};
 
 use uefi_browser::document::{
-    external_stylesheet_urls, parse_html, parse_html_with_styles, Document, Form,
-    FormControlKind, FormMethod, Link, TermColor,
+    Document, Form, FormControlKind, FormMethod, Link, TermColor, external_stylesheet_urls,
+    parse_html, parse_html_with_styles,
 };
 use uefi_browser::http::{self, HttpResponse};
 use uefi_browser::network::connect_firmware_url;
@@ -250,13 +250,7 @@ fn fetch_document(
 
     let mut current = initial_url.clone();
     for redirect_index in 0..=MAX_REDIRECTS {
-        let response = fetch_response_with_method(
-            &current,
-            network,
-            "GET",
-            &[],
-            MAX_BODY_BYTES,
-        )?;
+        let response = fetch_response_with_method(&current, network, "GET", &[], MAX_BODY_BYTES)?;
         if response.is_redirect() {
             if redirect_index == MAX_REDIRECTS {
                 return Err(String::from("redirect limit exceeded"));
@@ -277,7 +271,10 @@ fn fetch_document(
         }
 
         let content_type = response.content_type().unwrap_or("text/plain").to_string();
-        let cache_control = response.header("cache-control").unwrap_or("").to_ascii_lowercase();
+        let cache_control = response
+            .header("cache-control")
+            .unwrap_or("")
+            .to_ascii_lowercase();
         let content_type_lower = content_type.to_ascii_lowercase();
         let cacheable = response.status == 200
             && (content_type_lower.starts_with("text/html")
@@ -345,8 +342,12 @@ fn fetch_stylesheets(
                 if redirect_index == 3 {
                     break;
                 }
-                let Some(location) = response.location() else { break; };
-                let Ok(next) = current.resolve(location) else { break; };
+                let Some(location) = response.location() else {
+                    break;
+                };
+                let Ok(next) = current.resolve(location) else {
+                    break;
+                };
                 if current.scheme == Scheme::Https && next.scheme == Scheme::Http {
                     break;
                 }
@@ -354,7 +355,11 @@ fn fetch_stylesheets(
                 continue;
             }
             if response.status == 200
-                && response.content_type().unwrap_or("").to_ascii_lowercase().starts_with("text/css")
+                && response
+                    .content_type()
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .starts_with("text/css")
                 && response.body.len() <= MAX_STYLESHEET_BYTES
             {
                 sheets.push(String::from_utf8_lossy(&response.body).into_owned());
@@ -387,13 +392,17 @@ fn fetch_form_document(
             if redirect_index == MAX_REDIRECTS {
                 return Err(String::from("form redirect limit exceeded"));
             }
-            let location = response.location()
+            let location = response
+                .location()
                 .ok_or_else(|| String::from("form redirect has no Location header"))?
                 .to_string();
-            let next = current.resolve(&location)
+            let next = current
+                .resolve(&location)
                 .map_err(|error| format!("invalid form redirect target: {error}"))?;
             if current.scheme == Scheme::Https && next.scheme == Scheme::Http {
-                return Err(String::from("refusing HTTPS-to-HTTP form redirect downgrade"));
+                return Err(String::from(
+                    "refusing HTTPS-to-HTTP form redirect downgrade",
+                ));
             }
             if matches!(response.status, 301 | 302 | 303) && current_method == "POST" {
                 current_method = "GET";
@@ -474,14 +483,9 @@ fn fetch_response_with_method(
     match url.scheme {
         Scheme::Http => {
             uefi::println!("Sending HTTP request...");
-            let response = http::exchange_request(
-                &mut connection.peer.stream,
-                url,
-                method,
-                body,
-                max_body,
-            )
-            .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
+            let response =
+                http::exchange_request(&mut connection.peer.stream, url, method, body, max_body)
+                    .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
             uefi::println!("HTTP response received ({} bytes).", response.body.len());
             Ok(response)
         }
@@ -1061,7 +1065,9 @@ fn submit_form(
             }
             FormControlKind::Reset | FormControlKind::Button => None,
             FormControlKind::File => {
-                return Err(String::from("file uploads are not supported by this firmware browser"));
+                return Err(String::from(
+                    "file uploads are not supported by this firmware browser",
+                ));
             }
             FormControlKind::Checkbox => {
                 let prompt = format!(
@@ -1089,7 +1095,10 @@ fn submit_form(
                 }
             }
             FormControlKind::Radio => {
-                if selected_radio_names.iter().any(|name| name == &control.name) {
+                if selected_radio_names
+                    .iter()
+                    .any(|name| name == &control.name)
+                {
                     None
                 } else {
                     let prompt = format!(
@@ -1124,10 +1133,16 @@ fn submit_form(
                             "  {}. {}{}",
                             index + 1,
                             option.label,
-                            if option.value == control.value { " [selected]" } else { "" }
+                            if option.value == control.value {
+                                " [selected]"
+                            } else {
+                                ""
+                            }
                         );
                     }
-                    let default = control.options.iter()
+                    let default = control
+                        .options
+                        .iter()
                         .position(|option| option.value == control.value)
                         .map(|index| index + 1)
                         .unwrap_or(1);
@@ -1140,7 +1155,10 @@ fn submit_form(
                     } else {
                         answer.trim().parse::<usize>().unwrap_or(0)
                     };
-                    let Some(option) = selected.checked_sub(1).and_then(|index| control.options.get(index)) else {
+                    let Some(option) = selected
+                        .checked_sub(1)
+                        .and_then(|index| control.options.get(index))
+                    else {
                         return Err(format!("invalid selection for {}", control.label));
                     };
                     Some(option.value.clone())
@@ -1190,23 +1208,26 @@ fn submit_form(
         }
     }
 
-    for control in form.controls.iter().filter(|control| {
-        control.required && control.kind == FormControlKind::Radio
-    }) {
+    for control in form
+        .controls
+        .iter()
+        .filter(|control| control.required && control.kind == FormControlKind::Radio)
+    {
         if !fields.iter().any(|(name, _)| name == &control.name) {
             return Err(format!("{} requires one selected option", control.label));
         }
     }
 
     let query = form_query_string(&fields)?;
-    let action = Url::parse(&form.action)
-        .map_err(|error| format!("invalid form action: {error}"))?;
+    let action =
+        Url::parse(&form.action).map_err(|error| format!("invalid form action: {error}"))?;
     match form.method {
         FormMethod::Get => {
             let target = if query.is_empty() {
                 action
             } else {
-                action.resolve(&format!("?{query}"))
+                action
+                    .resolve(&format!("?{query}"))
                     .map_err(|error| format!("invalid GET form URL: {error}"))?
             };
             Ok((target, "GET", Vec::new()))
@@ -1262,7 +1283,8 @@ fn run_browser_ui(
         let lines = renderer::layout_document(&page.document, content_width);
         if anchor_pending {
             if let Some(fragment) = page.url.fragment.as_deref() {
-                first_line = renderer::line_for_anchor(&page.document, &lines, fragment).unwrap_or(0);
+                first_line =
+                    renderer::line_for_anchor(&page.document, &lines, fragment).unwrap_or(0);
             }
             anchor_pending = false;
         }
@@ -1428,8 +1450,14 @@ fn run_browser_ui(
 
         let mut command = command.trim().to_string();
         if let Some(number) = command.strip_prefix("open-bookmark ") {
-            let index = number.trim().parse::<usize>().ok().and_then(|value| value.checked_sub(1));
-            let bookmark = storage.as_mut().and_then(|store| index.and_then(|i| store.bookmarks().get(i).cloned()));
+            let index = number
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|value| value.checked_sub(1));
+            let bookmark = storage
+                .as_mut()
+                .and_then(|store| index.and_then(|i| store.bookmarks().get(i).cloned()));
             if let Some(bookmark) = bookmark {
                 command = format!("open {}", bookmark.url);
             } else {
@@ -1475,9 +1503,16 @@ fn run_browser_ui(
             continue;
         }
         if let Some(number) = command.strip_prefix("delete-bookmark ") {
-            let removed = number.trim().parse::<usize>().ok()
+            let removed = number
+                .trim()
+                .parse::<usize>()
+                .ok()
                 .and_then(|value| value.checked_sub(1))
-                .and_then(|index| storage.as_mut().and_then(|store| store.remove_bookmark(index).ok()))
+                .and_then(|index| {
+                    storage
+                        .as_mut()
+                        .and_then(|store| store.remove_bookmark(index).ok())
+                })
                 .unwrap_or(false);
             status = if removed {
                 String::from("Bookmark deleted")
@@ -1505,7 +1540,11 @@ fn run_browser_ui(
             continue;
         }
         if let Some(number) = command.strip_prefix("form ") {
-            let index = number.trim().parse::<usize>().ok().and_then(|value| value.checked_sub(1));
+            let index = number
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|value| value.checked_sub(1));
             let form = index.and_then(|index| page.document.forms.get(index).cloned());
             let Some(form) = form else {
                 status = String::from("Form not found on this page");
@@ -1904,12 +1943,18 @@ fn write_render_line(
         let foreground = if selected {
             Color::Black
         } else {
-            span.style.foreground.map(uefi_color).unwrap_or(default_foreground)
+            span.style
+                .foreground
+                .map(uefi_color)
+                .unwrap_or(default_foreground)
         };
         let background = if selected {
             Color::Cyan
         } else {
-            span.style.background.map(uefi_background_color).unwrap_or(Color::Black)
+            span.style
+                .background
+                .map(uefi_background_color)
+                .unwrap_or(Color::Black)
         };
         let _ = output.set_color(foreground, background);
         let remaining = width.saturating_sub(used);
