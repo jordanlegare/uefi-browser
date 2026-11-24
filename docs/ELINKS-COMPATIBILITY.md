@@ -31,3 +31,18 @@ The layout engine reflows those runs to the active UEFI text-console width and t
 This is a clean-room Rust implementation based on observable text-browser behaviour and the public-domain entity mapping data described above. It does not contain a port of ELinks' GPLv2-only C renderer. Current gaps include full HTML5 tokenization/tree construction, CSS selectors and layout, tables with computed column widths, URL fragments and named anchors, form controls/submission, character-set negotiation, script execution (intentionally out of scope in firmware), downloads, persistent cache, and bookmarks. UEFI text output is UCS-2, so code points outside the BMP are replaced with '?' at the final console boundary. These limitations are explicit and should guide subsequent parity work.
 
 The new UI does not change network transport or trust policy. HTTPS requests continue through the existing wolfSSL path; certificate-chain, date, and hostname verification remain mandatory, and redirect downgrade protection remains in force.
+
+
+## Native Rust HTML, CSS, layout and persistence engine
+
+The renderer has moved beyond the original flat text extractor. The html5 module now builds a bounded DOM-like tree from a tokenizer, including implied document nodes, raw-text/RCDATA handling, common optional-end-tag repair, and automatic tbody insertion. The document converter turns that tree into bounded browser structures for block content, inline runs, links, fragment anchors, forms, and table cells.
+
+The CSS module applies style declarations from embedded style elements, linked external stylesheets, and inline attributes. It supports type/class/ID and descendant selectors plus a limited set of terminal-relevant properties. External stylesheet retrieval is capped at four files and 32 KiB per file. HTTPS documents do not load HTTP stylesheets. The CSS engine does not execute @import and does not implement full CSS layout.
+
+The layout engine computes line wraps and table column widths for the current UEFI console width. Long cell contents wrap; colspan contributes to column sizing. Table rowspan remains metadata-only. CSS widths are percentages, margins and padding are mapped to terminal cells, and CSS colors are reduced to the UEFI 16-color palette.
+
+Same-document fragments are navigated by their recorded block position without a new HTTP request. GET/POST forms support URL-encoded controls with masked password entry and explicit confirmation before POST. Multipart/file inputs, JavaScript, cookies and full HTML form constraint validation are not implemented.
+
+Bookmarks and the bounded page cache are persisted on the EFI image's boot filesystem under UEFI_BROWSER. The cache retains up to eight hashed HTML/text GET entries, each no larger than 256 KiB, with a six-hour expiry. no-store, no-cache, private, and Set-Cookie responses are excluded. Writes use a temporary record followed by filesystem rename; if the boot volume is not available or writable, the browser continues without persistent storage.
+
+The new code is an HTML5-style subset, not a claim of WHATWG HTML or CSS conformance. Remaining parser gaps include complete insertion modes, adoption-agency formatting repair, foster parenting and the complete named character reference set. Remaining rendering gaps include rowspan, pseudo-selectors, floats, flex/grid/positioned layout and full CSS cascade priority semantics. No remote script is executed, and the network/TLS chain of trust is unchanged.

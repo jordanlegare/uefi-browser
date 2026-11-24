@@ -73,29 +73,69 @@ pub enum HttpError {
 
 /// Construct a minimal HTTP/1.1 GET request.
 pub fn build_get_request(url: &Url) -> Vec<u8> {
+    build_request(url, "GET", &[])
+}
+
+/// Construct a bounded form POST request. The caller supplies an already
+/// URL-encoded body; no remote content controls request headers.
+pub fn build_post_request(url: &Url, body: &[u8]) -> Vec<u8> {
+    build_request(url, "POST", body)
+}
+
+fn build_request(url: &Url, method: &str, body: &[u8]) -> Vec<u8> {
     let host = host_header(url);
     let mut request = String::new();
-    request.push_str("GET ");
+    request.push_str(method);
+    request.push(' ');
     request.push_str(&url.path_and_query);
     request.push_str(" HTTP/1.1\r\nHost: ");
     request.push_str(&host);
     request.push_str("\r\nUser-Agent: UEFI-Browser/0.1\r\n");
     request.push_str("Accept: text/html, text/plain;q=0.9, */*;q=0.1\r\n");
-    request.push_str("Accept-Encoding: identity\r\nConnection: close\r\n\r\n");
-    request.into_bytes()
+    request.push_str("Accept-Encoding: identity\r\n");
+    if method == "POST" {
+        request.push_str("Content-Type: application/x-www-form-urlencoded\r\n");
+        request.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    request.push_str("Connection: close\r\n\r\n");
+    let mut bytes = request.into_bytes();
+    if method == "POST" {
+        bytes.extend_from_slice(body);
+    }
+    bytes
 }
 
 /// Send an HTTP GET over any byte stream and read the response until EOF.
-///
-/// This works with a plain UEFI TCP4 stream or a Mbed TLS stream because both
-/// implement TlsStreamIo. Partial writes and short reads are handled. The
-/// response wire buffer is bounded independently of the decoded body limit.
 pub fn exchange_get<S: TlsStreamIo>(
     stream: &mut S,
     url: &Url,
     max_body: usize,
 ) -> Result<HttpResponse, HttpError> {
-    let request = build_get_request(url);
+    exchange_request(stream, url, "GET", &[], max_body)
+}
+
+/// Send an application/x-www-form-urlencoded POST over any byte stream.
+pub fn exchange_post<S: TlsStreamIo>(
+    stream: &mut S,
+    url: &Url,
+    body: &[u8],
+    max_body: usize,
+) -> Result<HttpResponse, HttpError> {
+    exchange_request(stream, url, "POST", body, max_body)
+}
+
+/// Shared bounded request exchange used by GET navigation and HTML forms.
+pub fn exchange_request<S: TlsStreamIo>(
+    stream: &mut S,
+    url: &Url,
+    method: &str,
+    body: &[u8],
+    max_body: usize,
+) -> Result<HttpResponse, HttpError> {
+    if !matches!(method, "GET" | "POST") || (method == "GET" && !body.is_empty()) {
+        return Err(HttpError::SendError);
+    }
+    let request = build_request(url, method, body);
     let mut sent = 0usize;
     while sent < request.len() {
         let count = stream
@@ -499,6 +539,17 @@ mod tests {
         assert!(request.starts_with("GET /docs?q=uefi HTTP/1.1\r\n"));
         assert!(request.contains("Host: example.org:8443\r\n"));
         assert!(request.ends_with("Connection: close\r\n\r\n"));
+    }
+
+    #[test]
+    fn builds_urlencoded_post_request_with_exact_content_length() {
+        let url = Url::parse("https://example.org/search").unwrap();
+        let body = b"q=UEFI+browser&safe=yes";
+        let request = String::from_utf8(build_post_request(&url, body)).unwrap();
+        assert!(request.starts_with("POST /search HTTP/1.1\r\n"));
+        assert!(request.contains("Content-Type: application/x-www-form-urlencoded\r\n"));
+        assert!(request.contains("Content-Length: 23\r\n"));
+        assert!(request.ends_with("\r\n\r\nq=UEFI+browser&safe=yes"));
     }
 
     #[test]
