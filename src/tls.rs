@@ -127,9 +127,16 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
                 failing_certificate_sha256: {
                     let mut fingerprint = [0u8; 32];
                     let copied = unsafe {
-                        uefi_wolfssl_copy_bad_cert_sha256(fingerprint.as_mut_ptr(), fingerprint.len())
+                        uefi_wolfssl_copy_bad_cert_sha256(
+                            fingerprint.as_mut_ptr(),
+                            fingerprint.len(),
+                        )
                     };
-                    if copied == 32 { fingerprint } else { [0u8; 32] }
+                    if copied == 32 {
+                        fingerprint
+                    } else {
+                        [0u8; 32]
+                    }
                 },
             });
         }
