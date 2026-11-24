@@ -5,9 +5,11 @@
 #ifndef UEFI_BROWSER_WOLFSSL_USER_SETTINGS_H
 #define UEFI_BROWSER_WOLFSSL_USER_SETTINGS_H
 
+#ifndef __ASSEMBLER__
 #include <stddef.h>
 #include <stdarg.h>
 #include <time.h>
+#endif
 
 #define SINGLE_THREADED
 #define NO_FILESYSTEM
@@ -55,14 +57,12 @@
 
 /* No OS entropy source or deterministic fallback. */
 #define WC_NO_HASHDRBG
-extern int uefi_wolfssl_rng(unsigned char *output, unsigned int size);
 #define CUSTOM_RAND_GENERATE_BLOCK uefi_wolfssl_rng
 
 /* Certificate validity checks use the validated UEFI UTC clock. */
 #define HAVE_TIME_T_TYPE
 #define HAVE_TM_TYPE
 #define USER_TIME
-extern time_t uefi_wolfssl_time(time_t *timer);
 #define XTIME uefi_wolfssl_time
 
 #define XSNPRINTF uefi_wolfssl_snprintf
