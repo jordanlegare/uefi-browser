@@ -1450,7 +1450,7 @@ mod tests {
     #[test]
     fn google_style_search_form_survives_script_driven_css_hiding() {
         let base = Url::parse("https://www.google.com/").unwrap();
-        let html = "<!doctype html><html><head><style>@media screen and (min-width: 1px){.conditional{display:none}} .search-shell{display:none}</style></head><body><div class=search-shell><form action=/search method=get><textarea name=q aria-label=Search rows=1></textarea><input type=hidden name=source value=hp><input name=btnK type=submit value='Google Search'><input name=btnI type=submit value='I\'m Feeling Lucky'></form></div><div hidden><form action=/hidden><input name=secret value=no></form></div></body></html>";
+        let html = "<!doctype html><html><head><style>@media screen and (min-width: 1px){.conditional{display:none}} .search-shell{display:none}</style></head><body><div class=search-shell><form action=/search method=get><textarea name=q aria-label=Search rows=1></textarea><input type=hidden name=source value=hp><input name=btnK type=submit value='Google Search'><input name=btnI type=submit value='I&#39;m Feeling Lucky'></form></div><div hidden><form action=/hidden><input name=secret value=no></form></div></body></html>";
         let page = parse_html(html, &base);
 
         assert_eq!(page.forms.len(), 2);
