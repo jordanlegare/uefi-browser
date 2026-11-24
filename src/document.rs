@@ -737,14 +737,23 @@ impl DocumentBuilder<'_> {
                 controls.push(FormControl {
                     name: self.dom.attr(child, "name").unwrap_or("").to_string(),
                     label: if kind == FormControlKind::Submit {
-                        self.dom.attr(child, "value").filter(|value| !value.is_empty())
-                            .unwrap_or("Submit").to_string()
+                        self.dom
+                            .attr(child, "value")
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or("Submit")
+                            .to_string()
                     } else if kind == FormControlKind::Reset {
-                        self.dom.attr(child, "value").filter(|value| !value.is_empty())
-                            .unwrap_or("Reset").to_string()
+                        self.dom
+                            .attr(child, "value")
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or("Reset")
+                            .to_string()
                     } else if kind == FormControlKind::Button {
-                        self.dom.attr(child, "value").filter(|value| !value.is_empty())
-                            .unwrap_or("Button").to_string()
+                        self.dom
+                            .attr(child, "value")
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or("Button")
+                            .to_string()
                     } else {
                         self.field_label(child)
                     },
@@ -1125,11 +1134,17 @@ mod tests {
         assert_eq!(page.forms[0].controls[0].value, "uefi");
         assert!(page.blocks.iter().any(|block| matches!(
             block.kind,
-            BlockKind::FormControl { form_index: 0, control_index: 0 }
+            BlockKind::FormControl {
+                form_index: 0,
+                control_index: 0
+            }
         )));
         assert!(page.blocks.iter().any(|block| matches!(
             block.kind,
-            BlockKind::FormControl { form_index: 0, control_index: 1 }
+            BlockKind::FormControl {
+                form_index: 0,
+                control_index: 1
+            }
         )));
     }
 
