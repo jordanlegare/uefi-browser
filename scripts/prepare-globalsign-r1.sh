@@ -85,6 +85,16 @@ if ! openssl x509 -in "$ROOT_PEM" -noout -checkend 0 >/dev/null 2>&1; then
   echo "GlobalSign Root R1 is expired; refusing to add an expired trust anchor." >&2
   exit 1
 fi
+NOT_BEFORE="$(openssl x509 -in "$ROOT_PEM" -noout -startdate | sed 's/^notBefore=//')"
+NOT_BEFORE_EPOCH="$(date -u -d "$NOT_BEFORE" +%s)" || {
+  echo "Cannot parse GlobalSign Root R1 notBefore date: $NOT_BEFORE" >&2
+  exit 1
+}
+NOW_EPOCH="$(date -u +%s)"
+if (( NOT_BEFORE_EPOCH > NOW_EPOCH )); then
+  echo "GlobalSign Root R1 is not yet valid; refusing to add it." >&2
+  exit 1
+fi
 
 # Parse the source bundle and compare certificate fingerprints so R1 is never
 # appended twice if a future Mozilla/curl bundle starts carrying this root.
