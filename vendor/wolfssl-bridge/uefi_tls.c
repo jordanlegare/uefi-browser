@@ -134,13 +134,13 @@ int uefi_wolfssl_client_new(
     wolfSSL_SetIOReadCtx(session->ssl, session);
     wolfSSL_SetIOWriteCtx(session->ssl, session);
 
-    /* SNI selects the virtual host; domain check binds the certificate to URL host. */
-    ret = wolfSSL_UseSNI(session->ssl, WOLFSSL_SNI_HOST_NAME,
-                         hostname, (unsigned short)hostname_len);
-    if (ret != WOLFSSL_SUCCESS) goto fail;
+    /* DNS names use SNI plus hostname validation; IP literals use IP SAN validation. */
     if (is_ipv4_literal((const char *)hostname)) {
         ret = wolfSSL_check_ip_address(session->ssl, (const char *)hostname);
     } else {
+        ret = wolfSSL_UseSNI(session->ssl, WOLFSSL_SNI_HOST_NAME,
+                             hostname, (unsigned short)hostname_len);
+        if (ret != WOLFSSL_SUCCESS) goto fail;
         ret = wolfSSL_check_domain_name(session->ssl, (const char *)hostname);
     }
     if (ret != WOLFSSL_SUCCESS) goto fail;
