@@ -82,6 +82,7 @@ C_FLAGS="-ffreestanding -fno-builtin -fshort-wchar -DEFIX64 -DMBEDTLS_TEST_SW_IN
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_SYSTEM_NAME=Generic \
   -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+  -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=clang \
   -DCMAKE_C_COMPILER_TARGET="$COFF_TARGET" \
   -DCMAKE_C_FLAGS="$C_FLAGS" \
@@ -99,6 +100,7 @@ mkdir -p "$BRIDGE_BUILD"
 COMMON_CFLAGS=(
   "--target=$COFF_TARGET"
   -std=c11
+  -O2
   -ffreestanding
   -fno-builtin
   -fshort-wchar
