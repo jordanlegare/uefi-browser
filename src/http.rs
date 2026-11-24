@@ -83,6 +83,34 @@ pub fn build_post_request(url: &Url, body: &[u8]) -> Vec<u8> {
 }
 
 fn build_request(url: &Url, method: &str, body: &[u8]) -> Vec<u8> {
+    build_request_with_validators(url, method, body, None, None)
+}
+
+/// Build a cache-revalidation GET. Validator values are bounded and checked
+/// before they are copied into HTTP header lines.
+pub fn build_conditional_get_request(
+    url: &Url,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> Vec<u8> {
+    build_request_with_validators(url, "GET", &[], etag, last_modified)
+}
+
+fn valid_validator(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 1024
+        && value
+            .bytes()
+            .all(|byte| byte == b'\t' || (0x20..=0x7e).contains(&byte))
+}
+
+fn build_request_with_validators(
+    url: &Url,
+    method: &str,
+    body: &[u8],
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> Vec<u8> {
     let host = host_header(url);
     let mut request = String::new();
     request.push_str(method);
@@ -93,6 +121,18 @@ fn build_request(url: &Url, method: &str, body: &[u8]) -> Vec<u8> {
     request.push_str("\r\nUser-Agent: UEFI-Browser/0.1\r\n");
     request.push_str("Accept: text/html, text/plain;q=0.9, */*;q=0.1\r\n");
     request.push_str("Accept-Encoding: identity\r\n");
+    if method == "GET" {
+        if let Some(etag) = etag.filter(|value| valid_validator(value)) {
+            request.push_str("If-None-Match: ");
+            request.push_str(etag);
+            request.push_str("\r\n");
+        }
+        if let Some(modified) = last_modified.filter(|value| valid_validator(value)) {
+            request.push_str("If-Modified-Since: ");
+            request.push_str(modified);
+            request.push_str("\r\n");
+        }
+    }
     if method == "POST" {
         request.push_str("Content-Type: application/x-www-form-urlencoded\r\n");
         request.push_str(&format!("Content-Length: {}\r\n", body.len()));
@@ -132,10 +172,23 @@ pub fn exchange_request<S: TlsStreamIo>(
     body: &[u8],
     max_body: usize,
 ) -> Result<HttpResponse, HttpError> {
+    exchange_request_with_validators(stream, url, method, body, max_body, None, None)
+}
+
+/// Send GET/POST with optional GET cache validators.
+pub fn exchange_request_with_validators<S: TlsStreamIo>(
+    stream: &mut S,
+    url: &Url,
+    method: &str,
+    body: &[u8],
+    max_body: usize,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> Result<HttpResponse, HttpError> {
     if !matches!(method, "GET" | "POST") || (method == "GET" && !body.is_empty()) {
         return Err(HttpError::SendError);
     }
-    let request = build_request(url, method, body);
+    let request = build_request_with_validators(url, method, body, etag, last_modified);
     let mut sent = 0usize;
     while sent < request.len() {
         let count = stream
@@ -530,6 +583,25 @@ mod tests {
     fn close_delimited_response_waits_for_transport_eof() {
         let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nhello";
         assert!(!response_is_complete(response, 1024).unwrap());
+    }
+
+    #[test]
+    fn builds_conditional_get_with_safe_cache_validators() {
+        let url = Url::parse("https://example.org/docs?q=rust").unwrap();
+        let request = String::from_utf8(build_conditional_get_request(
+            &url,
+            Some("\"v1\""),
+            Some("Wed, 21 Oct 2015 07:28:00 GMT"),
+        )).unwrap();
+        assert!(request.contains("If-None-Match: \"v1\"\r\n"));
+        assert!(request.contains("If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT\r\n"));
+        assert!(!request.contains("If-None-Match: bad\\r\\nInjected"));
+        let unsafe_request = String::from_utf8(build_conditional_get_request(
+            &url,
+            Some("bad\\r\\nInjected: yes"),
+            None,
+        )).unwrap();
+        assert!(!unsafe_request.contains("Injected: yes"));
     }
 
     #[test]
