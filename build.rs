@@ -1,6 +1,5 @@
 use std::{env, fs, path::PathBuf};
 
-
 fn generate_elinks_entity_decoder() {
     use std::collections::BTreeMap;
 
