@@ -1470,6 +1470,7 @@ fn run_browser_ui(
 ) {
     let mut first_line = 0usize;
     let mut selected_link: Option<usize> = None;
+    let mut selected_control: Option<(usize, usize)> = None;
     let mut navigation_error: Option<String> = None;
     let mut status = String::from("Ready");
     let mut last_search = String::new();
