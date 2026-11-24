@@ -272,9 +272,7 @@ fn parse_name(input: &[u8]) -> String {
     // Accept both representations without relaxing DER bounds checking.
     let mut outer_offset = 0usize;
     let name_content = match read_tlv(input, &mut outer_offset) {
-        Some(sequence) if sequence.tag == 0x30 && outer_offset == input.len() => {
-            sequence.value
-        }
+        Some(sequence) if sequence.tag == 0x30 && outer_offset == input.len() => sequence.value,
         _ => input,
     };
 
