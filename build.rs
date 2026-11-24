@@ -9,6 +9,12 @@ fn main() {
     println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_SOURCE_DATE");
     println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_SHA256");
     println!("cargo:rerun-if-env-changed=UEFI_CA_BUNDLE_CERT_COUNT");
+    println!("cargo:rerun-if-changed=scripts/build-uefi.sh");
+    println!("cargo:rerun-if-changed=vendor/wolfssl-bridge/include/user_settings.h");
+    println!("cargo:rerun-if-changed=vendor/wolfssl-bridge/uefi_tls.c");
+    println!("cargo:rerun-if-changed=vendor/wolfssl-bridge/uefi_platform.c");
+    println!("cargo:rerun-if-changed=vendor/wolfssl-bridge/uefi_date.c");
+    println!("cargo:rerun-if-changed=vendor/wolfssl-bridge/uefi_crt.c");
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os != "uefi" {
@@ -28,6 +34,7 @@ fn main() {
             if !required.is_file() {
                 panic!("wolfSSL link input is missing: {}", required.display());
             }
+            println!("cargo:rerun-if-changed={}", required.display());
         }
 
         println!("cargo:rustc-link-search=native={}", bridge_dir.display());
