@@ -449,6 +449,18 @@ fn current_tag<'a>(stack: &[NodeId], dom: &'a Dom) -> Option<&'a str> {
     stack.last().and_then(|id| dom.tag(*id))
 }
 
+fn should_foster_parent(stack: &[NodeId], dom: &Dom) -> bool {
+    let Some(table_position) = stack.iter().rposition(|id| dom.tag(*id) == Some("table")) else {
+        return false;
+    };
+    stack[table_position + 1..].iter().all(|id| {
+        matches!(
+            dom.tag(*id),
+            Some("tbody" | "thead" | "tfoot" | "tr")
+        )
+    })
+}
+
 fn table_foster_location(stack: &[NodeId], dom: &Dom) -> Option<(NodeId, NodeId)> {
     let table_position = stack.iter().rposition(|id| dom.tag(*id) == Some("table"))?;
     if stack[table_position + 1..]
@@ -559,7 +571,7 @@ pub fn build_tree(source: &str) -> Dom {
                 }
                 // In the HTML "in table" insertion mode, non-whitespace text
                 // is foster-parented before the nearest open table, not inside it.
-                if !text.trim().is_empty() {
+                if !text.trim().is_empty() && should_foster_parent(&stack, &dom) {
                     if let Some((parent, table)) = table_foster_location(&stack, &dom) {
                         let _ = dom.insert_before(parent, table, NodeKind::Text(text));
                         continue;
@@ -672,8 +684,9 @@ pub fn build_tree(source: &str) -> Dom {
                     }
                 }
 
-                let foster =
-                    !is_allowed_in_table(&name) && table_foster_location(&stack, &dom).is_some();
+                let foster = !is_allowed_in_table(&name)
+                    && should_foster_parent(&stack, &dom)
+                    && table_foster_location(&stack, &dom).is_some();
                 let node_kind = NodeKind::Element {
                     tag: name.clone(),
                     attributes,
