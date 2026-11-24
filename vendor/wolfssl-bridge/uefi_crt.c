@@ -20,8 +20,7 @@ int uefi_wolfssl_tolower(int character)
 
 int uefi_wolfssl_isspace(int character)
 {
-    return character == ' ' || character == '\\t' || character == '\\n' ||
-           character == '\\v' || character == '\\f' || character == '\\r';
+    return character == 0x20 || (character >= 0x09 && character <= 0x0D);
 }
 
 int uefi_wolfssl_stricmp(const char *left, const char *right)
