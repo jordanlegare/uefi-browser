@@ -6,7 +6,7 @@ set -euo pipefail
 INPUT="${1:?usage: prepare-globalsign-r1.sh input.pem output.pem}"
 OUTPUT="${2:?usage: prepare-globalsign-r1.sh input.pem output.pem}"
 
-ROOT_R1_URL="https://secure.globalsign.com/cacert/root-r1.crt"
+ROOT_R1_URL="https://secure.globalsign.net/cacert/Root-R1.crt"
 ROOT_R1_SHA256="EBD41040E4BB3EC742C9E381D31EF2A41A48B6685C96E7CEF3C1DF6CD4331C99"
 ROOT_R1_SKI="607B661A450D97CA89502F7D04CD34A8FFFCFD4B"
 
