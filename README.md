@@ -2,7 +2,7 @@
 
 A standalone Rust application for x86-64 UEFI firmware, intended to grow into a full terminal web browser in the style of ELinks. It is packaged as a PE32+ EFI application and designed to run before an operating system.
 
-> **Status: CI-built standalone EFI image; runtime firmware/network tests still pending.** The source includes an EFI Simple Network Protocol (SNP) Ethernet adapter, an in-application smoltcp IPv4/DHCP/UDP/TCP stack, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. GitHub Actions now builds and inspects the final Mbed TLS 4.3.0 PE32+ x86-64 EFI application. It has not yet been boot-tested under OVMF or on physical firmware, and it is not feature-equivalent to ELinks.
+> **Status: CI-built standalone EFI image; runtime firmware/network tests still pending.** The source includes an EFI Simple Network Protocol (SNP) Ethernet adapter, an in-application smoltcp IPv4/DHCP/UDP/TCP stack, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. The wolfSSL 5.9.4 replacement is being integrated on a feature branch; its complete PE32+ x86-64 build is pending CI. It has not yet been boot-tested under OVMF or on physical firmware, and it is not feature-equivalent to ELinks.
 
 ## Goals
 
@@ -10,14 +10,14 @@ A standalone Rust application for x86-64 UEFI firmware, intended to grow into a 
 - Run while UEFI Boot Services remain active; use the firmware NIC driver through SNP and acquire IPv4 configuration with the in-application DHCPv4 client.
 - Use UEFI Simple Network Protocol only for Ethernet frames; implement ARP, IPv4, DHCPv4, UDP, and TCP in the EFI application with smoltcp.
 - Use a Rust DNS client library for DNS packet encoding and decoding.
-- Bundle Mbed TLS into the EFI image so HTTPS does not depend on a firmware TLS service.
+- Bundle wolfSSL into the EFI image so HTTPS does not depend on a firmware TLS service.
 - Require X.509 chain and hostname verification; never offer a certificate-bypass mode.
 - Provide a keyboard-first terminal interface with URL navigation, history, link following, and search.
 - Keep the final executable self-contained, including cryptographic code and trust anchors.
 
 ## Network and TLS architecture
 
-DNS and TLS are separate protocols. DNS is a short request/response exchange over UDP (normally port 53); TLS is a stream protocol layered over TCP (normally port 443). There is no DNS4 stream adapter in Mbed TLS, and Mbed TLS does not resolve hostnames itself.
+DNS and TLS are separate protocols. DNS is a short request/response exchange over UDP (normally port 53); TLS is a stream protocol layered over TCP (normally port 443). There is no DNS4 stream adapter in wolfSSL, and wolfSSL does not resolve hostnames itself.
 
 The project uses this pipeline:
 
@@ -51,7 +51,7 @@ Hickory DNS over UDP         NTP over UDP/123
              smoltcp TCP socket
                     |
                     v
-              Mbed TLS 4.3.0
+              wolfSSL 5.9.4
   - original hostname retained for SNI and X.509 identity
   - mandatory chain and hostname verification
   - CA roots embedded in EFI image
@@ -71,7 +71,7 @@ The SNP adapter polls the firmware receive queue and emits complete Ethernet fra
 
 The UEFI handoff is implemented by connect_firmware_url() in src/network.rs: it borrows the long-lived SnpNetwork, resolves the hostname via Hickory/UDP, opens a smoltcp TCP socket, and returns a stream wrapper borrowing the interface. The portable connect_url()/Tcp4Connector abstraction remains available for host-side testing; the UEFI browser does not use EFI_TCP4_PROTOCOL. In both paths, ConnectedPeer retains the original URL hostname so ConnectedPeer::start_tls() can pass it to TlsConnection::new() for SNI and X.509 identity checks.
 
-This separation matters for HTTPS: TCP connects to the numeric IP address, while Mbed TLS must still receive the DNS hostname so that SNI and certificate identity checks use the expected server name.
+This separation matters for HTTPS: TCP connects to the numeric IP address, while wolfSSL must still receive the DNS hostname so that SNI and certificate identity checks use the expected server name.
 
 ### DNS policy and transport
 
@@ -98,24 +98,24 @@ The DNS policy uses hickory-proto 0.26.3 with default features disabled. It send
 | Firmware UTC conversion and fail-closed date policy | Implemented; unspecified timezone, DST flags, invalid RTC and implausibly old time are rejected |
 | DNS-to-TCP-to-TLS orchestration | Implemented; hostname is retained for SNI and certificate checks |
 | TCP stream-to-Mbed-TLS callback bridge | Implemented in Rust/C |
-| Mbed TLS 4.3.0 source fetch and archive checksum verification | Implemented |
-| UEFI Boot Services allocator hooks for Mbed TLS | Implemented and exercised in the successful static link |
-| Mbed TLS platform clock and gmtime hooks | Implemented in C/Rust source and configured for the build |
-| Mbed TLS static libraries and PE/COFF link integration | Full cross-build and final EFI link passed in CI |
+| wolfSSL 5.9.4 source fetch and archive checksum verification | Implemented |
+| UEFI Boot Services allocator hooks for wolfSSL | Implemented and exercised in the successful static link |
+| wolfSSL platform clock and gmtime hooks | Implemented in C/Rust source and configured for the build |
+| wolfSSL static libraries and PE/COFF link integration | Full cross-build and final EFI link passed in CI |
 | Mozilla-derived CA bundle update script | Implemented with checksum verification |
 | Build-time CA bundle embedding | Implemented; bundle asset is generated locally, not committed by default |
 | HTTP/1.1 GET and response parsing | Implemented |
 | Content-Length, chunked and close-delimited response bodies | Implemented with bounded response sizes |
 | Redirect following | Implemented with a hop limit and HTTPS-to-HTTP downgrade rejection |
 | HTTP fetch over smoltcp TCP | Integrated in the browser loop |
-| HTTPS fetch over Mbed TLS | Integrated conditionally; requires the static bridge and embedded CA bundle |
+| HTTPS fetch over wolfSSL | Integrated conditionally; requires the static bridge and embedded CA bundle |
 | Terminal navigation loop | Implemented: open URL, links, back, forward, reload, search, help, quit |
 | Reflowing ELinks-style viewport, keyboard link focus and scrolling controls | Not yet implemented |
 | CSS, JavaScript, forms, cookies, bookmarks and downloads | Not implemented |
 | QEMU/OVMF network integration test | Not yet run |
 | EFI image | Produced and uploaded as a CI artifact; OVMF/physical-firmware validation remains pending |
 
-The SNP adapter and smoltcp integration are concrete implementations, not just traits. CI passes Rust formatting, portable-core tests, the x86-64 UEFI target check, Mbed TLS 4.3.0 static compilation, UEFI C bridge compilation, final Rust+Mbed TLS link, PE/COFF inspection, and EFI artifact upload. SNP driver interoperability, DHCP, DNS, NTP, HTTP, and HTTPS must still be verified under OVMF and on physical hardware.
+The SNP adapter and smoltcp integration are concrete implementations, not just traits. CI passes Rust formatting, portable-core tests, the x86-64 UEFI target check, wolfSSL 5.9.4 static compilation, UEFI C bridge compilation, final Rust+wolfSSL link, PE/COFF inspection, and EFI artifact upload. SNP driver interoperability, DHCP, DNS, NTP, HTTP, and HTTPS must still be verified under OVMF and on physical hardware.
 
 ## Repository layout
 
@@ -126,21 +126,21 @@ The SNP adapter and smoltcp integration are concrete implementations, not just t
 | src/document.rs | Basic HTML visible-text and anchor extraction |
 | src/http.rs | HTTP/1.1 GET builder, response parsing, chunked decoding and stream exchange |
 | src/dns.rs | Hickory DNS A-query construction, bounded UDP exchange contract and response validation |
-| src/entropy.rs | Secure-random provider interface used by DNS; TLS uses PSA Crypto's EFI_RNG entropy driver |
-| src/firmware_rng.rs | EFI_RNG_PROTOCOL-backed DNS RNG and C-ABI entropy provider for TF-PSA-Crypto |
+| src/entropy.rs | Secure-random provider interface used by DNS; TLS uses wolfCrypt's EFI_RNG entropy driver |
+| src/firmware_rng.rs | EFI_RNG_PROTOCOL-backed DNS RNG and C-ABI entropy provider for wolfCrypt |
 | src/snp_network.rs | SNP Ethernet device and persistent smoltcp interface, DHCPv4, UDP/DNS, TCP streams |
 | src/firmware_ntp.rs | SNTP time bootstrap over smoltcp UDP and UEFI Runtime Services SetTime |
 | src/firmware_time.rs | Runtime Services UTC conversion with fail-closed validity and DST policy |
-| src/network.rs | DNS-to-TCP orchestration, firmware composition helper and retained-hostname Mbed TLS handoff |
-| src/tls.rs | Rust Mbed TLS FFI boundary and TCP BIO callback adapter; PSA Crypto supplies TLS randomness |
-| src/uefi_memory.rs | UEFI Boot Services pool allocator hooks for Mbed TLS |
+| src/network.rs | DNS-to-TCP orchestration, firmware composition helper and retained-hostname wolfSSL handoff |
+| src/tls.rs | Rust wolfSSL FFI boundary and TCP BIO callback adapter; wolfCrypt supplies TLS randomness |
+| src/uefi_memory.rs | UEFI Boot Services pool allocator hooks for wolfSSL |
 | src/ca_bundle.rs | Optional build-time embedded PEM trust bundle |
-| vendor/mbedtls-bridge/uefi_tls.c | Mbed TLS client setup, BIO callbacks, handshake and mandatory X.509 verification |
-| vendor/mbedtls-bridge/uefi_platform.c | EFI_RNG entropy provider, UEFI time/gmtime hooks, monotonic-time adapter, and volatile zeroization |
-| vendor/mbedtls-bridge/uefi_crt.c | Minimal freestanding C string primitives required by Mbed TLS without a host CRT |
-| vendor/mbedtls-bridge/include/ | Mbed TLS and TF-PSA-Crypto UEFI configurations plus freestanding platform headers |
-| scripts/fetch-mbedtls.sh | Downloads and checksum-verifies the pinned Mbed TLS source archive |
-| scripts/build-uefi.sh | Builds static Mbed TLS libraries and the UEFI C bridge, then invokes the Rust EFI build |
+| vendor/wolfssl-bridge/uefi_tls.c | wolfSSL client setup, BIO callbacks, handshake and mandatory X.509 verification |
+| vendor/wolfssl-bridge/uefi_platform.c | EFI_RNG entropy provider, UEFI time/gmtime hooks, monotonic-time adapter, and volatile zeroization |
+| vendor/wolfssl-bridge/uefi_crt.c | Minimal freestanding C string primitives required by wolfSSL without a host CRT |
+| vendor/wolfssl-bridge/include/ | wolfSSL and wolfCrypt UEFI configurations plus freestanding platform headers |
+| scripts/fetch-wolfssl.sh | Downloads and checksum-verifies the pinned wolfSSL source archive |
+| scripts/build-uefi.sh | Builds static wolfSSL libraries and the UEFI C bridge, then invokes the Rust EFI build |
 | scripts/update-ca-bundle.sh | Fetches and verifies the Mozilla-derived PEM trust bundle for image embedding |
 | build.rs | Adds static link inputs and optionally stages a NUL-terminated CA bundle |
 | .github/workflows/ci.yml | Formatting, portable tests and x86-64 UEFI target compilation |
@@ -157,26 +157,33 @@ Disabling default features disables std. No host socket, thread, or operating-sy
 
 Hickory does not own the UDP device. The UEFI adapter owns packet I/O, while Hickory owns DNS wire-format handling and validation. This avoids using EFI_DNS4_PROTOCOL as a black-box firmware resolver and lets the application control transaction IDs, timeouts, packet bounds, and accepted answers.
 
-## Mbed TLS selection and packaging
+## wolfSSL selection and packaging
 
-The TLS backend is pinned to the official upstream **Mbed TLS 4.3.0** release, published on 16 November 2026. The selected release includes security fixes published in November 2026. The official release archive is downloaded and checked against its SHA-256 hash before extraction.
+The TLS backend is pinned to wolfSSL 5.9.4. The source archive is downloaded from a public distribution mirror and verified against the published SHA-256 digest before extraction:
 
 ~~~text
-Archive: mbedtls-4.3.0.tar.bz2
-SHA-256: 1c87cba094cb40f097ebe0eba440a74939b71dab4e1d0d566bc90749ff381d18
+Archive: wolfssl-5.9.4.zip
+SHA-256: 9cd0d69d208d025b16836c177658cc0deebc2a85c4b60898c9bc546bc6cbdf18
 ~~~
 
-The intended final image contains static Mbed TLS libraries and the UEFI-specific C bridge. It must not require a DLL, shared object, firmware TLS protocol, or operating-system crypto service at runtime.
+The source is built as a static x86-64 COFF library and linked into the EFI image. The runtime does not require a DLL, shared object, firmware TLS protocol, or operating-system crypto service.
 
-The C bridge configures mandatory X.509 verification (MBEDTLS_SSL_VERIFY_REQUIRED), installs the supplied CA chain, initializes PSA Crypto before TLS setup, sets the original URL hostname for SNI and identity checks, and installs stream BIO callbacks. The Rust TlsConnection provides the BIO callbacks over the smoltcp TCP stream. Mbed TLS 4.3 no longer uses the legacy `mbedtls_ssl_conf_rng` API: TF-PSA-Crypto's `MBEDTLS_PSA_DRIVER_GET_ENTROPY` hook calls a Rust C-ABI function that opens EFI_RNG_PROTOCOL and fills the requested buffer. Only successful firmware reads report full entropy; there is no libc or OS random source.
+The C bridge uses the TLS 1.3 client method, sets `WOLFSSL_VERIFY_PEER`, loads the embedded Mozilla-derived CA bundle with `wolfSSL_CTX_load_verify_buffer()`, sends SNI with `wolfSSL_UseSNI()`, and checks the URL hostname with `wolfSSL_check_domain_name()`. The handshake fails if certificate-chain, validity-time, or hostname verification fails. There is no `WOLFSSL_VERIFY_NONE` path.
 
-The UEFI port routes allocation to src/uefi_memory.rs using UEFI Boot Services AllocatePool/FreePool, and routes certificate time to src/firmware_time.rs through vendor/mbedtls-bridge/uefi_platform.c. The C-side Gregorian conversion implements the `mbedtls_platform_gmtime_r` hook; rejected or unavailable firmware time fails certificate validity checks closed.
+wolfSSL's custom I/O callbacks connect directly to the Rust `TlsStreamIo` trait, which retains ownership of the existing smoltcp TCP socket. The port does not use wolfSSL's default BSD socket functions.
 
-Mbed TLS 4.x separates the TLS/X.509 configuration from the TF-PSA-Crypto configuration. The build supplies both `MBEDTLS_USER_CONFIG_FILE=uefi_mbedtls_config.h` and `TF_PSA_CRYPTO_USER_CONFIG_FILE=uefi_tf_psa_config.h`. The TF-PSA configuration exposes the shared UEFI platform declarations and defines the allocator, time, gmtime, and printf hooks there. Those platform macros must not be duplicated in the Mbed TLS user configuration: Mbed TLS 4.x explicitly checks for that split. The Mbed TLS user configuration remains responsible for TLS/X.509-facing options and the common platform feature toggles. The configured printf macro points to a C no-op: firmware has no stdio stream, and Mbed TLS self-test/diagnostic output must not introduce a host CRT dependency. The two configuration hooks are required because TF-PSA-Crypto consumes its own user-configuration file in Mbed TLS 4.x.
+wolfCrypt obtains entropy through `CUSTOM_RAND_GENERATE_BLOCK`, which calls the Rust C-ABI adapter backed exclusively by EFI_RNG_PROTOCOL. Certificate time is supplied through wolfSSL's `USER_TIME`/`XTIME` hook and the validated UEFI Runtime Services clock. The custom `XMALLOC_USER` allocator routes memory to UEFI Boot Services AllocatePool/FreePool; no host malloc, OS clock, or weak random fallback is permitted.
 
-scripts/build-uefi.sh fetches the pinned source, configures an x86-64 COFF static-library build, compiles the UEFI C bridge, and sets the link environment consumed by build.rs. The script is the verified full-image build entry point; the full Mbed TLS build and final PE/COFF link passed in the latest GitHub Actions run.
+The shared `vendor/wolfssl-bridge/include/user_settings.h` is used for both wolfSSL and the bridge build. It selects a single-threaded, no-filesystem, no-socket TLS 1.3 client while retaining RSA and ECC certificate verification algorithms, P-256/P-384/P-521, X25519, AES-GCM, ChaCha20-Poly1305, SHA-384 and SHA-512. TLS 1.2 is intentionally disabled in this first wolfSSL port.
 
+Build the full standalone EFI image with:
 
+~~~sh
+./scripts/update-ca-bundle.sh
+./scripts/build-uefi.sh
+~~~
+
+The script downloads and verifies wolfSSL, cross-compiles its static library and UEFI bridge, embeds the CA bundle, and invokes the Rust UEFI build. The full wolfSSL build and EFI link are pending CI verification for this integration branch.
 
 ### Trust bundle
 
@@ -189,7 +196,7 @@ Prepare the trust bundle before a full build:
 ./scripts/build-uefi.sh
 ~~~
 
-The repository does not commit a periodically refreshed CA bundle by default. HTTPS is refused by the browser unless both the Mbed TLS bridge and the embedded bundle are present.
+The repository does not commit a periodically refreshed CA bundle by default. HTTPS is refused by the browser unless the wolfSSL bridge and embedded bundle are present.
 
 ### TLS security requirements
 
@@ -197,10 +204,10 @@ The repository does not commit a periodically refreshed CA bundle by default. HT
 2. Hostname verification against the URL hostname and SNI during the handshake.
 3. Chain validation against the CA bundle embedded in the image.
 4. Validity-time checks using trustworthy UTC from UEFI Runtime Services. Invalid clock, unspecified timezone, daylight-adjustment flags, or an implausibly old clock cause HTTPS to fail closed.
-5. PSA Crypto entropy is sourced only from EFI_RNG_PROTOCOL through `mbedtls_platform_get_entropy`. A failed read aborts initialization; no timestamp, counter, host random device, or predictable pseudo-random fallback is allowed.
+5. wolfCrypt entropy is sourced only from EFI_RNG_PROTOCOL through `wolfssl_platform_get_entropy`. A failed read aborts initialization; no timestamp, counter, host random device, or predictable pseudo-random fallback is allowed.
 6. No HTTPS-to-HTTP redirect downgrade and no certificate-error bypass.
 7. Bounded network operations and correct release of TCP and TLS resources.
-8. A maintained Mbed TLS release with security fixes.
+8. A maintained wolfSSL release with security fixes.
 
 ## URL and HTML core
 
@@ -227,7 +234,7 @@ rustup target add x86_64-unknown-uefi
 cargo check --target x86_64-unknown-uefi
 ```
 
-That last command checks Rust code for the firmware target. It is not the complete, statically linked browser image. To build the actual `.efi` application, including Mbed TLS 4.3.0 and the embedded CA bundle, run the full build procedure below.
+That last command checks Rust code for the firmware target. It is not the complete, statically linked browser image. To build the actual `.efi` application, including wolfSSL 5.9.4 and the embedded CA bundle, run the full build procedure below.
 
 Do not run the generated `.efi` file as a Linux executable. Boot it through UEFI firmware, an EFI shell, or a configured OVMF virtual machine.
 
@@ -238,7 +245,7 @@ The complete build requires:
 - Rust stable 1.91 or newer and the x86_64-unknown-uefi target.
 - CMake and Ninja.
 - Clang/LLVM capable of emitting x86-64 COFF objects and llvm-ar.
-- curl, sha256sum and tar to obtain the pinned Mbed TLS source and trust bundle.
+- curl, sha256sum and tar to obtain the pinned wolfSSL source and trust bundle.
 - UEFI firmware exposing an Ethernet-capable Simple Network Protocol (SNP) NIC driver, EFI_RNG_PROTOCOL, and Runtime Services time. IPv4/UDP4/TCP4 firmware protocols are not required.
 - An Ethernet link and a DHCPv4 server providing an address, router, and DNS resolver. smoltcp implements the in-application IP stack; firmware must still provide the underlying NIC driver.
 
@@ -270,9 +277,9 @@ target/x86_64-unknown-uefi/release/uefi-browser.efi
 dist/EFI/BOOT/BOOTX64.EFI
 ~~~
 
-build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UEFI_MBEDTLS_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
+build.rs also supports manual static-link input through UEFI_WOLFSSL_LIB_DIR, UEFI_WOLFSSL_BRIDGE_DIR and UEFI_CA_BUNDLE_PATH. The build script sets those values for the standard workflow.
 
-**Historical verification record (22 November 2026):** GitHub Actions run [#44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870) passed the earlier firmware-transport implementation. It is not the artifact for the SNP/smoltcp stack. The full-build job compiled Mbed TLS 4.3.0 and the UEFI bridge, linked the standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `553d4c7c5757a921adf53fcddf55bf9f6cb45a15e6618dfc63352ce0fe45d0cb` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
+**Historical verification record (22 November 2026):** GitHub Actions run [#44998906870](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870) passed the earlier firmware-transport implementation. It is not the artifact for the SNP/smoltcp stack. The full-build job compiled wolfSSL 5.9.4 and the UEFI bridge, linked the standalone EFI application, and verified it with `file` and `llvm-readobj` as a PE32+ x86-64 EFI application (`IMAGE_SUBSYSTEM_EFI_APPLICATION`). The uploaded artifact is [uefi-browser-x86_64](https://github.com/jordanlegare/uefi-browser/actions/runs/44998906870/artifacts/14745231086); its ZIP contains both `target/x86_64-unknown-uefi/release/uefi-browser.efi` and `dist/EFI/BOOT/BOOTX64.EFI`. The `BOOTX64.EFI` SHA-256 is `553d4c7c5757a921adf53fcddf55bf9f6cb45a15e6618dfc63352ce0fe45d0cb` (1,382,400 bytes). This confirms compilation and image format only—not successful firmware boot, protocol interoperability, TLS handshakes, or real web browsing. Run under network-enabled OVMF and on physical firmware before treating it as release-ready.
 
 ## Firmware adapter details
 
@@ -280,7 +287,7 @@ build.rs also supports manual static-link input through UEFI_MBEDTLS_LIB_DIR, UE
 
 src/snp_network.rs wraps EFI_SIMPLE_NETWORK_PROTOCOL in smoltcp's `phy::Device` interface. It discovers a NIC, starts and initializes SNP, validates the Ethernet MAC/link/MTU, enables the required unicast and broadcast receive filters, and polls complete Ethernet frames into smoltcp. The interface advertises the NIC MTU and uses firmware RNG material for smoltcp's random seed and ephemeral local ports.
 
-smoltcp owns the rest of the network stack: Ethernet framing, ARP, IPv4, routing, DHCPv4, UDP, and TCP. Its DHCP socket configures the interface address, default gateway, and DNS resolver. Hickory DNS and SNTP use temporary bounded smoltcp UDP sockets with resolver/source endpoint checks. Browser TCP sessions use smoltcp TCP sockets with bounded polling and 16 KiB receive/transmit buffers. The TCP socket and SNP device remain owned by `SnpTcpStream` while Mbed TLS reads and writes through the `TlsStreamIo` interface.
+smoltcp owns the rest of the network stack: Ethernet framing, ARP, IPv4, routing, DHCPv4, UDP, and TCP. Its DHCP socket configures the interface address, default gateway, and DNS resolver. Hickory DNS and SNTP use temporary bounded smoltcp UDP sockets with resolver/source endpoint checks. Browser TCP sessions use smoltcp TCP sockets with bounded polling and 16 KiB receive/transmit buffers. The TCP socket and SNP device remain owned by `SnpTcpStream` while wolfSSL reads and writes through the `TlsStreamIo` interface.
 
 The application requires the firmware's SNP implementation and an Ethernet link, but does not require EFI IPv4 Config2, EFI UDP4, or EFI TCP4. It cannot provide a missing NIC driver. Runtime interoperability still needs testing across multiple firmware implementations and NICs; successful compilation does not validate SNP hardware behavior.
 
@@ -292,15 +299,15 @@ At startup, the browser creates an SNP/smoltcp stack and runs its DHCPv4 client.
 
 ### Firmware randomness and time
 
-src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the TF-PSA-Crypto C-ABI entropy callback. The TLS stack uses the `MBEDTLS_PSA_DRIVER_GET_ENTROPY` path, not the removed Mbed TLS 3.x `mbedtls_ssl_conf_rng` hook. Each PSA entropy request opens the firmware protocol for the duration of its read; failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
+src/firmware_rng.rs wraps EFI_RNG_PROTOCOL and requests the firmware-selected default algorithm. It provides both the DNS transaction-ID source and the wolfCrypt C-ABI entropy callback. The TLS stack uses the `WOLFSSL_PSA_DRIVER_GET_ENTROPY` path, not the removed wolfSSL 3.x `wolfssl_ssl_conf_rng` hook. Each wolfCrypt entropy request opens the firmware protocol for the duration of its read; failure to locate or read the RNG is propagated; there is no clock, counter, OS random device, or weak PRNG fallback.
 
-src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The Mbed TLS user configuration and C platform bridge route certificate-time operations through these hooks. The static C bridge and final EFI link pass in CI. Runtime operation against real firmware network drivers is still unverified.
+src/firmware_time.rs reads UEFI Runtime Services time, validates the structure, requires a defined timezone, rejects daylight-adjustment flags, rejects dates earlier than the configured policy floor, and converts the civil time to Unix seconds. Its C ABI function returns -1 if time is not trustworthy. The wolfSSL user configuration and C platform bridge route certificate-time operations through these hooks. The static C bridge and final EFI link pass in CI. Runtime operation against real firmware network drivers is still unverified.
 
-### C runtime and Mbed TLS platform hooks
+### C runtime and wolfSSL platform hooks
 
-The C bridge no longer uses POSIX allocation: TLS session allocations use Mbed TLS platform macros backed by uefi_mbedtls_calloc and uefi_mbedtls_free in src/uefi_memory.rs. Those functions use UEFI AllocatePool/FreePool and are valid only while Boot Services remain active.
+The C bridge no longer uses POSIX allocation: TLS session allocations use wolfSSL platform macros backed by uefi_wolfssl_calloc and uefi_wolfssl_free in src/uefi_memory.rs. Those functions use UEFI AllocatePool/FreePool and are valid only while Boot Services remain active.
 
-The custom Mbed TLS platform configuration also routes time/gmtime operations through the UEFI Runtime Services callback and a freestanding Gregorian conversion. There is no host socket, libc clock, or firmware TLS dependency in the intended runtime path. The Mbed TLS library and C bridge compilation passed in the most recent full-build attempt. Cargo then stopped in build.rs because it incorrectly required a PEM begin marker at byte zero; the official Mozilla bundle includes descriptive comments before the first certificate. The build script now validates bounded PEM marker presence and embeds from the first certificate, and the next CI run must confirm the final EFI link.
+The custom wolfSSL platform configuration also routes time/gmtime operations through the UEFI Runtime Services callback and a freestanding Gregorian conversion. There is no host socket, libc clock, or firmware TLS dependency in the intended runtime path. The wolfSSL library and C bridge compilation passed in the most recent full-build attempt. Cargo then stopped in build.rs because it incorrectly required a PEM begin marker at byte zero; the official Mozilla bundle includes descriptive comments before the first certificate. The build script now validates bounded PEM marker presence and embeds from the first certificate, and the next CI run must confirm the final EFI link.
 
 ### Latest CI image
 
@@ -336,15 +343,15 @@ Copying a binary to this path does not guarantee network access. Firmware must e
 - [x] Implement in-application DHCPv4, IPv4 routing, UDP DNS/NTP, and TCP stream sockets with smoltcp.
 - [x] Implement EFI_RNG_PROTOCOL and UEFI UTC clock adapters with fail-closed policy.
 - [x] Initialize SNP directly and acquire DHCPv4 configuration with smoltcp before TLS initialization.
-- [x] Connect Hickory DNS -> smoltcp UDP -> smoltcp TCP -> Mbed TLS while retaining the server hostname for SNI.
-- [x] Add Mbed TLS 4.3.0 source pin and archive checksum verification.
-- [x] Add UEFI allocator, platform time/gmtime hooks, and static COFF build/link scaffolding for Mbed TLS.
+- [x] Connect Hickory DNS -> smoltcp UDP -> smoltcp TCP -> wolfSSL while retaining the server hostname for SNI.
+- [x] Add wolfSSL 5.9.4 source pin and archive checksum verification.
+- [x] Add UEFI allocator, platform time/gmtime hooks, and static COFF build/link scaffolding for wolfSSL.
 - [x] Add optional CA-bundle update and build-time embedding support.
 - [x] Implement HTTP/1.1 GET, header/status parsing, Content-Length, chunked and close-delimited responses.
 - [x] Implement a keyboard-driven terminal navigation loop with links, history, back/forward, reload and search.
 - [x] Implement bounded redirects and reject HTTPS-to-HTTP redirect downgrade.
-- [x] Run and verify the complete Mbed TLS 4.3.0 C cross-build and final PE/COFF link in CI.
-- [x] Build and inspect an EFI binary containing the CA roots and Mbed TLS libraries.
+- [x] Run and verify the complete wolfSSL 5.9.4 C cross-build and final PE/COFF link in CI.
+- [x] Build and inspect an EFI binary containing the CA roots and wolfSSL libraries.
 - [ ] Run the browser under OVMF with SNP Ethernet and DHCPv4 networking and test real HTTP/HTTPS sites.
 - [ ] Test on multiple physical UEFI implementations and NIC drivers.
 - [ ] Add DNS CNAME/AAAA, DNS-over-TCP fallback, and cache.
@@ -357,19 +364,19 @@ Copying a binary to this path does not guarantee network access. Firmware must e
 
 This is pre-OS code running with firmware privileges. Bugs in parsers, TLS callbacks, allocation, or protocol lifetime handling can crash the machine or compromise the boot chain. Remote content is untrusted. The browser must not execute remote JavaScript in the firmware environment.
 
-The project is not yet release-verified. Do not use it to handle secrets or replace a maintained operating-system browser until the Mbed TLS cross-build, final EFI link, CA-bundle review, and real firmware integration tests have passed.
+The project is not yet release-verified. Do not use it to handle secrets or replace a maintained operating-system browser until the wolfSSL cross-build, final EFI link, CA-bundle review, and real firmware integration tests have passed.
 
 ## References
 
 - [Hickory DNS protocol crate](https://docs.rs/hickory-proto/0.26.3/hickory_proto/)
 - [Hickory protocol feature flags](https://docs.rs/crate/hickory-proto/0.26.3/features)
-- [Mbed TLS upstream](https://github.com/Mbed-TLS/mbedtls)
-- [TF-PSA-Crypto configuration split in Mbed TLS 4.x](https://github.com/Mbed-TLS/TF-PSA-Crypto/blob/development/docs/psa-transition.md#compile-time-configuration)
-- [Mbed TLS 4.3.0 release](https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-4.3.0)
+- [wolfSSL upstream](https://github.com/Mbed-TLS/wolfssl)
+- [wolfCrypt configuration split in wolfSSL 4.x](https://github.com/Mbed-TLS/wolfCrypt/blob/development/docs/psa-transition.md#compile-time-configuration)
+- [wolfSSL 5.9.4 release](https://github.com/Mbed-TLS/wolfssl/releases/tag/wolfssl-4.3.0)
 - [UEFI 2.11 network protocols](https://uefi.org/specs/UEFI/2.11/29_Network_Protocols_ARP_and_DHCP.html)
 - [Rust UEFI crate](https://docs.rs/uefi/)
 - [Rust UEFI target](https://doc.rust-lang.org/rustc/platform-support/unknown-uefi.html)
 
 ## License
 
-Original project code is intended to be dual-licensed under MIT or Apache-2.0. Mbed TLS is separately licensed upstream; review and preserve its license notices when redistributing an EFI image that includes it.
+The combined browser distribution is licensed under GPLv3 to comply with the selected wolfSSL open-source distribution. wolfSSL's upstream copyright and license notices are retained.
