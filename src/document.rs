@@ -1239,6 +1239,38 @@ mod tests {
     }
 
     #[test]
+    fn form_controls_are_emitted_at_their_original_dom_positions() {
+        let base = Url::parse("https://example.org/search").unwrap();
+        let page = parse_html(
+            "<form action=/search><p>Before <label for=q>Query</label><input id=q name=q value=uefi> after</p><p>More text</p><button type=submit name=go value=1>Search</button></form>",
+            &base,
+        );
+        let first_text = page.blocks.iter().position(|block| {
+            block.runs.iter().any(|run| run.text.contains("Before"))
+        }).unwrap();
+        let input = page.blocks.iter().position(|block| matches!(
+            &block.kind,
+            BlockKind::FormControl { form_index: 0, control_index: 0 }
+        )).unwrap();
+        let after_text = page.blocks.iter().position(|block| {
+            block.runs.iter().any(|run| run.text.contains("after"))
+        }).unwrap();
+        let more_text = page.blocks.iter().position(|block| {
+            block.runs.iter().any(|run| run.text.contains("More text"))
+        }).unwrap();
+        let submit = page.blocks.iter().position(|block| matches!(
+            &block.kind,
+            BlockKind::FormControl { form_index: 0, control_index: 1 }
+        )).unwrap();
+
+        assert!(first_text < input);
+        assert!(input < after_text);
+        assert!(after_text < more_text);
+        assert!(more_text < submit);
+        assert_eq!(page.forms[0].controls[0].value, "uefi");
+    }
+
+    #[test]
     fn discovers_bounded_external_stylesheets_and_rejects_https_mixed_content() {
         let base = Url::parse("https://example.org/docs/").unwrap();
         let urls = external_stylesheet_urls(
