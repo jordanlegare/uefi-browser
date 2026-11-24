@@ -112,7 +112,7 @@ pub fn resolve_a<T: UdpDnsTransport, R: SecureRandom>(
                 if length > response.len() {
                     return Err(DnsError::InvalidDatagram);
                 }
-                match parse_a_response(&response[..length], transaction_id, hostname) {
+                return match parse_a_response(&response[..length], transaction_id, hostname) {
                     Err(DnsError::Truncated) => {
                         let tcp_length = transport
                             .exchange_tcp(
