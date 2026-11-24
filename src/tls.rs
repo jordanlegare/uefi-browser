@@ -4,6 +4,7 @@
 //! verification. Rust retains ownership of the SNP/smoltcp TCP stream.
 
 use alloc::ffi::CString;
+use alloc::vec::Vec;
 use core::ffi::{c_int, c_void};
 use core::marker::PhantomData;
 
@@ -36,6 +37,12 @@ unsafe extern "C" {
     fn uefi_wolfssl_last_time_unix() -> i64;
     fn uefi_wolfssl_last_verify_error() -> c_int;
     fn uefi_wolfssl_last_verify_depth() -> c_int;
+    fn uefi_wolfssl_peer_chain_count() -> c_int;
+    fn uefi_wolfssl_copy_peer_chain_sha1(
+        depth: c_int,
+        output: *mut u8,
+        capacity: usize,
+    ) -> c_int;
     fn uefi_wolfssl_copy_bad_cert_sha256(output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_handshake(session: *mut RawTlsSession) -> c_int;
     fn uefi_wolfssl_read(session: *mut RawTlsSession, output: *mut u8, capacity: usize) -> c_int;
@@ -141,6 +148,34 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
             return Err(TlsError::CertificateVerification(verification));
         }
         Ok(())
+    }
+
+    /// Return SHA-1 fingerprints for the peer chain captured by wolfSSL's
+    /// verification callback, in verifier depth order (leaf first).
+    ///
+    /// SHA-1 is used only for compatibility with external fingerprint
+    /// references; it is not used for TLS certificate verification.
+    pub fn peer_chain_sha1(&self) -> Vec<[u8; 20]> {
+        let count = unsafe { uefi_wolfssl_peer_chain_count() };
+        if count <= 0 {
+            return Vec::new();
+        }
+
+        let mut fingerprints = Vec::new();
+        for depth in 0..count {
+            let mut fingerprint = [0u8; 20];
+            let copied = unsafe {
+                uefi_wolfssl_copy_peer_chain_sha1(
+                    depth,
+                    fingerprint.as_mut_ptr(),
+                    fingerprint.len(),
+                )
+            };
+            if copied == 20 {
+                fingerprints.push(fingerprint);
+            }
+        }
+        fingerprints
     }
 
     pub fn read(&mut self, output: &mut [u8]) -> Result<usize, TlsError> {
