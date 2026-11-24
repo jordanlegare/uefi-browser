@@ -82,7 +82,7 @@ struct Tlv<'a> {
 /// rejected because they are not valid in the certificate structures parsed here.
 fn read_tlv<'a>(input: &'a [u8], offset: &mut usize) -> Option<Tlv<'a>> {
     let tag = *input.get(*offset)?;
-    *offset = offset.checked_add(1)?;
+    *offset = (*offset).checked_add(1)?;
     if tag & 0x1f == 0x1f {
         return None;
     }
@@ -96,7 +96,7 @@ fn read_tlv<'a>(input: &'a [u8], offset: &mut usize) -> Option<Tlv<'a>> {
         if octets == 0 || octets > 4 {
             return None;
         }
-        let end = offset.checked_add(octets)?;
+        let end = (*offset).checked_add(octets)?;
         if end > input.len() {
             return None;
         }
@@ -109,7 +109,7 @@ fn read_tlv<'a>(input: &'a [u8], offset: &mut usize) -> Option<Tlv<'a>> {
         parsed
     };
 
-    let end = offset.checked_add(length)?;
+    let end = (*offset).checked_add(length)?;
     if end > input.len() {
         return None;
     }
@@ -131,24 +131,25 @@ fn oid_text(bytes: &[u8]) -> String {
     if bytes.is_empty() {
         return String::from("invalid OID");
     }
-    let first = bytes[0] as u64;
+    let mut subidentifiers = Vec::new();
+    let mut value = 0u64;
+    for byte in bytes {
+        value = value.saturating_mul(128).saturating_add((byte & 0x7f) as u64);
+        if byte & 0x80 == 0 {
+            subidentifiers.push(value);
+            value = 0;
+        }
+    }
+    if subidentifiers.is_empty() || bytes.last().is_some_and(|byte| byte & 0x80 != 0) {
+        return String::from("invalid OID");
+    }
+    let first = subidentifiers.remove(0);
     let first_arc = core::cmp::min(first / 40, 2);
     let second_arc = first.saturating_sub(first_arc * 40);
     let mut arcs = Vec::new();
     arcs.push(first_arc);
     arcs.push(second_arc);
-
-    let mut value = 0u64;
-    for byte in &bytes[1..] {
-        value = value.saturating_mul(128).saturating_add((byte & 0x7f) as u64);
-        if byte & 0x80 == 0 {
-            arcs.push(value);
-            value = 0;
-        }
-    }
-    if bytes.last().is_some_and(|byte| byte & 0x80 != 0) {
-        return String::from("invalid OID");
-    }
+    arcs.extend(subidentifiers);
 
     let mut output = String::new();
     for (index, arc) in arcs.iter().enumerate() {
@@ -202,7 +203,8 @@ fn oid_label(oid: &str) -> &'static str {
 }
 
 fn parse_name(input: &[u8]) -> String {
-    let Some(sequence) = read_tlv(input, &mut 0usize) else {
+    let mut offset = 0usize;
+    let Some(sequence) = read_tlv(input, &mut offset) else {
         return String::from("unavailable");
     };
     if sequence.tag != 0x30 {
@@ -252,7 +254,8 @@ fn parse_name(input: &[u8]) -> String {
 }
 
 fn algorithm(input: &[u8]) -> (String, String) {
-    let Some(sequence) = read_tlv(input, &mut 0usize) else {
+    let mut offset = 0usize;
+    let Some(sequence) = read_tlv(input, &mut offset) else {
         return (String::from("unavailable"), String::from("unavailable"));
     };
     if sequence.tag != 0x30 {
@@ -520,7 +523,7 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
 
     let tbs = outer_fields[0];
     let (outer_signature_algorithm, _) = algorithm_from_tlv(outer_fields[1]);
-    let signature_bytes = outer_fields[2].value.len().saturating_sub(1);
+    let signature_bytes = if outer_fields[2].tag == 0x03 { outer_fields[2].value.len().saturating_sub(1) } else { 0 };
 
     let tbs_fields = children(tbs.value).ok_or("malformed TBSCertificate sequence")?;
     let mut index = 0usize;
@@ -573,7 +576,10 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
     let public_key_algorithm_field = *spki_fields.first().ok_or("missing public key algorithm")?;
     let (public_key_algorithm, public_key_parameters) = algorithm_from_tlv(public_key_algorithm_field);
     let public_key_bits = spki_fields.get(1).filter(|field| field.tag == 0x03)
-        .map(|bits| bits.value.len().saturating_sub(1).saturating_mul(8))
+        .map(|bits| {
+            let encoded_bits = bits.value.len().saturating_sub(1).saturating_mul(8);
+            encoded_bits.saturating_sub(bits.value.first().copied().unwrap_or(0) as usize)
+        })
         .unwrap_or(0);
 
     let mut summary = CertificateSummary {
