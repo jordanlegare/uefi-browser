@@ -25,7 +25,7 @@ int uefi_wolfssl_isspace(int character)
 
 int uefi_wolfssl_stricmp(const char *left, const char *right)
 {
-    while (*left != '\\0' && *right != '\\0') {
+    while (*left != '\0' && *right != '\0') {
         unsigned char a = (unsigned char)*left++;
         unsigned char b = (unsigned char)*right++;
         if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + ('a' - 'A'));

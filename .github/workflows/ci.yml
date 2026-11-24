@@ -46,6 +46,13 @@ jobs:
             tests/uefi_date_validation.c vendor/wolfssl-bridge/uefi_date.c \
             -o /tmp/uefi-date-validation
           /tmp/uefi-date-validation
+      - name: Test freestanding wolfSSL string comparison
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror -fno-builtin \
+            -fsanitize=address,undefined \
+            tests/uefi_crt_stricmp.c vendor/wolfssl-bridge/uefi_crt.c \
+            -o /tmp/uefi-crt-stricmp
+          /tmp/uefi-crt-stricmp
       - name: Download and verify embedded CA roots
         run: ./scripts/update-ca-bundle.sh
       - name: Build wolfSSL, bridge, and EFI application
