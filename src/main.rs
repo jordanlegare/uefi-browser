@@ -2356,11 +2356,14 @@ fn render_links(links: &[Link]) {
 fn print_help() {
     uefi::println!("");
     uefi::println!("UEFI Browser keyboard and command reference");
-    uefi::println!("  UP / DOWN       Scroll one line");
+    uefi::println!("  UP / DOWN       Move to nearby link or form control; otherwise scroll");
+    uefi::println!("  LEFT / RIGHT    Move focus between links and controls");
     uefi::println!("  PAGE UP/DOWN    Scroll one screen");
     uefi::println!("  HOME / END      Jump to top or bottom");
-    uefi::println!("  TAB / [         Focus next / previous link");
-    uefi::println!("  ENTER           Open the focused link");
+    uefi::println!("  TAB / [         Focus next / previous link or form control");
+    uefi::println!("  TYPE / BACKSPACE Edit a focused text field");
+    uefi::println!("  SPACE           Toggle a checkbox or radio option");
+    uefi::println!("  ENTER           Submit the focused form or open a focused link");
     uefi::println!("  g or o          Enter a URL");
     uefi::println!("  /               Search the rendered document; n finds next");
     uefi::println!("  :               Open the command prompt");
@@ -2371,7 +2374,7 @@ fn print_help() {
         "  Commands: open URL, open N, open-bookmark N, bookmark, bookmarks, delete-bookmark N"
     );
     uefi::println!(
-        "            form N, cache-stats, clear-cache, search WORD, back, forward, reload, quit"
+        "            form N (focus its controls), cache-stats, clear-cache, search WORD, back, forward, reload, quit"
     );
     uefi::println!("");
 }
