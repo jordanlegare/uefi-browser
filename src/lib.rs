@@ -9,6 +9,7 @@ pub mod grc_chain;
 pub mod http;
 pub mod network;
 pub mod tls;
+pub mod x509_summary;
 pub mod url;
 
 #[cfg(target_os = "uefi")]
