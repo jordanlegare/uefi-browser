@@ -390,7 +390,20 @@ fn fetch_response(
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
                 if let Err(error) = tls.handshake() {
-                    return Err(describe_tls_failure(&error));
+                    let observed_chain = tls.peer_chain_sha1();
+                    let report = if is_certificate_verification_failure(&error) {
+                        drop(tls);
+                        drop(connection);
+                        describe_tls_failure_with_grc(
+                            &error,
+                            &url.host,
+                            &observed_chain,
+                            network,
+                        )
+                    } else {
+                        describe_tls_failure(&error)
+                    };
+                    return Err(report);
                 }
                 let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
@@ -407,6 +420,161 @@ fn fetch_response(
             }
         }
     }
+}
+
+fn is_certificate_verification_failure(error: &uefi_browser::tls::TlsError) -> bool {
+    matches!(
+        error,
+        uefi_browser::tls::TlsError::Handshake {
+            verify_error,
+            ..
+        } if *verify_error != 0
+    )
+}
+
+fn describe_tls_failure_with_grc(
+    error: &uefi_browser::tls::TlsError,
+    hostname: &str,
+    observed_chain: &[[u8; 20]],
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> String {
+    use uefi_browser::grc_chain::{compare_chains, format_sha1};
+
+    let mut report = describe_tls_failure(error);
+    report.push_str("\n\nIndependent chain reference: GRC HTTPS fingerprint service");
+    report.push_str(&format!(
+        "\nQuery: https://www.grc.com/fingerprints.htm?chain={hostname}"
+    ));
+
+    match fetch_grc_reference_chain(hostname, network) {
+        Ok(reference) => {
+            let comparison = compare_chains(&reference, observed_chain);
+            report.push_str(&format!(
+                "\nGRC returned {} certificate fingerprints for {}.",
+                reference.certificates.len(),
+                reference.hostname
+            ));
+            report.push_str(&format!(
+                "\nLocal verifier captured {} certificate fingerprint(s), ordered by chain depth (leaf first).",
+                observed_chain.len()
+            ));
+
+            if comparison.local_chain_empty {
+                report.push_str(
+                    "\nCOMPARISON: unavailable. wolfSSL did not expose a certificate path to the diagnostic callback.",
+                );
+            } else if comparison.is_consistent() {
+                report.push_str(
+                    "\nCOMPARISON: MATCH. The observed server/intermediate fingerprints agree with the GRC reference. The root may be omitted from the peer-sent chain.",
+                );
+            } else {
+                report.push_str(
+                    "\nCOMPARISON: CHAIN DIVERGENCE. The locally observed path differs from GRC's independently retrieved reference.",
+                );
+                if !comparison.server_leaf_matches {
+                    report.push_str(
+                        "\nThe server leaf fingerprint does not match the GRC server certificate fingerprint.",
+                    );
+                }
+                for certificate in &comparison.missing {
+                    report.push_str(&format!(
+                        "\nMissing from local path: {} {} — {}",
+                        certificate.role.label(),
+                        certificate.name,
+                        format_sha1(&certificate.sha1)
+                    ));
+                }
+                for fingerprint in &comparison.unexpected_local {
+                    report.push_str(&format!(
+                        "\nNot present in GRC reference: {}",
+                        format_sha1(fingerprint)
+                    ));
+                }
+                report.push_str(
+                    "\nInterpretation: possible TLS interception or a different certificate path/edge. CDN routing, certificate rotation, cross-signing, and timing can also cause legitimate differences; this comparison alone does not prove MITM.",
+                );
+            }
+
+            report.push_str("\nGRC reference chain:");
+            for certificate in &reference.certificates {
+                report.push_str(&format!(
+                    "\n  {}: {} [{}]",
+                    certificate.role.label(),
+                    certificate.name,
+                    format_sha1(&certificate.sha1)
+                ));
+            }
+        }
+        Err(reason) => {
+            report.push_str(&format!(
+                "\nCOMPARISON: unavailable. Could not retrieve or parse the GRC reference: {reason}"
+            ));
+            report.push_str(
+                "\nThe browser did not relax TLS verification for the GRC connection.",
+            );
+        }
+    }
+
+    report
+}
+
+fn fetch_grc_reference_chain(
+    hostname: &str,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Result<uefi_browser::grc_chain::ReferenceChain, String> {
+    use uefi_browser::grc_chain::parse_grc_chain_html;
+
+    if !is_dns_hostname(hostname) {
+        return Err(String::from(
+            "GRC comparison requires an ASCII DNS hostname; IP literals and malformed names are not queried.",
+        ));
+    }
+
+    let reference_url = Url::parse(&format!(
+        "https://www.grc.com/fingerprints.htm?chain={hostname}"
+    ))
+    .map_err(|error| format!("invalid GRC reference URL: {error}"))?;
+
+    let ca_bundle = uefi_browser::ca_bundle::pem()
+        .ok_or_else(|| String::from("embedded CA trust bundle unavailable"))?;
+    let mut connection = connect_firmware_url(network, &reference_url, 15_000)
+        .map_err(|failure| format!("GRC DNS/TCP connection failed: {:?}", failure.error))?;
+    connection.peer.stream.set_io_timeout_ms(5_000);
+
+    let mut tls = connection
+        .start_tls(ca_bundle)
+        .map_err(|error| format!("GRC TLS initialization failed: {error:?}"))?;
+    tls.handshake()
+        .map_err(|error| format!("GRC TLS certificate verification failed: {error:?}"))?;
+
+    let response = http::exchange_get(&mut tls, &reference_url, 128 * 1024)
+        .map_err(|error| format!("GRC HTTPS request failed: {error:?}"))?;
+    if response.status != 200 {
+        return Err(format!("GRC returned HTTP status {}", response.status));
+    }
+
+    let html = String::from_utf8_lossy(&response.body);
+    parse_grc_chain_html(&html, hostname)
+        .map_err(|error| format!("GRC chain page parse failed: {error:?}"))
+}
+
+fn is_dns_hostname(hostname: &str) -> bool {
+    if hostname.is_empty() || hostname.len() > 253 || !hostname.is_ascii() {
+        return false;
+    }
+    if !hostname.bytes().any(|byte| byte.is_ascii_alphabetic()) {
+        return false;
+    }
+
+    hostname.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    })
 }
 
 fn describe_tls_failure(error: &uefi_browser::tls::TlsError) -> String {
