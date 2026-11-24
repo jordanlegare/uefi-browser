@@ -148,6 +148,9 @@ The command prompt supports URL opening, opening a numbered link or bookmark, bo
     bookmarks
     delete-bookmark N
     form N
+    history
+    open-history N
+    clear-history
     cache-stats
     clear-cache
     search WORD
