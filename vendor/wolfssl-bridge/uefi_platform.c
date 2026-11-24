@@ -70,7 +70,17 @@ void uefi_wolfssl_free(void *pointer, void *heap, int type)
 
     if (pointer == NULL) return;
     allocation = (uefi_wolfssl_allocation *)pointer - 1;
-    uefi_browser_free(allocation->base);
+    {
+        volatile unsigned char *bytes = (volatile unsigned char *)pointer;
+        size_t remaining = allocation->size;
+        while (remaining-- > 0) *bytes++ = 0;
+    }
+    {
+        void *base = allocation->base;
+        allocation->size = 0;
+        allocation->base = NULL;
+        uefi_browser_free(base);
+    }
 }
 
 void *uefi_wolfssl_realloc(void *pointer, size_t size, void *heap, int type)
