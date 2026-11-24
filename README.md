@@ -4,6 +4,12 @@ A standalone Rust application for x86-64 UEFI firmware, intended to grow into a 
 
 > **Status: wolfSSL replacement in progress; wolfSSL build and runtime firmware/network tests pending.** The source includes an EFI Simple Network Protocol (SNP) Ethernet adapter, an in-application smoltcp IPv4/DHCP/UDP/TCP stack, Hickory DNS, firmware RNG/time providers, HTTP/1.1 stream fetching, basic HTML text/link extraction, history, link following, and an interactive firmware-console loop. The wolfSSL 5.9.4 replacement is being integrated on a feature branch; its complete PE32+ x86-64 build is pending CI. It has not yet been boot-tested under OVMF or on physical firmware, and it is not feature-equivalent to ELinks.
 
+## TLS certificate failure diagnostics
+
+HTTPS certificate verification is mandatory. If wolfSSL rejects a peer certificate, the browser blocks the original connection, reports the verifier error and failing certificate details when available, and attempts an independently TLS-verified GRC fingerprint comparison for DNS hostnames. GRC is corroborating evidence only: it cannot override local verification or add trust anchors. A chain mismatch is reported as a possible interception/path discrepancy, not proof of MITM.
+
+See [TLS Certificate and Chain-of-Trust Verification](docs/TLS-CHAIN-VERIFICATION.md) for the step-by-step verification flow, failure handling, comparison semantics, coverage, and limitations.
+
 ## Goals
 
 - Run directly as an x86-64 UEFI application without Linux, initramfs, shell, or host userspace.
