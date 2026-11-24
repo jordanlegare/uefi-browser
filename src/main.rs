@@ -390,9 +390,7 @@ fn fetch_response(
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;
                 if let Err(error) = tls.handshake() {
-                    return Err(format!(
-                        "TLS handshake / certificate verification failed: {error:?}"
-                    ));
+                    return Err(describe_tls_failure(&error));
                 }
                 let response = http::exchange_get(&mut tls, url, MAX_BODY_BYTES)
                     .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
@@ -408,6 +406,48 @@ fn fetch_response(
                 ))
             }
         }
+    }
+}
+
+fn describe_tls_failure(error: &uefi_browser::tls::TlsError) -> String {
+    use uefi_browser::tls::TlsError;
+
+    match error {
+        TlsError::Handshake {
+            code,
+            verify_error,
+            verify_depth,
+            failing_certificate_sha256,
+        } => {
+            let mut fingerprint = String::new();
+            for byte in failing_certificate_sha256 {
+                fingerprint.push_str(&format!("{:02X}", byte));
+            }
+            let has_fingerprint = failing_certificate_sha256.iter().any(|byte| *byte != 0);
+            let certificate = if has_fingerprint {
+                format!("Failing certificate SHA-256: {}", fingerprint)
+            } else {
+                String::from("Failing certificate fingerprint: unavailable")
+            };
+            let depth = if *verify_depth >= 0 {
+                format!("Failing chain depth: {} (0 = leaf)", verify_depth)
+            } else {
+                String::from("Failing chain depth: unavailable")
+            };
+            let reason = match *code {
+                188 => "No trusted issuer could be found for a certificate in the presented chain.",
+                _ => "wolfSSL rejected the peer certificate chain; see the raw verifier code below.",
+            };
+            let suspicion = if *code == 188 {
+                "SECURITY ASSESSMENT: Possible TLS interception, but MITM is NOT proven. An intercepting proxy can present a certificate signed by an untrusted local CA; a missing intermediate or incomplete trust bundle can produce the same failure."
+            } else {
+                "SECURITY ASSESSMENT: Certificate validation failed. This alone does not establish a man-in-the-middle attack."
+            };
+            format!(
+                "TLS CERTIFICATE VERIFICATION FAILED\n{reason}\nVerifier code: {code}; X.509 error: {verify_error}\n{depth}\n{certificate}\n{suspicion}\nThe connection was blocked. Do not enter credentials or sensitive data.\nChecks performed by wolfSSL include chain signatures/path building, CA constraints, certificate validity times, and hostname identity where applicable. Revocation status (CRL/OCSP) is not currently checked."
+            )
+        }
+        _ => format!("TLS handshake failed: {error:?}\nThe connection was blocked; certificate verification was not bypassed."),
     }
 }
 
