@@ -4,6 +4,32 @@
  */
 #include <stddef.h>
 
+/* wolfSSL's freestanding replacements for MinGW CRT imports. */
+static int uefi_errno_value;
+
+int *uefi_wolfssl_errno(void)
+{
+    return &uefi_errno_value;
+}
+
+int uefi_wolfssl_tolower(int character)
+{
+    if (character >= 'A' && character <= 'Z') return character + ('a' - 'A');
+    return character;
+}
+
+int uefi_wolfssl_stricmp(const char *left, const char *right)
+{
+    while (*left != '\\0' && *right != '\\0') {
+        unsigned char a = (unsigned char)*left++;
+        unsigned char b = (unsigned char)*right++;
+        if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + ('a' - 'A'));
+        if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + ('a' - 'A'));
+        if (a != b) return (int)a - (int)b;
+    }
+    return (unsigned char)*left - (unsigned char)*right;
+}
+
 void *memcpy(void *destination, const void *source, size_t length)
 {
     unsigned char *out = (unsigned char *)destination;
