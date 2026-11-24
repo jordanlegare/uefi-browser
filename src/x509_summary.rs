@@ -897,8 +897,8 @@ fn algorithm_from_tlv(field: Tlv<'_>) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
     use super::*;
+    use alloc::vec;
 
     fn tlv(tag: u8, value: &[u8]) -> Vec<u8> {
         let mut output = Vec::new();
