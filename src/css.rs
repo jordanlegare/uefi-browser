@@ -550,7 +550,7 @@ fn parse_selector(input: &str) -> Option<Selector> {
                         return None;
                     }
                     let (name, value) = if let Some((name, value)) = expression.split_once('=') {
-                        let value = value.trim().trim_matches(['\\'', '"']).to_string();
+                        let value = value.trim().trim_matches(['\'', '"']).to_string();
                         (name.trim().to_ascii_lowercase(), Some(value))
                     } else {
                         (expression.to_ascii_lowercase(), None)
