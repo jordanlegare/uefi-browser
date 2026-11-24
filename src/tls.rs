@@ -34,6 +34,9 @@ unsafe extern "C" {
     fn uefi_wolfssl_client_free(session: *mut RawTlsSession);
     fn uefi_wolfssl_last_ca_cert_index() -> c_int;
     fn uefi_wolfssl_last_time_unix() -> i64;
+    fn uefi_wolfssl_last_verify_error() -> c_int;
+    fn uefi_wolfssl_last_verify_depth() -> c_int;
+    fn uefi_wolfssl_last_peer_cert_count() -> c_int;
     fn uefi_wolfssl_handshake(session: *mut RawTlsSession) -> c_int;
     fn uefi_wolfssl_read(session: *mut RawTlsSession, output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_write(session: *mut RawTlsSession, input: *const u8, length: usize) -> c_int;
@@ -50,7 +53,12 @@ pub enum TlsError {
         ca_cert_index: c_int,
         wolfssl_time_unix: i64,
     },
-    Handshake(c_int),
+    Handshake {
+        code: c_int,
+        verify_error: c_int,
+        verify_depth: c_int,
+        peer_cert_count: c_int,
+    },
     CertificateVerification(u32),
     Read(c_int),
     Write(c_int),
@@ -112,7 +120,12 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
     pub fn handshake(&mut self) -> Result<(), TlsError> {
         let result = unsafe { uefi_wolfssl_handshake(self.raw) };
         if result != 0 {
-            return Err(TlsError::Handshake(result));
+            return Err(TlsError::Handshake {
+                code: result,
+                verify_error: unsafe { uefi_wolfssl_last_verify_error() },
+                verify_depth: unsafe { uefi_wolfssl_last_verify_depth() },
+                peer_cert_count: unsafe { uefi_wolfssl_last_peer_cert_count() },
+            });
         }
         let verification = unsafe { uefi_wolfssl_verify_result(self.raw) };
         if verification != 0 {
