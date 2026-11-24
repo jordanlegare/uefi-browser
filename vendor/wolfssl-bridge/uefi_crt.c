@@ -18,6 +18,12 @@ int uefi_wolfssl_tolower(int character)
     return character;
 }
 
+int uefi_wolfssl_isspace(int character)
+{
+    return character == ' ' || character == '\\t' || character == '\\n' ||
+           character == '\\v' || character == '\\f' || character == '\\r';
+}
+
 int uefi_wolfssl_stricmp(const char *left, const char *right)
 {
     while (*left != '\\0' && *right != '\\0') {
