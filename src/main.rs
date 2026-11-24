@@ -416,6 +416,14 @@ fn fetch_response(
                         "[TLS 6/6] Rejected certificate DER: {}. Closing the original TLS/TCP connection.",
                         der_status
                     );
+                    // Print the key evidence before the independent GRC request.
+                    // GRC has its own TLS handshake and may fail or stall; that must
+                    // never hide diagnostics already captured from the original peer.
+                    print_tls_rejection_diagnostics(
+                        &error,
+                        failing_certificate_der.as_deref(),
+                        &observed_chain,
+                    );
                     let report = if is_certificate_verification_failure(&error) {
                         drop(tls);
                         drop(connection);
@@ -459,6 +467,97 @@ fn is_certificate_verification_failure(error: &uefi_browser::tls::TlsError) -> b
             ..
         } if *verify_error != 0
     )
+}
+
+fn print_tls_rejection_diagnostics(
+    error: &uefi_browser::tls::TlsError,
+    failing_certificate_der: Option<&[u8]>,
+    observed_chain: &[[u8; 20]],
+) {
+    use uefi_browser::tls::TlsError;
+
+    let TlsError::Handshake {
+        verify_error,
+        verify_depth,
+        failing_certificate_sha256,
+        ..
+    } = error else {
+        return;
+    };
+
+    uefi::println!(
+        "[TLS VERIFY] Original peer rejected: X.509 error {}, chain depth {} (0 = leaf).",
+        verify_error,
+        verify_depth
+    );
+
+    if failing_certificate_sha256.iter().any(|byte| *byte != 0) {
+        let mut fingerprint = String::new();
+        for (index, byte) in failing_certificate_sha256.iter().enumerate() {
+            if index != 0 {
+                fingerprint.push(':');
+            }
+            fingerprint.push_str(&format!("{:02X}", byte));
+        }
+        uefi::println!(
+            "[TLS VERIFY] Rejected certificate SHA-256: {}",
+            fingerprint
+        );
+    } else {
+        uefi::println!(
+            "[TLS VERIFY] Rejected certificate SHA-256: unavailable (wolfSSL did not return a digest)."
+        );
+    }
+
+    if *verify_depth >= 0 {
+        if let Some(fingerprint) = observed_chain.get(*verify_depth as usize) {
+            uefi::println!(
+                "[TLS VERIFY] Rejected-depth SHA-1 (GRC comparison format): {}",
+                uefi_browser::grc_chain::format_sha1(fingerprint)
+            );
+        } else {
+            uefi::println!(
+                "[TLS VERIFY] No peer-chain SHA-1 fingerprint was captured at depth {}.",
+                verify_depth
+            );
+        }
+    }
+
+    match failing_certificate_der {
+        Some(der) => match uefi_browser::x509_summary::summarize_certificate(der) {
+            Ok(summary) => {
+                uefi::println!("[TLS VERIFY] Rejected certificate Subject: {}", summary.subject);
+                uefi::println!("[TLS VERIFY] Rejected certificate Issuer: {}", summary.issuer);
+                uefi::println!(
+                    "[TLS VERIFY] Rejected certificate Serial: {}",
+                    summary.serial_number
+                );
+                uefi::println!(
+                    "[TLS VERIFY] Rejected certificate SKI: {}",
+                    summary.subject_key_identifier
+                );
+                uefi::println!(
+                    "[TLS VERIFY] Rejected certificate AKI: {}",
+                    summary.authority_key_identifier
+                );
+                uefi::println!(
+                    "[TLS VERIFY] Rejected certificate Basic Constraints: {}",
+                    summary.basic_constraints
+                );
+                uefi::println!(
+                    "[TLS VERIFY] Exact rejected DER length: {} bytes.",
+                    summary.der_bytes
+                );
+            }
+            Err(reason) => uefi::println!(
+                "[TLS VERIFY] Captured rejected DER, but its diagnostic parser could not decode it: {}",
+                reason
+            ),
+        },
+        None => uefi::println!(
+            "[TLS VERIFY] Rejected certificate DER unavailable; subject/issuer fields cannot be reported."
+        ),
+    }
 }
 
 fn describe_tls_failure_with_grc(
