@@ -238,6 +238,7 @@ fn layout_block(block: &Block, width: usize) -> Vec<RenderLine> {
             style.strong |= *header;
         }
         BlockKind::Table { .. } => {}
+        BlockKind::FormControl { .. } => {}
         BlockKind::DefinitionTerm => style.strong = true,
         BlockKind::DefinitionDescription => prefix.push_str("    "),
         BlockKind::HorizontalRule => {
