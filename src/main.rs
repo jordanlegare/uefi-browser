@@ -24,14 +24,6 @@ unsafe extern "C" {
     fn uefi_mbedtls_link_anchor() -> i32;
 }
 
-#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-#[unsafe(no_mangle)]
-pub extern "C" fn uefi_browser_tls_log(stage: i32, detail: i32) {
-    // Keep the ABI callback for the instrumented Mbed TLS build, but emit nothing.
-    // All TLS and X.509 verification remains active in Mbed TLS.
-    let _ = (stage, detail);
-}
-
 struct BrowserPage {
     url: Url,
     status: u16,
@@ -396,8 +388,7 @@ fn fetch_response(
                 // Use a shorter per-I/O timeout for TLS so a peer that accepts
                 // TCP but never sends a ServerHello cannot freeze the UI.
                 connection.peer.stream.set_io_timeout_ms(5_000);
-                // Reset both diagnostic stores before client_new(): CA parsing
-                // happens during TLS session construction, before handshake().
+                // CA parsing occurs during TLS session construction, before handshake().
                 let mut tls = connection
                     .start_tls(ca_bundle)
                     .map_err(|error| format!("TLS initialization failed: {error:?}"))?;

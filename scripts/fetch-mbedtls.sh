@@ -11,8 +11,9 @@ DEST="$VENDOR/mbedtls-$VERSION"
 
 mkdir -p "$VENDOR"
 if [[ -d "$DEST" ]]; then
-  if grep -Fq 'uefi_x509_parent_trace' "$DEST/library/x509_crt.c" 2>/dev/null; then
-    echo "Removing legacy trace-instrumented Mbed TLS source before rebuilding."
+  if grep -R -l -E 'uefi_x509_parent_trace|uefi_browser_tls_debug_log|uefi_browser_tls_log' \
+      "$DEST/library" "$DEST/tf-psa-crypto" >/dev/null 2>&1; then
+    echo "Removing legacy diagnostic-instrumented Mbed TLS source before rebuilding."
     rm -rf "$DEST"
   else
     echo "Mbed TLS $VERSION is already present at $DEST"
