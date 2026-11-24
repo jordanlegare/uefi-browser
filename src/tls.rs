@@ -161,9 +161,7 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
         }
         let mut der = Vec::new();
         der.resize(length as usize, 0);
-        let copied = unsafe {
-            uefi_wolfssl_copy_bad_cert_der(der.as_mut_ptr(), der.len())
-        };
+        let copied = unsafe { uefi_wolfssl_copy_bad_cert_der(der.as_mut_ptr(), der.len()) };
         if copied == length { Some(der) } else { None }
     }
 
@@ -247,7 +245,8 @@ unsafe extern "C" fn verification_progress_callback(event: c_int, depth: c_int, 
         ),
         2 => uefi::println!(
             "[TLS VERIFY] CERTIFICATE REJECTED at depth {} (0 = leaf); wolfSSL X.509 error {}. Capturing the exact rejected certificate.",
-            depth, error
+            depth,
+            error
         ),
         _ => {}
     }
