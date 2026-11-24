@@ -6,6 +6,7 @@
 #define UEFI_BROWSER_WOLFSSL_USER_SETTINGS_H
 
 #include <stddef.h>
+#include <stdarg.h>
 #include <time.h>
 
 #define SINGLE_THREADED
@@ -13,8 +14,10 @@
 #define NO_WRITEV
 #define WOLFSSL_NO_SOCK
 #define WOLFSSL_USER_IO
-#define WOLFSSL_IGNORE_FILE_WARN
 #define WOLFSSL_SMALL_STACK
+#define WOLFSSL_USER_LOG
+#define NO_STDIO_FILESYSTEM
+#define NO_ERROR_STRINGS
 
 /* TLS 1.3 client only. */
 #define WOLFSSL_TLS13
@@ -61,6 +64,11 @@ extern int uefi_wolfssl_rng(unsigned char *output, unsigned int size);
 #define USER_TIME
 extern time_t uefi_wolfssl_time(time_t *timer);
 #define XTIME uefi_wolfssl_time
+
+#define XSNPRINTF uefi_wolfssl_snprintf
+#define XVSNPRINTF uefi_wolfssl_vsnprintf
+extern int uefi_wolfssl_snprintf(char *buffer, size_t size, const char *format, ...);
+extern int uefi_wolfssl_vsnprintf(char *buffer, size_t size, const char *format, va_list args);
 
 /* UEFI AllocatePool-backed allocator. Realloc is implemented with a size header. */
 #define XMALLOC_USER
