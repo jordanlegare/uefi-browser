@@ -154,12 +154,13 @@ static int64_t days_from_civil(int64_t year, unsigned int month, unsigned int da
     unsigned int year_of_era;
     unsigned int day_of_year;
     unsigned int day_of_era;
+    unsigned int adjusted_month;
 
     year -= month <= 2U;
     era = (year >= 0 ? year : year - 399) / 400;
     year_of_era = (unsigned int)(year - era * 400);
-    day_of_year = (153U * (month + (month > 2U ? (unsigned int)-3 : 9U)) + 2U) / 5U
-                  + day - 1U;
+    adjusted_month = month > 2U ? month - 3U : month + 9U;
+    day_of_year = (153U * adjusted_month + 2U) / 5U + day - 1U;
     day_of_era = year_of_era * 365U + year_of_era / 4U
                  - year_of_era / 100U + day_of_year;
     return era * 146097 + (int64_t)day_of_era - 719468;
@@ -184,7 +185,7 @@ static void civil_from_days(int64_t days, int64_t *year,
                     - year_of_era / 100U);
     month_prime = (5U * day_of_year + 2U) / 153U;
     *day = day_of_year - (153U * month_prime + 2U) / 5U + 1U;
-    *month = month_prime + (month_prime < 10U ? 3U : (unsigned int)-9);
+    *month = month_prime < 10U ? month_prime + 3U : month_prime - 9U;
     *year += *month <= 2U;
 }
 
