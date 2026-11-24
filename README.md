@@ -172,7 +172,7 @@ The C bridge uses the TLS 1.3 client method, sets `WOLFSSL_VERIFY_PEER`, loads t
 
 wolfSSL's custom I/O callbacks connect directly to the Rust `TlsStreamIo` trait, which retains ownership of the existing smoltcp TCP socket. The port does not use wolfSSL's default BSD socket functions.
 
-wolfCrypt obtains entropy through `CUSTOM_RAND_GENERATE_BLOCK`, which calls the Rust C-ABI adapter backed exclusively by EFI_RNG_PROTOCOL. Certificate time is supplied through wolfSSL's `USER_TIME`/`XTIME` hook and the validated UEFI Runtime Services clock. The custom `XMALLOC_USER` allocator routes memory to UEFI Boot Services AllocatePool/FreePool; no host malloc, OS clock, or weak random fallback is permitted.
+wolfCrypt obtains entropy through `CUSTOM_RAND_GENERATE_BLOCK`, which calls the Rust C-ABI adapter backed exclusively by EFI_RNG_PROTOCOL. Certificate time is supplied through wolfSSL's `USER_TIME`/`XTIME` hook and a freestanding `XGMTIME` UTC calendar conversion, both using the validated UEFI Runtime Services clock. The custom `XMALLOC_USER` allocator routes memory to UEFI Boot Services AllocatePool/FreePool; no host malloc, OS clock, or weak random fallback is permitted.
 
 The shared `vendor/wolfssl-bridge/include/user_settings.h` is used for both wolfSSL and the bridge build. It selects a single-threaded, no-filesystem, no-socket TLS 1.3 client while retaining RSA and ECC certificate verification algorithms, P-256/P-384/P-521, X25519, AES-GCM, ChaCha20-Poly1305, SHA-384 and SHA-512. TLS 1.2 is intentionally disabled in this first wolfSSL port.
 
