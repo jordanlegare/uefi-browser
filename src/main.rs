@@ -447,7 +447,9 @@ fn describe_tls_failure(error: &uefi_browser::tls::TlsError) -> String {
                 "TLS CERTIFICATE VERIFICATION FAILED\n{reason}\nVerifier code: {code}; X.509 error: {verify_error}\n{depth}\n{certificate}\n{suspicion}\nThe connection was blocked. Do not enter credentials or sensitive data.\nChecks performed by wolfSSL include chain signatures/path building, CA constraints, certificate validity times, and hostname identity where applicable. Revocation status (CRL/OCSP) is not currently checked."
             )
         }
-        _ => format!("TLS handshake failed: {error:?}\nThe connection was blocked; certificate verification was not bypassed."),
+        _ => format!(
+            "TLS handshake failed: {error:?}\nThe connection was blocked; certificate verification was not bypassed."
+        ),
     }
 }
 
