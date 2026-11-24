@@ -6,6 +6,7 @@ TARGET="x86_64-unknown-uefi"
 COFF_TARGET="x86_64-w64-mingw32"
 VERSION="5.9.4"
 SRC="$ROOT/vendor/wolfssl-$VERSION"
+BUILD="$ROOT/build/wolfssl-$VERSION"
 PREFIX="$ROOT/build/wolfssl-install"
 BRIDGE_BUILD="$ROOT/build/uefi-wolfssl-bridge"
 PLATFORM_INCLUDE="$ROOT/vendor/wolfssl-bridge/include"
@@ -17,39 +18,37 @@ if [[ ! -d "$MINGW_INCLUDE" ]]; then
   exit 1
 fi
 
+command -v cmake >/dev/null
+command -v ninja >/dev/null
 command -v clang >/dev/null
 command -v llvm-ar >/dev/null
-command -v llvm-ranlib >/dev/null
-command -v make >/dev/null
+command -v rustup >/dev/null
 command -v unzip >/dev/null
 rustup target add "$TARGET"
 
 bash "$ROOT/scripts/fetch-wolfssl.sh"
 
-rm -rf "$PREFIX" "$BRIDGE_BUILD"
+rm -rf "$BUILD" "$PREFIX" "$BRIDGE_BUILD"
 mkdir -p "$BRIDGE_BUILD"
 
-COMMON_CFLAGS="-O2 -ffreestanding -fno-builtin -fshort-wchar -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE"
+C_FLAGS="-O2 -ffreestanding -fno-builtin -fshort-wchar -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE"
 
-(
-  cd "$SRC"
-  CC="clang --target=$COFF_TARGET" \
-  AR=llvm-ar \
-  RANLIB=llvm-ranlib \
-  CFLAGS="$COMMON_CFLAGS" \
-  ./configure \
-    --host="$COFF_TARGET" \
-    --prefix="$PREFIX" \
-    --enable-usersettings \
-    --disable-shared \
-    --enable-static \
-    --disable-examples \
-    --disable-crypttests \
-    --disable-benchmark
-  make --jobs="$(nproc)"
-  make install
-)
+cmake -S "$SRC" -B "$BUILD" -G Ninja \
+  -DCMAKE_SYSTEM_NAME=Generic \
+  -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_C_COMPILER_TARGET="$COFF_TARGET" \
+  -DCMAKE_C_FLAGS="$C_FLAGS" \
+  -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DWOLFSSL_USER_SETTINGS=yes \
+  -DWOLFSSL_EXAMPLES=no \
+  -DWOLFSSL_CRYPT_TESTS=no
 
+cmake --build "$BUILD" --parallel
+cmake --install "$BUILD"
 test -s "$PREFIX/lib/libwolfssl.a"
 
 BRIDGE_CFLAGS="-std=c11 -O2 -ffreestanding -fno-builtin -fshort-wchar -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -I$SRC -I$PREFIX/include -isystem $MINGW_INCLUDE"
@@ -73,7 +72,6 @@ export UEFI_WOLFSSL_LIB_DIR="$PREFIX/lib"
 export UEFI_WOLFSSL_BRIDGE_DIR="$BRIDGE_BUILD"
 
 bash "$ROOT/scripts/update-ca-bundle.sh"
-
 if [[ -f "$ROOT/assets/cacert.pem" ]]; then
   source "$ROOT/scripts/check-ca-bundle.sh"
   export UEFI_CA_BUNDLE_PATH="$ROOT/assets/cacert.pem"
