@@ -22,8 +22,10 @@ type ReceiveCallback = unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> c_in
 
 unsafe extern "C" {
     fn uefi_wolfssl_client_new(
-        hostname: *const u8, hostname_len: usize,
-        ca_pem: *const u8, ca_pem_len: usize,
+        hostname: *const u8,
+        hostname_len: usize,
+        ca_pem: *const u8,
+        ca_pem_len: usize,
         io_context: *mut c_void,
         send_callback: Option<SendCallback>,
         receive_callback: Option<ReceiveCallback>,
@@ -85,7 +87,10 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
         if raw.is_null() {
             return Err(TlsError::Initialization(-1));
         }
-        Ok(Self { raw, _borrow: PhantomData })
+        Ok(Self {
+            raw,
+            _borrow: PhantomData,
+        })
     }
 
     /// wolfSSL verifies the peer during connect; the explicit result check is
@@ -146,7 +151,9 @@ impl<S: TlsStreamIo> Drop for TlsConnection<'_, S> {
 }
 
 unsafe extern "C" fn send_callback<S: TlsStreamIo>(
-    context: *mut c_void, data: *const u8, length: usize,
+    context: *mut c_void,
+    data: *const u8,
+    length: usize,
 ) -> c_int {
     if context.is_null() || (data.is_null() && length != 0) || length > c_int::MAX as usize {
         return -1;
@@ -165,7 +172,9 @@ unsafe extern "C" fn send_callback<S: TlsStreamIo>(
 }
 
 unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
-    context: *mut c_void, output: *mut u8, capacity: usize,
+    context: *mut c_void,
+    output: *mut u8,
+    capacity: usize,
 ) -> c_int {
     if context.is_null() || (output.is_null() && capacity != 0) || capacity > c_int::MAX as usize {
         return -1;
@@ -173,7 +182,9 @@ unsafe extern "C" fn receive_callback<S: TlsStreamIo>(
     if capacity == 0 {
         return 0;
     }
-    let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else { return -1; };
+    let Some(stream) = (unsafe { (context as *mut S).as_mut() }) else {
+        return -1;
+    };
     let buffer = unsafe { core::slice::from_raw_parts_mut(output, capacity) };
     match stream.receive(buffer) {
         Ok(read) if read <= c_int::MAX as usize => read as c_int,
