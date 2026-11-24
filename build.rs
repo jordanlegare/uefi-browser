@@ -34,6 +34,8 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", lib_dir.display());
         println!("cargo:rustc-link-lib=static=uefi_wolfssl_bridge");
         println!("cargo:rustc-link-lib=static=wolfssl");
+        // Re-scan the bridge archive for freestanding CRT symbols referenced by wolfSSL.
+        println!("cargo:rustc-link-lib=static=uefi_wolfssl_bridge");
         println!("cargo:rustc-cfg=uefi_wolfssl_linked");
     }
 
