@@ -68,11 +68,6 @@ impl SecureRandom for UefiRandom {
 /// Each request opens EFI_RNG_PROTOCOL for the duration of the read. This
 /// keeps protocol lifetime scoped to the call and ensures that missing or
 /// failing firmware RNG access propagates as an error (there is no fallback).
-#[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-unsafe extern "C" {
-    fn uefi_browser_tls_log(stage: i32, detail: i32);
-}
-
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn uefi_browser_fill_random(output: *mut u8, output_size: usize) -> i32 {
     if output_size == 0 {
@@ -84,17 +79,9 @@ pub unsafe extern "C" fn uefi_browser_fill_random(output: *mut u8, output_size: 
 
     // SAFETY: The C caller supplies a writable buffer of output_size bytes.
     let buffer = unsafe { core::slice::from_raw_parts_mut(output, output_size) };
-    #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-    unsafe {
-        uefi_browser_tls_log(20, output_size as i32)
-    };
     let mut random = match UefiRandom::open() {
         Ok(random) => random,
         Err(_) => {
-            #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-            unsafe {
-                uefi_browser_tls_log(21, -1)
-            };
             return -1;
         }
     };
@@ -102,10 +89,6 @@ pub unsafe extern "C" fn uefi_browser_fill_random(output: *mut u8, output_size: 
     let result = match random.fill(buffer) {
         Ok(()) => 0,
         Err(_) => -1,
-    };
-    #[cfg(all(target_os = "uefi", uefi_mbedtls_linked))]
-    unsafe {
-        uefi_browser_tls_log(21, result)
     };
     result
 }
