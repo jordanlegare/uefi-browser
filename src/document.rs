@@ -120,10 +120,9 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 continue;
             }
 
-            let Some(relative_end) = source[cursor..].find('>') else {
+            let Some(end) = find_tag_end(source, cursor) else {
                 break;
             };
-            let end = cursor + relative_end;
             let tag = source[cursor + 1..end].trim();
             cursor = end + 1;
             if tag.is_empty() || tag.starts_with('!') || tag.starts_with('?') {
@@ -516,6 +515,22 @@ fn is_block_tag(name: &str) -> bool {
     )
 }
 
+fn find_tag_end(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut quote = None;
+
+    for (index, byte) in bytes.iter().enumerate().skip(start) {
+        match quote {
+            Some(delimiter) if *byte == delimiter => quote = None,
+            Some(_) => {}
+            None if *byte == b'\'' || *byte == b'"' => quote = Some(*byte),
+            None if *byte == b'>' => return Some(index),
+            None => {}
+        }
+    }
+    None
+}
+
 fn attribute(tag: &str, wanted: &str) -> Option<String> {
     let bytes = tag.as_bytes();
     let mut at = tag
@@ -562,7 +577,7 @@ fn attribute(tag: &str, wanted: &str) -> Option<String> {
                 }
             } else {
                 let value_start = at;
-                while at < bytes.len() && !bytes[at].is_ascii_whitespace() && bytes[at] != b'/' {
+                while at < bytes.len() && !bytes[at].is_ascii_whitespace() {
                     at += 1;
                 }
                 value = tag[value_start..at].to_string();
@@ -658,6 +673,17 @@ mod tests {
                 .iter()
                 .any(|block| matches!(&block.kind, BlockKind::Preformatted))
         );
+    }
+
+    #[test]
+    fn preserves_slashes_in_unquoted_link_targets_and_quoted_tag_delimiters() {
+        let base = Url::parse("https://example.org/docs/").unwrap();
+        let page = parse_html(
+            "<p title=\"left > right\">Go to <a href=https://www.example.net/a/b?q=one>the page</a>.</p>",
+            &base,
+        );
+        assert_eq!(page.links[0].target, "https://www.example.net/a/b?q=one");
+        assert!(page.text.contains("the page [1]"));
     }
 
     #[test]
