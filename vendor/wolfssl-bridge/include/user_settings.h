@@ -64,12 +64,14 @@
 #define HAVE_TM_TYPE
 #define USER_TIME
 #define XTIME uefi_wolfssl_time
+#define XGMTIME uefi_wolfssl_gmtime
 
 #define XSNPRINTF uefi_wolfssl_snprintf
 #define XVSNPRINTF uefi_wolfssl_vsnprintf
 #ifndef __ASSEMBLER__
 extern int uefi_wolfssl_rng(unsigned char *output, unsigned int size);
 extern time_t uefi_wolfssl_time(time_t *timer);
+extern struct tm *uefi_wolfssl_gmtime(const time_t *timer, struct tm *result);
 extern int uefi_wolfssl_snprintf(char *buffer, size_t size, const char *format, ...);
 extern int uefi_wolfssl_vsnprintf(char *buffer, size_t size, const char *format, va_list args);
 #endif
