@@ -123,7 +123,7 @@ pub fn build_a_query(hostname: &str, transaction_id: u16) -> Result<alloc::vec::
     message.to_vec().map_err(|_| DnsError::EncodeFailed)
 }
 
-/// Validate a DNS response and return an A record owned by the queried name.
+/// Validate an A response, following at most eight CNAME aliases to an A owner.
 pub fn parse_a_response(
     packet: &[u8],
     expected_id: u16,
@@ -160,12 +160,31 @@ pub fn parse_a_response(
         return Err(DnsError::QuestionMismatch);
     }
 
-    for record in &message.answers {
-        if record.name == expected_name && record.dns_class == DNSClass::IN {
-            if let RData::A(address) = &record.data {
-                return Ok(address.0);
+    // Follow bounded CNAME chains in the validated answer section. DNS
+    // responses may return the address only for the final canonical owner.
+    let mut owner = expected_name;
+    for _ in 0..8 {
+        let mut alias = None;
+        for record in &message.answers {
+            if record.name != owner || record.dns_class != DNSClass::IN {
+                continue;
+            }
+            match &record.data {
+                RData::A(address) => return Ok(address.0),
+                RData::CNAME(cname) => {
+                    alias = Some(cname.0.clone());
+                    break;
+                }
+                _ => {}
             }
         }
+        let Some(next_owner) = alias else {
+            return Err(DnsError::NoAddress);
+        };
+        if next_owner == owner {
+            return Err(DnsError::NoAddress);
+        }
+        owner = next_owner;
     }
 
     Err(DnsError::NoAddress)
@@ -204,7 +223,7 @@ fn absolute_name(hostname: &str) -> Result<String, DnsError> {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
-    use hickory_proto::rr::{Record, rdata::A};
+    use hickory_proto::rr::{Record, rdata::{A, CNAME}};
 
     struct FixedRandom(u16);
 
@@ -276,6 +295,51 @@ mod tests {
         assert_eq!(
             parse_a_response(&response(0x7A31), 0x7A32, "example.org"),
             Err(DnsError::TransactionMismatch)
+        );
+    }
+
+    #[test]
+    fn follows_cname_chain_to_canonical_ipv4_address() {
+        let alias = Name::from_ascii("www.example.org.").unwrap();
+        let canonical = Name::from_ascii("edge.example.net.").unwrap();
+        let mut message = Message::new(0x7A31, MessageType::Response, OpCode::Query);
+        message.add_query(Query::query(alias.clone(), RecordType::A));
+        message.add_answer(Record::from_rdata(
+            alias,
+            60,
+            RData::CNAME(CNAME(canonical.clone())),
+        ));
+        message.add_answer(Record::from_rdata(
+            canonical,
+            60,
+            RData::A(A::new(203, 0, 113, 7)),
+        ));
+
+        assert_eq!(
+            parse_a_response(&message.to_vec().unwrap(), 0x7A31, "www.example.org"),
+            Ok(Ipv4Addr::new(203, 0, 113, 7))
+        );
+    }
+
+    #[test]
+    fn rejects_cname_loops() {
+        let queried = Name::from_ascii("www.example.org.").unwrap();
+        let alias = Name::from_ascii("alias.example.org.").unwrap();
+        let mut looped = Message::new(0x7A31, MessageType::Response, OpCode::Query);
+        looped.add_query(Query::query(queried.clone(), RecordType::A));
+        looped.add_answer(Record::from_rdata(
+            queried.clone(),
+            60,
+            RData::CNAME(CNAME(alias.clone())),
+        ));
+        looped.add_answer(Record::from_rdata(
+            alias,
+            60,
+            RData::CNAME(CNAME(queried.clone())),
+        ));
+        assert_eq!(
+            parse_a_response(&looped.to_vec().unwrap(), 0x7A31, "www.example.org"),
+            Err(DnsError::NoAddress)
         );
     }
 
