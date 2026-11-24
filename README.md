@@ -129,7 +129,7 @@ The SNP adapter and smoltcp integration are concrete implementations, not just t
 |---|---|
 | src/main.rs | UEFI entry point, interactive terminal navigation, redirect policy and page rendering |
 | src/url.rs | HTTP/HTTPS URL parsing, default ports, authority validation and relative URL resolution |
-| src/document.rs | Basic HTML visible-text and anchor extraction |
+| src/document.rs | Basic HTML visible-text/anchor extraction with public-domain ELinks named-entity data |
 | src/http.rs | HTTP/1.1 GET builder, response parsing, chunked decoding and stream exchange |
 | src/dns.rs | Hickory DNS A-query construction, bounded UDP exchange contract and response validation |
 | src/entropy.rs | Secure-random provider interface used by DNS; TLS uses wolfCrypt's EFI_RNG entropy driver |
@@ -216,6 +216,9 @@ The repository does not commit a periodically refreshed CA bundle by default. HT
 8. A maintained wolfSSL release with security fixes.
 
 ## URL and HTML core
+
+ELinks reuse is intentionally limited to its public-domain SGML/Unicode named-entity mapping table. The build generates a compact Rust decoder from `assets/elinks-entities.txt`; the EFI image does not link the ELinks GPLv2-only C application. See [ELinks reuse and UEFI porting boundary](docs/ELINKS-COMPATIBILITY.md) for the licensing and runtime rationale.
+
 
 src/url.rs accepts http:// and https://, defaults a bare hostname to HTTPS, applies ports 80 and 443, and resolves common absolute, scheme-relative, root-relative, and path-relative references. It rejects unknown schemes and URL user-information. IPv6 literal parsing is not implemented in this first pass.
 
