@@ -698,6 +698,15 @@ impl DocumentBuilder<'_> {
                         continue;
                     }
                     if child_style.display == DisplayMode::None {
+                        // Controls inside a CSS-hidden wrapper still appear in the
+                        // form's collected control list. Consume those nodes here
+                        // so they cannot block later visible controls from matching
+                        // the source-order cursor.
+                        while control_nodes.get(*next_control).is_some_and(|control| {
+                            *control == child || self.dom.ancestors(*control).contains(&child)
+                        }) {
+                            *next_control = next_control.saturating_add(1);
+                        }
                         continue;
                     }
 
@@ -1283,6 +1292,32 @@ mod tests {
         assert!(after_text < more_text);
         assert!(more_text < submit);
         assert_eq!(page.forms[0].controls[0].value, "uefi");
+    }
+
+    #[test]
+    fn controls_inside_hidden_subtrees_do_not_hide_following_visible_widgets() {
+        let base = Url::parse("https://www.google.com/").unwrap();
+        let page = parse_html(
+            "<form action=/search><div style='display:none'><div><input name=tracking value=x></div></div><div><textarea name=q aria-label=Search></textarea></div><button type=submit value=Search>Search</button></form>",
+            &base,
+        );
+
+        assert_eq!(page.forms.len(), 1);
+        assert_eq!(page.forms[0].controls.len(), 3);
+        let visible_controls = page
+            .blocks
+            .iter()
+            .filter_map(|block| match &block.kind {
+                BlockKind::FormControl {
+                    form_index: 0,
+                    control_index,
+                } => Some(*control_index),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(visible_controls, alloc::vec![1, 2]);
+        assert_eq!(page.forms[0].controls[1].name, "q");
+        assert_eq!(page.forms[0].controls[2].kind, FormControlKind::Submit);
     }
 
     #[test]
