@@ -36,7 +36,7 @@ unsafe extern "C" {
     fn uefi_wolfssl_last_time_unix() -> i64;
     fn uefi_wolfssl_last_verify_error() -> c_int;
     fn uefi_wolfssl_last_verify_depth() -> c_int;
-    fn uefi_wolfssl_last_peer_cert_count() -> c_int;
+    fn uefi_wolfssl_copy_bad_cert_sha256(output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_handshake(session: *mut RawTlsSession) -> c_int;
     fn uefi_wolfssl_read(session: *mut RawTlsSession, output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_write(session: *mut RawTlsSession, input: *const u8, length: usize) -> c_int;
@@ -57,7 +57,7 @@ pub enum TlsError {
         code: c_int,
         verify_error: c_int,
         verify_depth: c_int,
-        peer_cert_count: c_int,
+        failing_certificate_sha256: [u8; 32],
     },
     CertificateVerification(u32),
     Read(c_int),
@@ -124,7 +124,13 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
                 code: result,
                 verify_error: unsafe { uefi_wolfssl_last_verify_error() },
                 verify_depth: unsafe { uefi_wolfssl_last_verify_depth() },
-                peer_cert_count: unsafe { uefi_wolfssl_last_peer_cert_count() },
+                failing_certificate_sha256: {
+                    let mut fingerprint = [0u8; 32];
+                    let copied = unsafe {
+                        uefi_wolfssl_copy_bad_cert_sha256(fingerprint.as_mut_ptr(), fingerprint.len())
+                    };
+                    if copied == 32 { fingerprint } else { [0u8; 32] }
+                },
             });
         }
         let verification = unsafe { uefi_wolfssl_verify_result(self.raw) };
