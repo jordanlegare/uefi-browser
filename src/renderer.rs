@@ -701,6 +701,58 @@ mod tests {
     }
 
     #[test]
+    fn renders_current_form_values_and_masks_passwords() {
+        use crate::document::{Form, FormControl};
+
+        let document = Document {
+            forms: alloc::vec![Form {
+                action: "https://example.org/login".to_string(),
+                method: crate::document::FormMethod::Post,
+                controls: alloc::vec![
+                    FormControl {
+                        name: "user".to_string(),
+                        label: "Username".to_string(),
+                        value: "alice".to_string(),
+                        kind: FormControlKind::Text,
+                        required: true,
+                        disabled: false,
+                        checked: false,
+                        options: Vec::new(),
+                    },
+                    FormControl {
+                        name: "password".to_string(),
+                        label: "Password".to_string(),
+                        value: "secret".to_string(),
+                        kind: FormControlKind::Password,
+                        required: true,
+                        disabled: false,
+                        checked: false,
+                        options: Vec::new(),
+                    },
+                ],
+            }],
+            blocks: alloc::vec![
+                Block {
+                    kind: BlockKind::FormControl { form_index: 0, control_index: 0 },
+                    runs: Vec::new(),
+                    style: ComputedStyle::default(),
+                },
+                Block {
+                    kind: BlockKind::FormControl { form_index: 0, control_index: 1 },
+                    runs: Vec::new(),
+                    style: ComputedStyle::default(),
+                },
+            ],
+            ..Document::default()
+        };
+        let lines = layout_document(&document, 60);
+        let rendered = lines.iter().map(RenderLine::plain_text).collect::<Vec<_>>().join("\n");
+        assert!(rendered.contains("Username: [alice]"));
+        assert!(rendered.contains("Password: [******]"));
+        assert!(!rendered.contains("secret"));
+    }
+
+    #[test]
     fn recognizes_double_width_and_combining_characters() {
         assert_eq!(character_width('界'), 2);
         assert_eq!(character_width('e'), 1);
