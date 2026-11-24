@@ -64,12 +64,24 @@ struct CompoundSelector {
     tag: Option<String>,
     id: Option<String>,
     classes: Vec<String>,
+    attributes: Vec<(String, Option<String>)>,
+    pseudo_classes: Vec<PseudoClass>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum PseudoClass {
+    FirstChild,
+    LastChild,
+    OnlyChild,
+    Empty,
+    NthChild(usize),
 }
 
 #[derive(Clone, Debug)]
 struct Declaration {
     property: String,
     value: String,
+    important: bool,
 }
 
 impl StyleSheet {
@@ -145,14 +157,18 @@ impl StyleSheet {
         }
 
         matched.sort_by_key(|(specificity, order, _)| (*specificity, *order));
-        for (_, _, declarations) in matched {
-            for declaration in &declarations {
-                apply_declaration(&mut result, &declaration.property, &declaration.value);
-            }
-        }
+        let inline = dom.attr(node, "style").map(parse_declarations).unwrap_or_default();
 
-        if let Some(inline) = dom.attr(node, "style") {
-            for declaration in parse_declarations(inline) {
+        // Normal declarations cascade first; important declarations cascade
+        // in a second pass so a lower-specificity !important rule still wins
+        // over a normal inline declaration.
+        for important in [false, true] {
+            for (_, _, declarations) in &matched {
+                for declaration in declarations.iter().filter(|item| item.important == important) {
+                    apply_declaration(&mut result, &declaration.property, &declaration.value);
+                }
+            }
+            for declaration in inline.iter().filter(|item| item.important == important) {
                 apply_declaration(&mut result, &declaration.property, &declaration.value);
             }
         }
@@ -403,22 +419,67 @@ fn nearest_terminal_color(r: u8, g: u8, b: u8) -> TermColor {
 }
 
 fn parse_declarations(input: &str) -> Vec<Declaration> {
-    input
-        .split(';')
-        .filter_map(|part| {
-            let (property, value) = part.split_once(':')?;
-            let property = property.trim();
-            let value = value.trim().trim_end_matches("!important").trim();
-            if property.is_empty() || value.is_empty() {
-                None
-            } else {
-                Some(Declaration {
-                    property: property.to_ascii_lowercase(),
-                    value: value.to_string(),
-                })
+    let mut declarations = Vec::new();
+    let mut start = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut parentheses = 0usize;
+    for (index, character) in input.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\\\' && quote.is_some() {
+            escaped = true;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if character == delimiter {
+                quote = None;
             }
+            continue;
+        }
+        match character {
+            '\\'' | '"' => quote = Some(character),
+            '(' => parentheses = parentheses.saturating_add(1),
+            ')' => parentheses = parentheses.saturating_sub(1),
+            ';' if parentheses == 0 => {
+                if let Some(item) = parse_declaration(&input[start..index]) {
+                    declarations.push(item);
+                }
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if let Some(item) = parse_declaration(&input[start..]) {
+        declarations.push(item);
+    }
+    declarations
+}
+
+fn parse_declaration(part: &str) -> Option<Declaration> {
+    let (property, value) = part.split_once(':')?;
+    let property = property.trim();
+    let value = value.trim();
+    let important = value
+        .to_ascii_lowercase()
+        .trim_end()
+        .ends_with("!important");
+    let value = if important {
+        value[..value.len().saturating_sub("!important".len())].trim()
+    } else {
+        value
+    };
+    if property.is_empty() || value.is_empty() {
+        None
+    } else {
+        Some(Declaration {
+            property: property.to_ascii_lowercase(),
+            value: value.to_string(),
+            important,
         })
-        .collect()
+    }
 }
 
 fn strip_comments(input: &str) -> String {
@@ -443,34 +504,104 @@ fn parse_selector(input: &str) -> Option<Selector> {
         let mut compound = CompoundSelector::default();
         let bytes = token.as_bytes();
         let mut cursor = 0usize;
-        if cursor < bytes.len() && bytes[cursor] != b'#' && bytes[cursor] != b'.' {
+        if cursor < bytes.len() && bytes[cursor] != b'#'
+            && bytes[cursor] != b'.' && bytes[cursor] != b'[' && bytes[cursor] != b':'
+            && bytes[cursor] != b'*'
+        {
             let start = cursor;
-            while cursor < bytes.len() && bytes[cursor] != b'#' && bytes[cursor] != b'.' {
+            while cursor < bytes.len()
+                && !matches!(bytes[cursor], b'#' | b'.' | b'[' | b':' | b'*')
+            {
                 cursor += 1;
             }
             compound.tag = Some(token[start..cursor].to_ascii_lowercase());
             specificity = specificity.saturating_add(1);
+        } else if bytes.get(cursor) == Some(&b'*') {
+            cursor += 1;
         }
         while cursor < bytes.len() {
-            let kind = bytes[cursor];
-            cursor += 1;
-            let start = cursor;
-            while cursor < bytes.len() && bytes[cursor] != b'#' && bytes[cursor] != b'.' {
-                cursor += 1;
-            }
-            if start == cursor {
-                continue;
-            }
-            let value = token[start..cursor].to_string();
-            if kind == b'#' {
-                compound.id = Some(value);
-                specificity = specificity.saturating_add(100);
-            } else if kind == b'.' {
-                compound.classes.push(value);
-                specificity = specificity.saturating_add(10);
+            match bytes[cursor] {
+                b'#' | b'.' => {
+                    let kind = bytes[cursor];
+                    cursor += 1;
+                    let start = cursor;
+                    while cursor < bytes.len()
+                        && !matches!(bytes[cursor], b'#' | b'.' | b'[' | b':')
+                    {
+                        cursor += 1;
+                    }
+                    if start == cursor {
+                        return None;
+                    }
+                    let value = token[start..cursor].to_string();
+                    if kind == b'#' {
+                        compound.id = Some(value);
+                        specificity = specificity.saturating_add(100);
+                    } else {
+                        compound.classes.push(value);
+                        specificity = specificity.saturating_add(10);
+                    }
+                }
+                b'[' => {
+                    let start = cursor + 1;
+                    let end = token[start..].find(']')? + start;
+                    let expression = token[start..end].trim();
+                    if expression.is_empty() {
+                        return None;
+                    }
+                    let (name, value) = if let Some((name, value)) = expression.split_once('=') {
+                        let value = value.trim().trim_matches(['\\'', '"']).to_string();
+                        (name.trim().to_ascii_lowercase(), Some(value))
+                    } else {
+                        (expression.to_ascii_lowercase(), None)
+                    };
+                    if name.is_empty() {
+                        return None;
+                    }
+                    compound.attributes.push((name, value));
+                    specificity = specificity.saturating_add(10);
+                    cursor = end + 1;
+                }
+                b':' => {
+                    cursor += 1;
+                    let start = cursor;
+                    while cursor < bytes.len()
+                        && (bytes[cursor].is_ascii_alphanumeric() || bytes[cursor] == b'-')
+                    {
+                        cursor += 1;
+                    }
+                    let name = token[start..cursor].to_ascii_lowercase();
+                    let pseudo = match name.as_str() {
+                        "first-child" => PseudoClass::FirstChild,
+                        "last-child" => PseudoClass::LastChild,
+                        "only-child" => PseudoClass::OnlyChild,
+                        "empty" => PseudoClass::Empty,
+                        "nth-child" => {
+                            if bytes.get(cursor) != Some(&b'(') {
+                                return None;
+                            }
+                            let end = token[cursor + 1..].find(')')? + cursor + 1;
+                            let index = token[cursor + 1..end].trim().parse::<usize>().ok()?;
+                            if index == 0 {
+                                return None;
+                            }
+                            cursor = end + 1;
+                            PseudoClass::NthChild(index)
+                        }
+                        _ => return None,
+                    };
+                    compound.pseudo_classes.push(pseudo);
+                    specificity = specificity.saturating_add(10);
+                }
+                _ => return None,
             }
         }
-        if compound.tag.is_some() || compound.id.is_some() || !compound.classes.is_empty() {
+        if compound.tag.is_some()
+            || compound.id.is_some()
+            || !compound.classes.is_empty()
+            || !compound.attributes.is_empty()
+            || !compound.pseudo_classes.is_empty()
+        {
             compounds.push(compound);
         }
     }
@@ -533,6 +664,44 @@ fn matches_compound(dom: &Dom, node: NodeId, selector: &CompoundSelector) -> boo
             return false;
         }
     }
+    for (name, expected) in &selector.attributes {
+        let Some(actual) = dom.attr(node, name) else {
+            return false;
+        };
+        if expected.as_ref().is_some_and(|value| actual != value) {
+            return false;
+        }
+    }
+    if !selector.pseudo_classes.is_empty() {
+        let Some(parent) = dom.nodes.get(node).and_then(|item| item.parent) else {
+            return false;
+        };
+        let siblings: Vec<NodeId> = dom
+            .children(parent)
+            .iter()
+            .copied()
+            .filter(|id| dom.tag(*id).is_some())
+            .collect();
+        let Some(position) = siblings.iter().position(|id| *id == node) else {
+            return false;
+        };
+        for pseudo in &selector.pseudo_classes {
+            let matches = match pseudo {
+                PseudoClass::FirstChild => position == 0,
+                PseudoClass::LastChild => position + 1 == siblings.len(),
+                PseudoClass::OnlyChild => siblings.len() == 1,
+                PseudoClass::NthChild(index) => position + 1 == *index,
+                PseudoClass::Empty => {
+                    dom.children(node).iter().all(|child| {
+                        matches!(dom.nodes[*child].kind, crate::html5::NodeKind::Comment)
+                    })
+                }
+            };
+            if !matches {
+                return false;
+            }
+        }
+    }
     true
 }
 
@@ -560,6 +729,30 @@ mod tests {
         assert_eq!(parse_color("#éa"), None);
         assert_eq!(parse_color("#zzzzzz"), None);
         assert_eq!(parse_color("#abc"), Some(TermColor::LightGray));
+    }
+
+    #[test]
+    fn important_and_inline_cascade_order_is_respected() {
+        let dom = build_tree(
+            "<style>.field{color:red!important}.field{font-weight:bold}</style><input class=field style='color:blue;font-weight:normal'>",
+        );
+        let input = dom.find_by_tag(dom.root, "input")[0];
+        let style = StyleSheet::from_dom(&dom).compute(&dom, input, &ComputedStyle::default());
+        assert_eq!(style.foreground, Some(TermColor::LightRed));
+        assert!(!style.bold);
+    }
+
+    #[test]
+    fn matches_attribute_and_basic_structural_selectors() {
+        let dom = build_tree(
+            "<style>form .field[type=search]:first-child{color:green} form input:last-child{font-weight:bold}</style><form><input class=field type=search><input name=submit></form>",
+        );
+        let inputs = dom.find_by_tag(dom.root, "input");
+        let sheet = StyleSheet::from_dom(&dom);
+        let first = sheet.compute(&dom, inputs[0], &ComputedStyle::default());
+        let last = sheet.compute(&dom, inputs[1], &ComputedStyle::default());
+        assert_eq!(first.foreground, Some(TermColor::DarkGreen));
+        assert!(last.bold);
     }
 
     #[test]
