@@ -25,8 +25,6 @@ BRIDGE_PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE="uefi_tf_psa_con
 
 bash "$ROOT/scripts/fetch-mbedtls.sh"
 
-# Add narrowly scoped, idempotent checkpoints around TLS 1.2/1.3 server-certificate processing.
-bash "$ROOT/scripts/patch-mbedtls-handshake.sh" "$SRC"
 # Instrument the ECDSA -> PSA -> ECC verification path without changing verification policy.
 bash "$ROOT/scripts/patch-mbedtls-ecdsa.sh" "$SRC"
 
