@@ -7,12 +7,14 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use uefi::proto::console::text::Key;
+use core::fmt::Write as _;
+use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::{Status, helpers, system};
 
 use uefi_browser::document::{Document, Link, parse_html};
 use uefi_browser::http::{self, HttpResponse};
 use uefi_browser::network::connect_firmware_url;
+use uefi_browser::renderer::{self, RenderLine};
 use uefi_browser::url::{Scheme, Url};
 
 const MAX_BODY_BYTES: usize = 256 * 1024;
@@ -22,9 +24,7 @@ const MAX_INPUT_BYTES: usize = 2048;
 struct BrowserPage {
     url: Url,
     status: u16,
-    title: String,
-    text: String,
-    links: Vec<Link>,
+    document: Document,
 }
 
 #[uefi::entry]
@@ -150,110 +150,7 @@ fn main() -> Status {
             }
         }
     };
-    let mut navigation_error: Option<String> = None;
-
-    loop {
-        render_page(&page, navigation_error.as_deref());
-        let prompt = format!("\n{} > ", page.url.as_string());
-        let Some(command) = read_line(&prompt, network) else {
-            break;
-        };
-        let command = command.trim();
-
-        if command.is_empty() {
-            continue;
-        }
-        if matches!(command, "q" | "quit" | "exit") {
-            break;
-        }
-        if matches!(command, "help" | "?") {
-            print_help();
-            continue;
-        }
-        if command == "links" {
-            render_links(&page.links);
-            continue;
-        }
-        if command == "clear" {
-            continue;
-        }
-        if let Some(query) = command.strip_prefix("search ") {
-            search_page(&page, query);
-            continue;
-        }
-
-        let mut target_index = None;
-        let target_url;
-        let mut add_history = false;
-
-        match command {
-            "back" => {
-                if history_index == 0 {
-                    uefi::println!("No previous page.");
-                    continue;
-                }
-                target_index = Some(history_index - 1);
-                target_url = Some(history[history_index - 1].clone());
-            }
-            "forward" => {
-                if history_index + 1 >= history.len() {
-                    uefi::println!("No forward page.");
-                    continue;
-                }
-                target_index = Some(history_index + 1);
-                target_url = Some(history[history_index + 1].clone());
-            }
-            "reload" => {
-                target_url = Some(page.url.clone());
-            }
-            other => {
-                let argument = other.strip_prefix("open ").unwrap_or(other).trim();
-                if let Ok(number) = argument.parse::<usize>() {
-                    if number == 0 || number > page.links.len() {
-                        uefi::println!("No link with that number.");
-                        continue;
-                    }
-                    target_url = match Url::parse(&page.links[number - 1].target) {
-                        Ok(url) => Some(url),
-                        Err(error) => {
-                            uefi::println!("Invalid link target: {error}");
-                            continue;
-                        }
-                    };
-                } else {
-                    target_url = match Url::parse(argument) {
-                        Ok(url) => Some(url),
-                        Err(error) => {
-                            uefi::println!("Invalid address: {error}");
-                            continue;
-                        }
-                    };
-                }
-                add_history = true;
-            }
-        }
-
-        let Some(target) = target_url else {
-            continue;
-        };
-
-        match fetch_document(&target, network) {
-            Ok(next_page) => {
-                if let Some(index) = target_index {
-                    history_index = index;
-                } else if add_history {
-                    history.truncate(history_index + 1);
-                    history.push(next_page.url.clone());
-                    history_index = history.len() - 1;
-                }
-                page = next_page;
-                navigation_error = None;
-            }
-            Err(error) => {
-                navigation_error = Some(error);
-            }
-        }
-    }
+    run_browser_ui(&mut page, &mut history, &mut history_index, network);
 
     uefi::println!("\nLeaving UEFI Browser and returning to firmware.");
     Status::SUCCESS
@@ -294,28 +191,21 @@ fn fetch_document(
         let document = if content_type.to_ascii_lowercase().starts_with("text/html") {
             parse_html(&body, &current)
         } else if content_type.to_ascii_lowercase().starts_with("text/plain") {
-            Document {
-                title: current.host.clone(),
-                text: body,
-                links: Vec::new(),
-            }
+            Document::from_plain(&current.host, &body)
         } else {
-            Document {
-                title: current.host.clone(),
-                text: format!(
+            Document::from_plain(
+                &current.host,
+                &format!(
                     "This text browser does not render Content-Type: {content_type}\n{} bytes received.",
                     response.body.len()
                 ),
-                links: Vec::new(),
-            }
+            )
         };
 
         return Ok(BrowserPage {
             url: current,
             status: response.status,
-            title: document.title,
-            text: document.text,
-            links: document.links,
+            document,
         });
     }
 
@@ -862,31 +752,562 @@ fn describe_tls_failure(error: &uefi_browser::tls::TlsError) -> String {
     }
 }
 
-fn render_page(page: &BrowserPage, navigation_error: Option<&str>) {
-    clear_screen();
-    uefi::println!("+--------------------------------------------------------------------------+");
-    uefi::println!("| UEFI BROWSER                                                             |");
-    uefi::println!("+--------------------------------------------------------------------------+");
-    uefi::println!("Title:  {}", page.title);
-    uefi::println!("URL:    {}", page.url.as_string());
-    uefi::println!("HTTP:   {}", page.status);
-    uefi::println!("--------------------------------------------------------------------------");
-    if let Some(error) = navigation_error {
-        uefi::println!("NAVIGATION ERROR: {error}");
-        uefi::println!("Previous page remains available. Enter a new URL or 'reload'.");
-        uefi::println!(
-            "--------------------------------------------------------------------------"
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BrowserAction {
+    Quit,
+    Back,
+    Forward,
+    Reload,
+    Goto,
+    Search,
+    Command,
+    Help,
+    Links,
+    ScrollUp,
+    ScrollDown,
+    PageUp,
+    PageDown,
+    Top,
+    Bottom,
+    NextLink,
+    PreviousLink,
+    ActivateLink,
+    FindNext,
+}
+
+fn run_browser_ui(
+    page: &mut BrowserPage,
+    history: &mut Vec<Url>,
+    history_index: &mut usize,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) {
+    let mut first_line = 0usize;
+    let mut selected_link: Option<usize> = None;
+    let mut navigation_error: Option<String> = None;
+    let mut status = String::from("Ready");
+    let mut last_search = String::new();
+
+    loop {
+        let (columns, rows) = terminal_dimensions();
+        let content_width = columns.saturating_sub(2).max(8);
+        let content_height = rows.saturating_sub(5).max(1);
+        let lines = renderer::layout_document(&page.document, content_width);
+        let max_first = lines.len().saturating_sub(content_height);
+        first_line = first_line.min(max_first);
+
+        if selected_link.is_some_and(|index| index >= page.document.links.len()) {
+            selected_link = None;
+        }
+
+        render_terminal_page(
+            page,
+            &lines,
+            first_line,
+            content_height,
+            selected_link,
+            navigation_error.as_deref(),
+            &status,
         );
+
+        let Some(action) = read_browser_action(network) else {
+            break;
+        };
+
+        let command = match action {
+            BrowserAction::Quit => break,
+            BrowserAction::ScrollUp => {
+                first_line = first_line.saturating_sub(1);
+                status = String::from("Scrolled up");
+                continue;
+            }
+            BrowserAction::ScrollDown => {
+                first_line = first_line.saturating_add(1).min(max_first);
+                status = String::from("Scrolled down");
+                continue;
+            }
+            BrowserAction::PageUp => {
+                first_line = first_line.saturating_sub(content_height.saturating_sub(1).max(1));
+                status = String::from("Previous screen");
+                continue;
+            }
+            BrowserAction::PageDown => {
+                first_line = first_line
+                    .saturating_add(content_height.saturating_sub(1).max(1))
+                    .min(max_first);
+                status = String::from("Next screen");
+                continue;
+            }
+            BrowserAction::Top => {
+                first_line = 0;
+                status = String::from("Top of document");
+                continue;
+            }
+            BrowserAction::Bottom => {
+                first_line = max_first;
+                status = String::from("End of document");
+                continue;
+            }
+            BrowserAction::NextLink => {
+                if page.document.links.is_empty() {
+                    status = String::from("No links on this page");
+                } else {
+                    let next =
+                        selected_link.map_or(0, |index| (index + 1) % page.document.links.len());
+                    selected_link = Some(next);
+                    reveal_link(&lines, next, &mut first_line, content_height);
+                    status = format!("Link {}/{}", next + 1, page.document.links.len());
+                }
+                continue;
+            }
+            BrowserAction::PreviousLink => {
+                if page.document.links.is_empty() {
+                    status = String::from("No links on this page");
+                } else {
+                    let previous = selected_link.map_or(page.document.links.len() - 1, |index| {
+                        if index == 0 {
+                            page.document.links.len() - 1
+                        } else {
+                            index - 1
+                        }
+                    });
+                    selected_link = Some(previous);
+                    reveal_link(&lines, previous, &mut first_line, content_height);
+                    status = format!("Link {}/{}", previous + 1, page.document.links.len());
+                }
+                continue;
+            }
+            BrowserAction::ActivateLink => {
+                if let Some(index) = selected_link {
+                    format!("open {}", index + 1)
+                } else {
+                    status = String::from("Press TAB to focus a link, then ENTER to open it");
+                    continue;
+                }
+            }
+            BrowserAction::Goto => {
+                let Some(value) = read_line("Go to URL: ", network) else {
+                    continue;
+                };
+                if value.trim().is_empty() {
+                    continue;
+                }
+                format!("open {}", value.trim())
+            }
+            BrowserAction::Search => {
+                let Some(query) = read_line("Find text: ", network) else {
+                    continue;
+                };
+                if query.trim().is_empty() {
+                    continue;
+                }
+                last_search = query.trim().to_string();
+                let found = renderer::find_line(&lines, &last_search, first_line.saturating_add(1))
+                    .or_else(|| renderer::find_line(&lines, &last_search, 0));
+                if let Some(line) = found {
+                    first_line = line.min(max_first);
+                    status = format!("Found: {}", last_search);
+                } else {
+                    status = format!("Not found: {}", last_search);
+                }
+                continue;
+            }
+            BrowserAction::FindNext => {
+                if last_search.is_empty() {
+                    status = String::from("Use / to search the page first");
+                } else {
+                    let found =
+                        renderer::find_line(&lines, &last_search, first_line.saturating_add(1))
+                            .or_else(|| renderer::find_line(&lines, &last_search, 0));
+                    if let Some(line) = found {
+                        first_line = line.min(max_first);
+                        status = format!("Next match: {}", last_search);
+                    } else {
+                        status = format!("No match: {}", last_search);
+                    }
+                }
+                continue;
+            }
+            BrowserAction::Command => {
+                let Some(value) = read_line(": ", network) else {
+                    continue;
+                };
+                value
+            }
+            BrowserAction::Back => String::from("back"),
+            BrowserAction::Forward => String::from("forward"),
+            BrowserAction::Reload => String::from("reload"),
+            BrowserAction::Help => {
+                print_help();
+                let _ = read_line("Press ENTER to return: ", network);
+                status = String::from("Help closed");
+                continue;
+            }
+            BrowserAction::Links => {
+                render_links(&page.document.links);
+                let _ = read_line("Press ENTER to return: ", network);
+                status = String::from("Link list closed");
+                continue;
+            }
+        };
+
+        let command = command.trim();
+        if command.is_empty() {
+            continue;
+        }
+        if matches!(command, "q" | "quit" | "exit") {
+            break;
+        }
+        if matches!(command, "help" | "?") {
+            print_help();
+            let _ = read_line("Press ENTER to return: ", network);
+            continue;
+        }
+        if command == "links" {
+            render_links(&page.document.links);
+            let _ = read_line("Press ENTER to return: ", network);
+            continue;
+        }
+        if command == "clear" {
+            continue;
+        }
+        if let Some(query) = command.strip_prefix("search ") {
+            let found = renderer::find_line(&lines, query, first_line.saturating_add(1))
+                .or_else(|| renderer::find_line(&lines, query, 0));
+            if let Some(line) = found {
+                first_line = line.min(max_first);
+                status = format!("Found: {}", query.trim());
+            } else {
+                status = format!("Not found: {}", query.trim());
+            }
+            last_search = query.trim().to_string();
+            continue;
+        }
+
+        let mut target_index = None;
+        let target_url;
+        let mut add_history = false;
+
+        match command {
+            "back" => {
+                if *history_index == 0 {
+                    status = String::from("No previous page");
+                    continue;
+                }
+                target_index = Some(*history_index - 1);
+                target_url = Some(history[*history_index - 1].clone());
+            }
+            "forward" => {
+                if *history_index + 1 >= history.len() {
+                    status = String::from("No forward page");
+                    continue;
+                }
+                target_index = Some(*history_index + 1);
+                target_url = Some(history[*history_index + 1].clone());
+            }
+            "reload" => {
+                target_url = Some(page.url.clone());
+            }
+            other => {
+                let argument = other.strip_prefix("open ").unwrap_or(other).trim();
+                if let Ok(number) = argument.parse::<usize>() {
+                    if number == 0 || number > page.document.links.len() {
+                        status = String::from("No link with that number");
+                        continue;
+                    }
+                    target_url = match Url::parse(&page.document.links[number - 1].target) {
+                        Ok(url) => Some(url),
+                        Err(error) => {
+                            status = format!("Invalid link target: {error}");
+                            continue;
+                        }
+                    };
+                } else {
+                    target_url = match Url::parse(argument) {
+                        Ok(url) => Some(url),
+                        Err(error) => {
+                            status = format!("Invalid address: {error}");
+                            continue;
+                        }
+                    };
+                }
+                add_history = true;
+            }
+        }
+
+        let Some(target) = target_url else {
+            continue;
+        };
+
+        status = format!("Loading {}", target.as_string());
+        render_terminal_page(
+            page,
+            &lines,
+            first_line,
+            content_height,
+            selected_link,
+            None,
+            &status,
+        );
+        match fetch_document(&target, network) {
+            Ok(next_page) => {
+                if let Some(index) = target_index {
+                    *history_index = index;
+                } else if add_history {
+                    history.truncate(*history_index + 1);
+                    history.push(next_page.url.clone());
+                    *history_index = history.len() - 1;
+                }
+                *page = next_page;
+                navigation_error = None;
+                first_line = 0;
+                selected_link = None;
+                last_search.clear();
+                status = format!("Loaded HTTP {}", page.status);
+            }
+            Err(error) => {
+                navigation_error = Some(error);
+                status = String::from("Navigation failed; previous page retained");
+            }
+        }
     }
-    uefi::println!("{}", page.text);
-    if !page.links.is_empty() {
-        uefi::println!("");
-        render_links(&page.links);
+}
+
+fn reveal_link(lines: &[RenderLine], link: usize, first_line: &mut usize, height: usize) {
+    if let Some(line) = renderer::line_for_link(lines, link) {
+        if line < *first_line {
+            *first_line = line;
+        } else if line >= (*first_line).saturating_add(height) {
+            *first_line = line.saturating_sub(height.saturating_sub(1));
+        }
     }
-    uefi::println!("");
-    uefi::println!(
-        "Commands: open N | URL | back | forward | reload | links | search WORD | help | quit"
+}
+
+fn read_browser_action(
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+) -> Option<BrowserAction> {
+    loop {
+        network.poll();
+        let key = system::with_stdin(|input| input.read_key().ok().flatten());
+        match key {
+            Some(Key::Printable(unit)) => {
+                let character: char = unit.into();
+                match character {
+                    'q' | '\u{3}' => return Some(BrowserAction::Quit),
+                    'g' | 'o' => return Some(BrowserAction::Goto),
+                    '/' => return Some(BrowserAction::Search),
+                    ':' => return Some(BrowserAction::Command),
+                    'b' => return Some(BrowserAction::Back),
+                    'f' => return Some(BrowserAction::Forward),
+                    'r' => return Some(BrowserAction::Reload),
+                    'h' | '?' => return Some(BrowserAction::Help),
+                    'l' => return Some(BrowserAction::Links),
+                    'n' => return Some(BrowserAction::FindNext),
+                    'j' => return Some(BrowserAction::ScrollDown),
+                    'k' => return Some(BrowserAction::ScrollUp),
+                    ' ' => return Some(BrowserAction::PageDown),
+                    '\t' => return Some(BrowserAction::NextLink),
+                    '\r' | '\n' => return Some(BrowserAction::ActivateLink),
+                    '[' => return Some(BrowserAction::PreviousLink),
+                    _ => {}
+                }
+            }
+            Some(Key::Special(code)) => match code {
+                ScanCode::UP => return Some(BrowserAction::ScrollUp),
+                ScanCode::DOWN => return Some(BrowserAction::ScrollDown),
+                ScanCode::PAGE_UP => return Some(BrowserAction::PageUp),
+                ScanCode::PAGE_DOWN => return Some(BrowserAction::PageDown),
+                ScanCode::HOME => return Some(BrowserAction::Top),
+                ScanCode::END => return Some(BrowserAction::Bottom),
+                ScanCode::ESCAPE => return Some(BrowserAction::PreviousLink),
+                _ => {}
+            },
+            None => {
+                uefi::boot::stall(core::time::Duration::from_micros(2_000));
+            }
+        }
+    }
+}
+
+fn terminal_dimensions() -> (usize, usize) {
+    let mut dimensions = (80usize, 25usize);
+    let _ = system::with_stdout(|output| {
+        if let Ok(Some(mode)) = output.current_mode() {
+            dimensions = (mode.columns().max(20), mode.rows().max(10));
+        }
+    });
+    dimensions
+}
+
+fn render_terminal_page(
+    page: &BrowserPage,
+    lines: &[RenderLine],
+    first_line: usize,
+    content_height: usize,
+    selected_link: Option<usize>,
+    navigation_error: Option<&str>,
+    status: &str,
+) {
+    let (width, height) = terminal_dimensions();
+    let width = width.max(20);
+    let content_height = content_height.min(height.saturating_sub(5).max(1));
+
+    let header = format!(
+        " UEFI BROWSER  |  HTTP {}  |  {}",
+        page.status, page.document.title
     );
+    let address = format!(" URL  {}", page.url.as_string());
+    let status_line = navigation_error.unwrap_or(status);
+    let footer =
+        " TAB link  ENTER open  arrows scroll  PGUP/PGDN page  g go  / find  : command  q quit";
+
+    let _ = system::with_stdout(|output| {
+        let _ = output.clear();
+        write_console_row(output, 0, width, Color::LightCyan, Color::Blue, &header);
+        write_console_row(output, 1, width, Color::White, Color::Black, &address);
+        write_console_row(
+            output,
+            2,
+            width,
+            Color::DarkGray,
+            Color::Black,
+            &"-".repeat(width),
+        );
+
+        for row in 0..content_height {
+            let line_index = first_line + row;
+            let screen_row = 3 + row;
+            let _ = output.set_cursor_position(0, screen_row);
+            let _ = output.set_color(Color::LightGray, Color::Black);
+            if let Some(line) = lines.get(line_index) {
+                write_render_line(output, line, width, selected_link);
+            } else {
+                write_console_text(output, " ");
+            }
+            let remaining = width.saturating_sub(
+                lines
+                    .get(line_index)
+                    .map_or(0, |line| line.width.min(width)),
+            );
+            if remaining > 0 {
+                let _ = output.set_color(Color::LightGray, Color::Black);
+                let _ = write!(output, "{}", " ".repeat(remaining));
+            }
+        }
+
+        let status_row = height.saturating_sub(2);
+        write_console_row(
+            output,
+            status_row,
+            width,
+            if navigation_error.is_some() {
+                Color::LightRed
+            } else {
+                Color::Yellow
+            },
+            Color::Black,
+            &format!(
+                " {}  |  line {}/{}",
+                status_line,
+                first_line.saturating_add(1).min(lines.len().max(1)),
+                lines.len()
+            ),
+        );
+        write_console_row(
+            output,
+            height.saturating_sub(1),
+            width,
+            Color::LightCyan,
+            Color::Black,
+            footer,
+        );
+        let _ = output.set_cursor_position(0, height.saturating_sub(1));
+    });
+}
+
+fn write_console_row(
+    output: &mut uefi::proto::console::text::Output,
+    row: usize,
+    width: usize,
+    foreground: Color,
+    background: Color,
+    text: &str,
+) {
+    let _ = output.set_cursor_position(0, row);
+    let _ = output.set_color(foreground, background);
+    let clipped = clip_text(text, width);
+    write_console_text(output, &clipped);
+    let used = clipped
+        .chars()
+        .map(renderer::character_width)
+        .sum::<usize>();
+    if used < width {
+        let _ = write!(output, "{}", " ".repeat(width - used));
+    }
+}
+
+fn write_render_line(
+    output: &mut uefi::proto::console::text::Output,
+    line: &RenderLine,
+    width: usize,
+    selected_link: Option<usize>,
+) {
+    let mut used = 0usize;
+    for span in &line.spans {
+        if used >= width {
+            break;
+        }
+        let selected = span.link.is_some() && span.link == selected_link;
+        let (foreground, background) = if selected {
+            (Color::Black, Color::Cyan)
+        } else if span.link.is_some() {
+            (Color::LightCyan, Color::Black)
+        } else if span.style.code {
+            (Color::LightGreen, Color::Black)
+        } else if span.style.strong {
+            (Color::Yellow, Color::Black)
+        } else if span.style.emphasis {
+            (Color::LightMagenta, Color::Black)
+        } else {
+            (Color::LightGray, Color::Black)
+        };
+        let _ = output.set_color(foreground, background);
+        let remaining = width.saturating_sub(used);
+        let clipped = clip_text(&span.text, remaining);
+        write_console_text(output, &clipped);
+        let span_width = clipped
+            .chars()
+            .map(renderer::character_width)
+            .sum::<usize>();
+        used = used.saturating_add(span_width);
+    }
+    let _ = output.set_color(Color::LightGray, Color::Black);
+}
+
+fn clip_text(text: &str, width: usize) -> String {
+    let mut clipped = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let char_width = renderer::character_width(ch);
+        if used.saturating_add(char_width) > width {
+            break;
+        }
+        clipped.push(ch);
+        used = used.saturating_add(char_width);
+    }
+    clipped
+}
+
+fn write_console_text(output: &mut uefi::proto::console::text::Output, text: &str) {
+    let mut safe = String::new();
+    for ch in text.chars() {
+        if ch.is_control() || (ch as u32) > 0xFFFF {
+            // Remote text must never be able to issue console control actions.
+            safe.push('?');
+        } else {
+            safe.push(ch);
+        }
+    }
+    let _ = write!(output, "{}", safe);
 }
 
 fn render_links(links: &[Link]) {
@@ -900,40 +1321,22 @@ fn render_links(links: &[Link]) {
     }
 }
 
-fn search_page(page: &BrowserPage, query: &str) {
-    let query = query.trim().to_ascii_lowercase();
-    if query.is_empty() {
-        uefi::println!("Usage: search WORD");
-        return;
-    }
-
-    let mut matches = 0usize;
-    for line in page.text.lines() {
-        if line.to_ascii_lowercase().contains(&query) {
-            uefi::println!("{line}");
-            matches += 1;
-        }
-    }
-
-    if matches == 0 {
-        uefi::println!("No match for: {query}");
-    }
-}
-
 fn print_help() {
     uefi::println!("");
-    uefi::println!("UEFI Browser commands");
-    uefi::println!("  HOST or URL     Navigate to a hostname or HTTP/HTTPS URL");
-    uefi::println!("  open URL        Navigate to an explicit URL");
-    uefi::println!("  open N / N      Follow numbered link N");
-    uefi::println!("  links           List links on the current page");
-    uefi::println!("  back            Visit the previous page");
-    uefi::println!("  forward         Visit the next page");
-    uefi::println!("  reload          Fetch the current page again");
-    uefi::println!("  search WORD     Find matching text lines on the current page");
-    uefi::println!("  clear           Redraw the current page");
-    uefi::println!("  help            Show this help");
-    uefi::println!("  quit            Return to firmware");
+    uefi::println!("UEFI Browser keyboard and command reference");
+    uefi::println!("  UP / DOWN       Scroll one line");
+    uefi::println!("  PAGE UP/DOWN    Scroll one screen");
+    uefi::println!("  HOME / END      Jump to top or bottom");
+    uefi::println!("  TAB / [         Focus next / previous link");
+    uefi::println!("  ENTER           Open the focused link");
+    uefi::println!("  g or o          Enter a URL");
+    uefi::println!("  /               Search the rendered document; n finds next");
+    uefi::println!("  :               Open the command prompt");
+    uefi::println!("  b / f / r       Back / forward / reload");
+    uefi::println!("  l               List links; q quits to firmware");
+    uefi::println!(
+        "  Commands: open URL, open N, back, forward, reload, links, search WORD, help, quit"
+    );
     uefi::println!("");
 }
 

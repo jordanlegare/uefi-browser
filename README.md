@@ -129,7 +129,8 @@ The SNP adapter and smoltcp integration are concrete implementations, not just t
 |---|---|
 | src/main.rs | UEFI entry point, interactive terminal navigation, redirect policy and page rendering |
 | src/url.rs | HTTP/HTTPS URL parsing, default ports, authority validation and relative URL resolution |
-| src/document.rs | Basic HTML visible-text and anchor extraction |
+| src/document.rs | Structured HTML block/inline parser, link targets, and public-domain ELinks named-entity data |
+| src/renderer.rs | Width-aware terminal line layout, wrapping, Unicode cell widths, and rendered-link positions |
 | src/http.rs | HTTP/1.1 GET builder, response parsing, chunked decoding and stream exchange |
 | src/dns.rs | Hickory DNS A-query construction, bounded UDP exchange contract and response validation |
 | src/entropy.rs | Secure-random provider interface used by DNS; TLS uses wolfCrypt's EFI_RNG entropy driver |
@@ -215,11 +216,26 @@ The repository does not commit a periodically refreshed CA bundle by default. HT
 7. Bounded network operations and correct release of TCP and TLS resources.
 8. A maintained wolfSSL release with security fixes.
 
+## ELinks-inspired terminal renderer
+
+The terminal frontend and layout engine are implemented in native Rust for the UEFI text console. The document parser now retains semantic blocks (headings, paragraphs, lists, quotations, preformatted text, definition lists and table rows), inline emphasis/code, and link identity. The renderer reflows content to the active console width, accounts for common double-width and combining Unicode ranges, and keeps links addressable after wrapping.
+
+The browser screen provides a fixed title/address/status chrome, a scrollable document viewport, colored inline links, focused-link highlighting, and keyboard navigation:
+
+- **Up / Down** or **j / k**: scroll one line; **Page Up / Page Down** or **Space**: scroll a screen; **Home / End**: jump to document boundaries.
+- **Tab / [**: focus next / previous link; **Enter**: follow the focused link; **l**: list links.
+- **g / o**: open a URL; **b / f / r**: back, forward, reload; **/** and **n**: search and find the next match.
+- **:** opens the command prompt; **h / ?** shows help; **q** returns to firmware.
+
+This is an independent ELinks-inspired renderer, not the ELinks C renderer copied into Rust. It is an initial rendering foundation, not full ELinks or browser-engine parity: CSS cascade/layout, JavaScript, interactive forms, cookies, downloads, persistent cache/bookmarks, complete HTML5 parsing, and full Unicode terminal-width tables are not implemented. The network and TLS pipeline is unchanged; HTTPS still requires successful wolfSSL peer-chain, validity-time and hostname verification.
 ## URL and HTML core
+
+ELinks reuse is intentionally limited to its public-domain SGML/Unicode named-entity mapping table. The build generates a compact Rust decoder from `assets/elinks-entities.txt`; the EFI image does not link the ELinks GPLv2-only C application. See [ELinks reuse and UEFI porting boundary](docs/ELINKS-COMPATIBILITY.md) for the licensing and runtime rationale.
+
 
 src/url.rs accepts http:// and https://, defaults a bare hostname to HTTPS, applies ports 80 and 443, and resolves common absolute, scheme-relative, root-relative, and path-relative references. It rejects unknown schemes and URL user-information. IPv6 literal parsing is not implemented in this first pass.
 
-src/document.rs extracts a page title, visible text, and numbered anchor links. It skips comments and common non-visible elements such as scripts, styles, templates, noscript, and SVG, and decodes a limited set of named and numeric entities. It is a lightweight text extractor, not a complete HTML5 tree builder. CSS layout, JavaScript, DOM mutation, form submission, cookies, media, and modern web application behaviour are not implemented.
+src/document.rs builds a structured document from common HTML block and inline elements, retaining headings, paragraphs, lists, quotations, preformatted text, definition lists, table rows, inline emphasis/code, and resolved HTTP/HTTPS links. It skips comments and common non-visible elements such as scripts, styles, templates, noscript, and SVG. The parser is intentionally bounded and is not a complete HTML5 tree builder. src/renderer.rs lays out those blocks for the active UEFI text-console width and preserves link identity through wrapping. CSS layout, JavaScript, DOM mutation, form submission, cookies, media, and modern web application behaviour are not implemented.
 
 ## Important: compile for the UEFI target
 

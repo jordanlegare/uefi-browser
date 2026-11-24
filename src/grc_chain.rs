@@ -149,7 +149,7 @@ pub fn parse_grc_chain_text(
                 return Err(ParseError::TooManyCertificates);
             }
 
-            let name_in_line = line[..start].trim();
+            let name_in_line = line[..start].trim().trim_end_matches('|').trim();
             let name = if name_in_line.is_empty()
                 || name_in_line.eq_ignore_ascii_case("certificate identification")
                 || name_in_line
