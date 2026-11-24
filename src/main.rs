@@ -668,15 +668,17 @@ fn fetch_grc_reference_chain(
     connection.peer.stream.set_io_timeout_ms(5_000);
 
     uefi::println!(
-        "[GRC 3/4] Establishing an independent TLS session with the same CA bundle and mandatory hostname verification."
+        "[GRC 3/4] Starting independent TLS verification for www.grc.com (5-second network I/O timeout)."
     );
+    uefi::println!("[GRC 3a/4] Creating wolfSSL context and loading the embedded CA trust bundle.");
     let mut tls = connection
         .start_tls(ca_bundle)
         .map_err(|error| format!("GRC TLS initialization failed: {error:?}"))?;
+    uefi::println!("[GRC 3b/4] TLS context ready. Sending ClientHello and waiting for the verified server handshake.");
     tls.handshake()
         .map_err(|error| format!("GRC TLS certificate verification failed: {error:?}"))?;
     uefi::println!(
-        "[GRC 4/4] Reference TLS verified. Fetching and parsing the bounded fingerprint response."
+        "[GRC 4/4] GRC TLS certificate and hostname verification passed. Fetching the bounded fingerprint response."
     );
 
     let response = http::exchange_get(&mut tls, &reference_url, 128 * 1024)
