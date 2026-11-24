@@ -85,9 +85,24 @@ static int uefi_verify_diagnostic_callback(int preverify_ok,
     uefi_record_peer_certificate(store);
 
     if (!preverify_ok && store != NULL && uefi_last_verify_error == 0) {
-        /* Record only; return the verifier's result unchanged below. */
+        WOLFSSL_X509 *certificate;
+        const unsigned char *der;
+        int der_length = 0;
+        wc_Sha256 sha256;
+
+        /* Record the exact certificate wolfSSL rejected; never alter the result. */
         uefi_last_verify_error = wolfSSL_X509_STORE_CTX_get_error(store);
         uefi_last_verify_depth = wolfSSL_X509_STORE_CTX_get_error_depth(store);
+        certificate = wolfSSL_X509_STORE_CTX_get_current_cert(store);
+        if (certificate != NULL) {
+            der = wolfSSL_X509_get_der(certificate, &der_length);
+            if (der != NULL && der_length > 0 && wc_InitSha256(&sha256) == 0) {
+                if (wc_Sha256Update(&sha256, der, (word32)der_length) == 0) {
+                    (void)wc_Sha256Final(&sha256, uefi_last_bad_cert_sha256);
+                }
+                wc_Sha256Free(&sha256);
+            }
+        }
     }
     return preverify_ok;
 }
@@ -284,25 +299,6 @@ fail:
     return ret == 0 ? -4 : ret;
 }
 
-static void capture_peer_leaf_fingerprint(WOLFSSL *ssl)
-{
-    WOLFSSL_X509 *cert;
-    const unsigned char *der;
-    int der_length = 0;
-    wc_Sha256 hash;
-
-    cert = wolfSSL_get_peer_certificate(ssl);
-    if (cert == NULL) return;
-    der = wolfSSL_X509_get_der(cert, &der_length);
-    if (der != NULL && der_length > 0 && wc_InitSha256(&hash) == 0) {
-        if (wc_Sha256Update(&hash, der, (word32)der_length) == 0) {
-            (void)wc_Sha256Final(&hash, uefi_last_bad_cert_sha256);
-        }
-        wc_Sha256Free(&hash);
-    }
-    wolfSSL_X509_free(cert);
-}
-
 int uefi_wolfssl_handshake(uefi_wolfssl_session *session)
 {
     int ret;
@@ -316,9 +312,6 @@ int uefi_wolfssl_handshake(uefi_wolfssl_session *session)
         return 0;
     }
     error = wolfSSL_get_error(session->ssl, ret);
-    if (uefi_last_verify_error != 0) {
-        capture_peer_leaf_fingerprint(session->ssl);
-    }
     return error == 0 ? -1 : -error;
 }
 
