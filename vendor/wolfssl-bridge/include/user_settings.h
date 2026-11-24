@@ -47,6 +47,7 @@
 #define WOLFSSL_SHA384
 #define WOLFSSL_SHA512
 #define WOLFSSL_ASN_TEMPLATE
+#define WOLFSSL_IP_ALT_NAME
 
 /* No OS entropy source or deterministic fallback. */
 #define WC_NO_HASHDRBG
