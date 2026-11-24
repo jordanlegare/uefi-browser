@@ -271,7 +271,7 @@ fn parse_dom_with_styles(dom: crate::html5::Dom, base: &Url, external_css: &[Str
         if body_style.display != DisplayMode::None {
             builder.walk_flow(body, body_style, 0);
         } else {
-            builder.emit_forms_from_fallback_subtree(body, &ComputedStyle::default(), 0);
+            builder.emit_css_hidden_fallback_subtree(body, &ComputedStyle::default(), 0);
         }
     }
 
@@ -339,6 +339,144 @@ impl DocumentBuilder<'_> {
                 .children(node)
                 .iter()
                 .any(|child| self.subtree_contains_form(*child))
+    }
+
+    /// Recover static text and links from stylesheet-hidden content. Pages that
+    /// depend on JavaScript to remove a CSS hiding class otherwise return HTTP
+    /// 200 with a populated body but no visible terminal content.
+    ///
+    /// Explicit HTML hidden/aria-hidden and inline display:none remain respected.
+    fn emit_css_hidden_fallback_subtree(
+        &mut self,
+        node: NodeId,
+        parent_style: &ComputedStyle,
+        list_depth: u8,
+    ) {
+        if self.is_explicitly_hidden(node) {
+            return;
+        }
+        let tag = self.dom.tag(node).unwrap_or("");
+        if matches!(tag, "script" | "style" | "template" | "svg" | "head") {
+            return;
+        }
+        if tag == "form" {
+            self.emit_forms_from_fallback_subtree(node, parent_style, list_depth);
+            return;
+        }
+
+        let mut style = self.computed(node, parent_style);
+        // The source node is hidden by CSS, but this fallback deliberately
+        // materializes its static content, so its emitted block must be visible.
+        style.display = DisplayMode::Block;
+        let mut runs = Vec::new();
+        self.collect_static_fallback_inline(node, style.clone(), None, &mut runs);
+        if !runs.is_empty() {
+            self.push_block(BlockKind::Paragraph, runs, style);
+        }
+        self.emit_forms_from_fallback_subtree(node, parent_style, list_depth);
+    }
+
+    /// Collect content without applying stylesheet display:none. This is only
+    /// used inside a stylesheet-hidden subtree; explicit author-hidden nodes and
+    /// non-rendered source elements are still excluded.
+    fn collect_static_fallback_inline(
+        &mut self,
+        node: NodeId,
+        style: ComputedStyle,
+        active_link: Option<usize>,
+        output: &mut Vec<InlineRun>,
+    ) {
+        if self.is_explicitly_hidden(node) {
+            return;
+        }
+        let tag = self.dom.tag(node).unwrap_or("");
+        if matches!(
+            tag,
+            "script" | "style" | "template" | "svg" | "head" | "form"
+        ) {
+            return;
+        }
+
+        if let Some(id) = self.dom.attr(node, "id") {
+            self.add_anchor_name(id, self.document.blocks.len());
+        }
+        if tag == "a" {
+            if let Some(name) = self.dom.attr(node, "name") {
+                self.add_anchor_name(name, self.document.blocks.len());
+            }
+        }
+
+        let mut link = active_link;
+        let mut created_link = None;
+        if tag == "a" {
+            if let Some(href) = self.dom.attr(node, "href") {
+                if !href.is_empty()
+                    && !href.starts_with("javascript:")
+                    && !href.starts_with("data:")
+                    && self.document.links.len() < MAX_LINKS
+                {
+                    if let Ok(target) = self.base.resolve(href) {
+                        let index = self.document.links.len();
+                        self.document.links.push(Link {
+                            label: String::new(),
+                            target: target.as_string(),
+                        });
+                        link = Some(index);
+                        created_link = Some(index);
+                    }
+                }
+            }
+        }
+
+        if tag == "br" {
+            push_run(output, "\n", inline_style(&style), link);
+            return;
+        }
+        if tag == "img" {
+            let alt = self.dom.attr(node, "alt").unwrap_or("image");
+            push_run(
+                output,
+                &format!("[image: {alt}]"),
+                inline_style(&style),
+                link,
+            );
+            return;
+        }
+
+        let is_block = is_block_tag(tag);
+        if is_block && output.last().is_some_and(|run| !run.text.ends_with('\n')) {
+            push_run(output, "\n", inline_style(&style), None);
+        }
+
+        for child in self.dom.children(node).iter().copied() {
+            match &self.dom.nodes[child].kind {
+                NodeKind::Text(text) => {
+                    push_run(output, text, inline_style(&style), link);
+                }
+                NodeKind::Comment | NodeKind::Document => {}
+                NodeKind::Element { .. } => {
+                    let child_style = self.computed(child, &style);
+                    self.collect_static_fallback_inline(child, child_style, link, output);
+                }
+            }
+        }
+
+        if is_block && output.last().is_some_and(|run| !run.text.ends_with('\n')) {
+            push_run(output, "\n", inline_style(&style), None);
+        }
+
+        if let Some(index) = created_link {
+            let label = runs_text_for_link(output, index);
+            if let Some(item) = self.document.links.get_mut(index) {
+                item.label = label;
+            }
+            push_run(
+                output,
+                &format!(" [{}]", index + 1),
+                InlineStyle::default(),
+                None,
+            );
+        }
     }
 
     fn emit_forms_from_fallback_subtree(
@@ -419,7 +557,7 @@ impl DocumentBuilder<'_> {
                         continue;
                     }
                     if style.display == DisplayMode::None {
-                        self.emit_forms_from_fallback_subtree(child, &parent_style, list_depth);
+                        self.emit_css_hidden_fallback_subtree(child, &parent_style, list_depth);
                         continue;
                     }
                     if (style.display == DisplayMode::Inline || is_inline_tag(tag))
@@ -443,10 +581,7 @@ impl DocumentBuilder<'_> {
 
     fn emit_block(&mut self, node: NodeId, style: ComputedStyle, list_depth: u8) {
         let tag = self.dom.tag(node).unwrap_or("");
-        if matches!(
-            tag,
-            "script" | "style" | "noscript" | "template" | "svg" | "head"
-        ) {
+        if matches!(tag, "script" | "style" | "template" | "svg" | "head") {
             return;
         }
 
@@ -559,7 +694,7 @@ impl DocumentBuilder<'_> {
         output: &mut Vec<InlineRun>,
     ) {
         let tag = self.dom.tag(node).unwrap_or("");
-        if matches!(tag, "script" | "style" | "noscript" | "template" | "svg") {
+        if matches!(tag, "script" | "style" | "template" | "svg") {
             return;
         }
 
@@ -617,6 +752,8 @@ impl DocumentBuilder<'_> {
                     let child_style = self.computed(child, &style);
                     if child_style.display != DisplayMode::None {
                         self.collect_inline(child, child_style, link, output);
+                    } else if !self.is_explicitly_hidden(child) {
+                        self.collect_static_fallback_inline(child, child_style, link, output);
                     }
                 }
             }
@@ -653,6 +790,14 @@ impl DocumentBuilder<'_> {
                 NodeKind::Element { .. } => {
                     let child_style = self.computed(child, &style);
                     if child_style.display == DisplayMode::None {
+                        if !self.is_explicitly_hidden(child) {
+                            self.collect_static_fallback_inline(
+                                child,
+                                child_style,
+                                active_link,
+                                output,
+                            );
+                        }
                         continue;
                     }
                     let tag = self.dom.tag(child).unwrap_or("");
@@ -1476,6 +1621,33 @@ mod tests {
         assert!(rendered.contains("[ Google Search ]"));
         assert!(rendered.contains("[ I'm Feeling Lucky ]"));
         assert!(!rendered.contains("secret"));
+    }
+
+    #[test]
+    fn stylesheet_hidden_search_results_remain_visible_without_javascript() {
+        let base = Url::parse("https://www.google.com/search?q=uefi").unwrap();
+        let html = "<!doctype html><html><head><style>.results-shell{display:none}</style></head><body><main class=results-shell><h3><a href=/url?q=example.test>Rust UEFI browser guide</a></h3><p>Search result snippet with TLS verification details.</p><div hidden>private tracking payload</div><noscript>JavaScript is disabled.</noscript></main></body></html>";
+        let page = parse_html(html, &base);
+
+        assert!(page.text.contains("Rust UEFI browser guide"));
+        assert!(
+            page.text
+                .contains("Search result snippet with TLS verification details.")
+        );
+        assert!(page.text.contains("JavaScript is disabled."));
+        assert!(!page.text.contains("private tracking payload"));
+        assert_eq!(page.links.len(), 1);
+        assert!(page.links[0].target.contains("example.test"));
+
+        let lines = crate::renderer::layout_document(&page, 80);
+        let rendered = lines
+            .iter()
+            .map(crate::renderer::RenderLine::plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("Rust UEFI browser guide"));
+        assert!(rendered.contains("Search result snippet"));
+        assert!(rendered.contains("[1]"));
     }
 
     #[test]

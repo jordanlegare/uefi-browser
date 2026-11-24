@@ -33,6 +33,8 @@ type BrowserStore = Option<PersistentStore<UefiFileStore>>;
 struct BrowserPage {
     url: Url,
     status: u16,
+    content_type: String,
+    body_bytes: usize,
     document: Document,
     from_cache: bool,
 }
@@ -201,27 +203,63 @@ fn build_browser_page(
     from_cache: bool,
 ) -> BrowserPage {
     let text = String::from_utf8_lossy(body).into_owned();
-    let document = if content_type.to_ascii_lowercase().starts_with("text/html") {
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let is_html = media_type == "text/html" || media_type == "application/xhtml+xml";
+    let is_textual = media_type.starts_with("text/")
+        || media_type == "application/json"
+        || media_type == "application/xml"
+        || media_type == "application/javascript"
+        || media_type.ends_with("+json")
+        || media_type.ends_with("+xml");
+
+    let mut document = if is_html {
         if external_css.is_empty() {
             parse_html(&text, &url)
         } else {
             parse_html_with_styles(&text, &url, external_css)
         }
-    } else if content_type.to_ascii_lowercase().starts_with("text/plain") {
+    } else if is_textual {
         Document::from_plain(&url.host, &text)
     } else {
         Document::from_plain(
             &url.host,
             &format!(
-                "This text browser does not render Content-Type: {content_type}\n{} bytes received.",
+                "This text browser cannot display Content-Type: {content_type}\n{} response bytes received.",
                 body.len()
             ),
         )
     };
 
+    // A successful HTTP status with an empty static document is not a useful
+    // page. Explain the distinction on-screen instead of presenting a blank
+    // terminal viewport with only "HTTP 200" in the header.
+    if is_html && document.blocks.is_empty() && document.forms.is_empty() {
+        let body_state = if body.is_empty() {
+            String::from("The response body was empty.")
+        } else {
+            String::from(
+                "The response body was received, but no static text or form controls were extracted.",
+            )
+        };
+        document = Document::from_plain(
+            &url.host,
+            &format!(
+                "HTTP {status} response received.\nContent-Type: {content_type}\nBody size: {} bytes.\n{body_state}\n\nThis firmware browser does not execute JavaScript. The site may be building its results client-side, or may be using HTML features that this renderer does not yet support.",
+                body.len()
+            ),
+        );
+    }
+
     BrowserPage {
         url,
         status,
+        content_type: content_type.to_string(),
+        body_bytes: body.len(),
         document,
         from_cache,
     }
@@ -2068,7 +2106,14 @@ fn run_browser_ui(
                             selected_control = None;
                             navigation_error = None;
                             last_search.clear();
-                            status = format!("Form response: HTTP {}", page.status);
+                            status = format!(
+                                "HTTP {} | {} | {} bytes | {} blocks | {} links",
+                                page.status,
+                                page.content_type,
+                                page.body_bytes,
+                                page.document.blocks.len(),
+                                page.document.links.len()
+                            );
                         }
                         Err(error) => {
                             navigation_error = Some(error);
