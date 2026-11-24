@@ -132,11 +132,7 @@ impl<'a, S: TlsStreamIo> TlsConnection<'a, S> {
                             fingerprint.len(),
                         )
                     };
-                    if copied == 32 {
-                        fingerprint
-                    } else {
-                        [0u8; 32]
-                    }
+                    if copied == 32 { fingerprint } else { [0u8; 32] }
                 },
             });
         }
