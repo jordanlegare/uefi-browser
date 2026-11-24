@@ -30,6 +30,7 @@
 #define HAVE_SUPPORTED_CURVES
 #define HAVE_HKDF
 #define HAVE_SNI
+#define HAVE_FFDHE_2048
 #define WC_RSA_PSS
 
 /* Preserve RSA and ECC verification for public Web PKI chains. */
