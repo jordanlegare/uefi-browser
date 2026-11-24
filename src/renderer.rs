@@ -118,7 +118,11 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
         | FormControlKind::Search
         | FormControlKind::Number
         | FormControlKind::TextArea => {
-            let label = if control.label.is_empty() { "Input" } else { &control.label };
+            let label = if control.label.is_empty() {
+                "Input"
+            } else {
+                &control.label
+            };
             push_label_lines(&mut output, label, width);
 
             let box_width = width.min(36).max(8);
@@ -161,7 +165,11 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
         FormControlKind::Select => {
             push_label_lines(
                 &mut output,
-                if control.label.is_empty() { "Select" } else { &control.label },
+                if control.label.is_empty() {
+                    "Select"
+                } else {
+                    &control.label
+                },
                 width,
             );
             let box_width = width.min(36).max(8);
@@ -239,7 +247,10 @@ fn wrap_render_line(line: RenderLine, width: usize) -> Vec<RenderLine> {
     let mut wrapped = wrap_runs(
         &[InlineRun {
             text: line.plain_text(),
-            style: line.spans.first().map_or(InlineStyle::default(), |span| span.style),
+            style: line
+                .spans
+                .first()
+                .map_or(InlineStyle::default(), |span| span.style),
             link: None,
         }],
         width,
@@ -331,8 +342,7 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
         inner_width: usize,
     }
 
-    let max_columns = 16usize
-        .min(width.saturating_sub(1).div_euclid(4).max(1));
+    let max_columns = 16usize.min(width.saturating_sub(1).div_euclid(4).max(1));
     let row_count = table.rows.len();
     let mut remaining = alloc::vec![0usize; max_columns];
     let mut placements = Vec::new();
@@ -349,10 +359,9 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
             if column >= max_columns {
                 break;
             }
-            let colspan = (cell.colspan.max(1) as usize)
-                .min(max_columns.saturating_sub(column));
-            let rowspan = (cell.rowspan.max(1) as usize)
-                .min(row_count.saturating_sub(row_index).max(1));
+            let colspan = (cell.colspan.max(1) as usize).min(max_columns.saturating_sub(column));
+            let rowspan =
+                (cell.rowspan.max(1) as usize).min(row_count.saturating_sub(row_index).max(1));
             for occupied in &mut remaining[column..column + colspan] {
                 *occupied = rowspan;
             }
@@ -486,7 +495,9 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
                         .saturating_sub(row_offsets[placement.row])
                         .saturating_add(line_index);
                     let source = placement.lines.get(offset);
-                    let used = source.map_or(0, |item| item.width).min(placement.inner_width);
+                    let used = source
+                        .map_or(0, |item| item.width)
+                        .min(placement.inner_width);
                     if let Some(source) = source {
                         for span in &source.spans {
                             append_text(&mut line, &span.text, span.style, span.link);
@@ -919,7 +930,10 @@ mod tests {
         assert!(rendered.contains("| alice_"));
         assert!(rendered.contains("| ******_"));
         assert!(!rendered.contains("secret"));
-        assert_eq!(lines.iter().filter(|line| line.focusable_control).count(), 2);
+        assert_eq!(
+            lines.iter().filter(|line| line.focusable_control).count(),
+            2
+        );
         assert!(lines.iter().all(|line| line.width <= 60));
     }
 
@@ -1039,13 +1053,23 @@ mod tests {
             ],
         };
         let lines = layout_table(&table, 40);
-        let rendered = lines.iter().map(RenderLine::plain_text).collect::<Vec<_>>().join("\n");
+        let rendered = lines
+            .iter()
+            .map(RenderLine::plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(rendered.contains("Shared"));
         assert!(rendered.contains("Top"));
         assert!(rendered.contains("Lower"));
         assert!(lines.iter().all(|line| line.width <= 40));
-        let lower = lines.iter().find(|line| line.plain_text().contains("Lower")).unwrap();
-        assert!(lower.plain_text().find("Lower").unwrap() > lower.plain_text().find("Shared").unwrap_or(0));
+        let lower = lines
+            .iter()
+            .find(|line| line.plain_text().contains("Lower"))
+            .unwrap();
+        assert!(
+            lower.plain_text().find("Lower").unwrap()
+                > lower.plain_text().find("Shared").unwrap_or(0)
+        );
     }
 
     #[test]
