@@ -394,12 +394,7 @@ fn fetch_response(
                     let report = if is_certificate_verification_failure(&error) {
                         drop(tls);
                         drop(connection);
-                        describe_tls_failure_with_grc(
-                            &error,
-                            &url.host,
-                            &observed_chain,
-                            network,
-                        )
+                        describe_tls_failure_with_grc(&error, &url.host, &observed_chain, network)
                     } else {
                         describe_tls_failure(&error)
                     };
@@ -509,9 +504,7 @@ fn describe_tls_failure_with_grc(
             report.push_str(&format!(
                 "\nCOMPARISON: unavailable. Could not retrieve or parse the GRC reference: {reason}"
             ));
-            report.push_str(
-                "\nThe browser did not relax TLS verification for the GRC connection.",
-            );
+            report.push_str("\nThe browser did not relax TLS verification for the GRC connection.");
         }
     }
 
