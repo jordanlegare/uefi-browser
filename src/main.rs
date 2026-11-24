@@ -88,7 +88,7 @@ fn main() -> Status {
         if allocator_linked {
             uefi_browser::uefi_memory::uefi_browser_free(allocation);
         }
-        let bridge_linked = cfg!(uefi_wolfssl_linked);
+        let bridge_linked = cfg!(uefi_wolfssl_linked) && allocator_linked;
         uefi::println!("wolfSSL 5.9.4 static bridge: {}", bridge_linked);
         uefi::println!(
             "UEFI clock suitable for X.509: {}",
