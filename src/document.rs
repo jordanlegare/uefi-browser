@@ -390,7 +390,10 @@ impl DocumentBuilder<'_> {
             return;
         }
         let tag = self.dom.tag(node).unwrap_or("");
-        if matches!(tag, "script" | "style" | "template" | "svg" | "head" | "form") {
+        if matches!(
+            tag,
+            "script" | "style" | "template" | "svg" | "head" | "form"
+        ) {
             return;
         }
 
@@ -441,11 +444,7 @@ impl DocumentBuilder<'_> {
         }
 
         let is_block = is_block_tag(tag);
-        if is_block
-            && output
-                .last()
-                .is_some_and(|run| !run.text.ends_with('\n'))
-        {
+        if is_block && output.last().is_some_and(|run| !run.text.ends_with('\n')) {
             push_run(output, "\n", inline_style(&style), None);
         }
 
@@ -462,11 +461,7 @@ impl DocumentBuilder<'_> {
             }
         }
 
-        if is_block
-            && output
-                .last()
-                .is_some_and(|run| !run.text.ends_with('\n'))
-        {
+        if is_block && output.last().is_some_and(|run| !run.text.ends_with('\n')) {
             push_run(output, "\n", inline_style(&style), None);
         }
 
@@ -1635,7 +1630,10 @@ mod tests {
         let page = parse_html(html, &base);
 
         assert!(page.text.contains("Rust UEFI browser guide"));
-        assert!(page.text.contains("Search result snippet with TLS verification details."));
+        assert!(
+            page.text
+                .contains("Search result snippet with TLS verification details.")
+        );
         assert!(page.text.contains("JavaScript is disabled."));
         assert!(!page.text.contains("private tracking payload"));
         assert_eq!(page.links.len(), 1);
