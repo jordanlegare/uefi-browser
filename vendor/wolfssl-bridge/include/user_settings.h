@@ -42,6 +42,7 @@ extern int uefi_wolfssl_stricmp(const char *left, const char *right);
 #define WOLFSSL_USER_IO
 #define WOLFSSL_SMALL_STACK
 #define KEEP_PEER_CERT
+#define OPENSSL_EXTRA_X509_SMALL
 #define WOLFSSL_USER_LOG
 #define NO_STDIO_FILESYSTEM
 #define NO_ERROR_STRINGS
