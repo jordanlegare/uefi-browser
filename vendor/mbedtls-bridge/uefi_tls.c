@@ -383,7 +383,7 @@ int uefi_mbedtls_client_new(
         MBEDTLS_SSL_TRANSPORT_STREAM,
         MBEDTLS_SSL_PRESET_DEFAULT
     );
-    if (ret != 0) { uefi_browser_tls_log(6, ret); goto fail; }
+    if (ret != 0) { goto fail; }
     uefi_browser_tls_log(6, ret);
 
 #if defined(MBEDTLS_DEBUG_C)
@@ -397,12 +397,12 @@ int uefi_mbedtls_client_new(
 
     uefi_browser_tls_log(7, 0);
     ret = mbedtls_ssl_setup(&session->ssl, &session->config);
-    if (ret != 0) { uefi_browser_tls_log(8, ret); goto fail; }
+    if (ret != 0) { goto fail; }
     uefi_browser_tls_log(8, ret);
 
     uefi_browser_tls_log(9, 0);
     ret = mbedtls_ssl_set_hostname(&session->ssl, (const char *)hostname);
-    if (ret != 0) { uefi_browser_tls_log(9, ret); goto fail; }
+    if (ret != 0) { goto fail; }
 
     mbedtls_ssl_set_bio(&session->ssl, session, bio_send, bio_recv, NULL);
     uefi_browser_tls_log(10, 0);
