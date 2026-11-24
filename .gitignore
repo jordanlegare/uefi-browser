@@ -1,6 +1,6 @@
 /target/
 /dist/
 /build/
-/vendor/mbedtls-4.3.0/
+/vendor/wolfssl-5.9.4/
 *.img
 *.qcow2
