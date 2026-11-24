@@ -19,7 +19,6 @@ const MAX_BODY_BYTES: usize = 256 * 1024;
 const MAX_REDIRECTS: usize = 5;
 const MAX_INPUT_BYTES: usize = 2048;
 
-#[cfg(all(target_os = "uefi", uefi_wolfssl_linked))]
 struct BrowserPage {
     url: Url,
     status: u16,
