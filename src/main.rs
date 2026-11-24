@@ -2199,7 +2199,7 @@ fn render_terminal_page(
                         BlockKind::FormControl {
                             form_index,
                             control_index,
-                        } => selected_control == Some((*form_index, *control_index))
+                        } => selected_control == Some((*form_index, *control_index)),
                         _ => false,
                     });
                 write_render_line(output, line, width, selected_link, focused_control);
