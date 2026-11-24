@@ -88,7 +88,7 @@ fn read_tlv<'a>(input: &'a [u8], offset: &mut usize) -> Option<Tlv<'a>> {
     }
 
     let first_length = *input.get(*offset)?;
-    *offset = offset.checked_add(1)?;
+    *offset = (*offset).checked_add(1)?;
     let length = if first_length & 0x80 == 0 {
         first_length as usize
     } else {
@@ -366,6 +366,13 @@ fn parse_san(input: &[u8]) -> Vec<String> {
     names
 }
 
+fn decimal_integer(bytes: &[u8]) -> String {
+    let value = bytes.iter().fold(0u64, |acc, byte| {
+        acc.saturating_mul(256).saturating_add(*byte as u64)
+    });
+    value.to_string()
+}
+
 fn parse_basic_constraints(input: &[u8]) -> String {
     let mut offset = 0usize;
     let Some(sequence) = read_tlv(input, &mut offset) else {
@@ -383,11 +390,11 @@ fn parse_basic_constraints(input: &[u8]) -> String {
         if field.tag == 0x01 && !field.value.is_empty() {
             is_ca = field.value[0] != 0;
         } else if field.tag == 0x02 {
-            path_len = Some(hex(field.value));
+            path_len = Some(decimal_integer(field.value));
         }
     }
     match (is_ca, path_len) {
-        (true, Some(length)) => format!("CA:TRUE, pathLenConstraint bytes: {length}"),
+        (true, Some(length)) => format!("CA:TRUE, pathLenConstraint: {length}"),
         (true, None) => String::from("CA:TRUE"),
         (false, _) => String::from("CA:FALSE"),
     }
@@ -517,8 +524,12 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
         return Err("certificate is not one complete DER SEQUENCE");
     }
     let outer_fields = children(outer.value).ok_or("malformed Certificate sequence")?;
-    if outer_fields.len() < 3 || outer_fields[0].tag != 0x30 {
-        return Err("Certificate is missing required fields");
+    if outer_fields.len() < 3 || outer_fields[0].tag != 0x30
+        || outer_fields[1].tag != 0x30
+        || outer_fields[2].tag != 0x03
+        || outer_fields[2].value.is_empty()
+    {
+        return Err("Certificate is missing required fields or has an invalid signature field");
     }
 
     let tbs = outer_fields[0];
@@ -569,10 +580,16 @@ pub fn summarize_certificate(der: &[u8]) -> Result<CertificateSummary, &'static 
     };
 
     let validity_fields = children(validity.value).ok_or("malformed validity sequence")?;
+    if validity_fields.len() != 2 {
+        return Err("Validity must contain exactly notBefore and notAfter");
+    }
     let not_before = time_text(validity_fields.first().copied());
     let not_after = time_text(validity_fields.get(1).copied());
 
     let spki_fields = children(spki.value).ok_or("malformed SubjectPublicKeyInfo")?;
+    if spki_fields.len() < 2 || spki_fields[1].tag != 0x03 || spki_fields[1].value.is_empty() {
+        return Err("SubjectPublicKeyInfo is missing its BIT STRING");
+    }
     let public_key_algorithm_field = *spki_fields.first().ok_or("missing public key algorithm")?;
     let (public_key_algorithm, public_key_parameters) = algorithm_from_tlv(public_key_algorithm_field);
     let public_key_bits = spki_fields.get(1).filter(|field| field.tag == 0x03)
