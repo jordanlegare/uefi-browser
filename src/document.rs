@@ -413,6 +413,9 @@ impl DocumentBuilder<'_> {
                 NodeKind::Element { .. } => {
                     let style = self.computed(child, &parent_style);
                     let tag = self.dom.tag(child).unwrap_or("");
+                    if self.is_explicitly_hidden(child) {
+                        continue;
+                    }
                     if style.display == DisplayMode::None {
                         self.emit_forms_from_fallback_subtree(child, &parent_style, list_depth);
                         continue;
@@ -1453,7 +1456,7 @@ mod tests {
         let html = "<!doctype html><html><head><style>@media screen and (min-width: 1px){.conditional{display:none}} .search-shell{display:none}</style></head><body><div class=search-shell><form action=/search method=get><textarea name=q aria-label=Search rows=1></textarea><input type=hidden name=source value=hp><input name=btnK type=submit value='Google Search'><input name=btnI type=submit value='I&#39;m Feeling Lucky'></form></div><div hidden><form action=/hidden><input name=secret value=no></form></div></body></html>";
         let page = parse_html(html, &base);
 
-        assert_eq!(page.forms.len(), 2);
+        assert_eq!(page.forms.len(), 1);
         assert_eq!(page.forms[0].controls.len(), 4);
         assert_eq!(page.forms[0].controls[0].kind, FormControlKind::TextArea);
         assert_eq!(page.forms[0].controls[1].kind, FormControlKind::Hidden);
