@@ -25,8 +25,12 @@ BRIDGE_PSA_USER_CONFIG_DEFINE='-DTF_PSA_CRYPTO_USER_CONFIG_FILE="uefi_tf_psa_con
 
 bash "$ROOT/scripts/fetch-mbedtls.sh"
 
-# Instrument the ECDSA -> PSA -> ECC verification path without changing verification policy.
+# Apply the bounded MPI and ECDSA arithmetic fixes without adding TLS diagnostics.
 bash "$ROOT/scripts/patch-mbedtls-ecdsa.sh" "$SRC"
+
+# Discard old CMake objects and bridge archives. Earlier builds may contain
+# X.509 trace hooks even after the vendored source has been refreshed.
+rm -rf "$BUILD" "$PREFIX" "$BRIDGE_BUILD"
 
 # Remove the upstream MinGW formatter override: it bypasses the platform hooks
 # and adds native MinGW snprintf dependencies to the EFI image. This patch must
