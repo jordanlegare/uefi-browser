@@ -15,7 +15,10 @@ extern int64_t uefi_browser_time_unix(void);
 
 typedef struct {
     size_t size;
+    void *base;
 } uefi_wolfssl_allocation;
+
+#define UEFI_WOLFSSL_ALLOC_ALIGNMENT ((uintptr_t)64)
 
 void *uefi_wolfssl_malloc(size_t size, void *heap, int type);
 void *uefi_wolfssl_realloc(void *pointer, size_t size, void *heap, int type);
@@ -38,31 +41,42 @@ void XFREE(void *pointer, void *heap, int type)
 
 void *uefi_wolfssl_malloc(size_t size, void *heap, int type)
 {
+    void *base;
+    uintptr_t aligned;
     uefi_wolfssl_allocation *allocation;
+    size_t payload_size = size == 0 ? 1 : size;
+    size_t overhead = sizeof(*allocation) + (size_t)UEFI_WOLFSSL_ALLOC_ALIGNMENT - 1U;
     (void)heap;
     (void)type;
 
-    if (size > SIZE_MAX - sizeof(*allocation)) return NULL;
-    allocation = (uefi_wolfssl_allocation *)uefi_browser_alloc(
-        sizeof(*allocation) + (size == 0 ? 1 : size));
-    if (allocation == NULL) return NULL;
+    if (payload_size > SIZE_MAX - overhead) return NULL;
+    base = uefi_browser_alloc(overhead + payload_size);
+    if (base == NULL) return NULL;
+
+    aligned = ((uintptr_t)base + sizeof(*allocation) +
+               UEFI_WOLFSSL_ALLOC_ALIGNMENT - 1U) &
+              ~(UEFI_WOLFSSL_ALLOC_ALIGNMENT - 1U);
+    allocation = (uefi_wolfssl_allocation *)aligned - 1;
     allocation->size = size;
-    return (void *)(allocation + 1);
+    allocation->base = base;
+    return (void *)aligned;
 }
 
 void uefi_wolfssl_free(void *pointer, void *heap, int type)
 {
+    uefi_wolfssl_allocation *allocation;
     (void)heap;
     (void)type;
-    if (pointer != NULL) {
-        uefi_browser_free((void *)((uefi_wolfssl_allocation *)pointer - 1));
-    }
+
+    if (pointer == NULL) return;
+    allocation = (uefi_wolfssl_allocation *)pointer - 1;
+    uefi_browser_free(allocation->base);
 }
 
 void *uefi_wolfssl_realloc(void *pointer, size_t size, void *heap, int type)
 {
     uefi_wolfssl_allocation *old_allocation;
-    uefi_wolfssl_allocation *new_allocation;
+    void *new_pointer;
     size_t copy_size;
     unsigned char *source;
     unsigned char *destination;
@@ -74,18 +88,16 @@ void *uefi_wolfssl_realloc(void *pointer, size_t size, void *heap, int type)
     }
 
     old_allocation = (uefi_wolfssl_allocation *)pointer - 1;
-    {
-        void *new_pointer = uefi_wolfssl_malloc(size, heap, type);
-        if (new_pointer == NULL) return NULL;
-        new_allocation = (uefi_wolfssl_allocation *)new_pointer - 1;
-    }
+    new_pointer = uefi_wolfssl_malloc(size, heap, type);
+    if (new_pointer == NULL) return NULL;
 
     copy_size = old_allocation->size < size ? old_allocation->size : size;
-    source = (unsigned char *)(old_allocation + 1);
-    destination = (unsigned char *)(new_allocation + 1);
+    source = (unsigned char *)pointer;
+    destination = (unsigned char *)new_pointer;
     while (copy_size-- > 0) *destination++ = *source++;
+
     uefi_wolfssl_free(pointer, heap, type);
-    return (void *)(new_allocation + 1);
+    return new_pointer;
 }
 
 int uefi_wolfssl_rng(unsigned char *output, unsigned int size)
