@@ -2,7 +2,9 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::css::{ComputedStyle, DisplayMode, TextAlign};
-use crate::document::{Block, BlockKind, Document, InlineRun, InlineStyle, Table, TableCell, TermColor};
+use crate::document::{
+    Block, BlockKind, Document, InlineRun, InlineStyle, Table, TableCell, TermColor,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderLine {
