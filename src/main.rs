@@ -444,6 +444,31 @@ fn describe_tls_failure_with_grc(
     match fetch_grc_reference_chain(hostname, network) {
         Ok(reference) => {
             let comparison = compare_chains(&reference, observed_chain);
+            if let uefi_browser::tls::TlsError::Handshake { verify_depth, .. } = error {
+                if *verify_depth >= 0 {
+                    if let Some(fingerprint) = observed_chain.get(*verify_depth as usize) {
+                        if let Some(certificate) = reference
+                            .certificates
+                            .iter()
+                            .find(|certificate| &certificate.sha1 == fingerprint)
+                        {
+                            report.push_str(&format!(
+                                "\nProblematic certificate identified at wolfSSL depth {}: {} {} [{}].",
+                                verify_depth,
+                                certificate.role.label(),
+                                certificate.name,
+                                format_sha1(fingerprint)
+                            ));
+                        } else {
+                            report.push_str(&format!(
+                                "\nProblematic certificate fingerprint at wolfSSL depth {}: {} (not listed in the GRC reference).",
+                                verify_depth,
+                                format_sha1(fingerprint)
+                            ));
+                        }
+                    }
+                }
+            }
             report.push_str(&format!(
                 "\nGRC returned {} certificate fingerprints for {}.",
                 reference.certificates.len(),
