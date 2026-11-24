@@ -12,6 +12,8 @@ pub struct RenderLine {
     pub spans: Vec<RenderSpan>,
     pub width: usize,
     pub block_index: Option<usize>,
+    /// True on the visual row that represents the interactive face of a control.
+    pub focusable_control: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,8 +107,21 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
 }
 
 fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
+    let width = width.max(8);
     let style = InlineStyle::default();
-    let mut text = String::new();
+    let mut output = Vec::new();
+
+    let mut push_label = |label: &str| {
+        if !label.is_empty() {
+            let run = InlineRun {
+                text: label.to_string(),
+                style,
+                link: None,
+            };
+            output.extend(wrap_runs(&[run], width, false));
+        }
+    };
+
     match control.kind {
         FormControlKind::Text
         | FormControlKind::Password
@@ -114,104 +129,124 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
         | FormControlKind::Search
         | FormControlKind::Number
         | FormControlKind::TextArea => {
-            let label = if control.label.is_empty() {
-                "Input"
-            } else {
-                control.label.as_str()
-            };
-            text.push_str(label);
-            text.push_str(": [");
-            let available = width
-                .saturating_sub(
-                    character_width('[')
-                        + character_width(']')
-                        + label.chars().map(character_width).sum::<usize>()
-                        + 2,
-                )
-                .max(1);
-            let shown = if control.kind == FormControlKind::Password {
+            let label = if control.label.is_empty() { "Input" } else { &control.label };
+            push_label(label);
+
+            let box_width = width.min(36).max(8);
+            let inner_width = box_width.saturating_sub(4).max(1);
+            let border = format!("+{}+", "-".repeat(box_width.saturating_sub(2)));
+            output.push(line_from_text(&border, style));
+
+            let mut value = if control.kind == FormControlKind::Password {
                 "*".repeat(control.value.chars().count())
             } else {
-                control.value.replace('\n', " ")
+                control.value.replace(['\r', '\n'], " ")
             };
-            let shown_width = shown.chars().map(character_width).sum::<usize>();
-            if shown_width > available {
+            let value_width = value.chars().map(character_width).sum::<usize>();
+            let field_chars = inner_width.saturating_sub(1).max(1);
+            let field_width = value.chars().map(character_width).sum::<usize>();
+            if field_width > field_chars {
                 let mut suffix = String::new();
                 let mut used = 0usize;
-                for ch in shown.chars().rev() {
-                    let cw = character_width(ch);
-                    if used + cw > available.saturating_sub(1) {
+                for ch in value.chars().rev() {
+                    let char_width = character_width(ch);
+                    if used.saturating_add(char_width) > field_chars.saturating_sub(1) {
                         break;
                     }
                     suffix.insert(0, ch);
-                    used += cw;
+                    used += char_width;
                 }
-                text.push('…');
-                text.push_str(&suffix);
-            } else {
-                text.push_str(&shown);
+                value = format!("<{suffix}");
             }
-            text.push(']');
-        }
-        FormControlKind::Checkbox => {
-            text.push_str(if control.checked { "[x] " } else { "[ ] " });
-            text.push_str(&control.label);
-        }
-        FormControlKind::Radio => {
-            text.push_str(if control.checked { "(*) " } else { "( ) " });
-            text.push_str(&control.label);
+            let shown_width = value.chars().map(character_width).sum::<usize>();
+            let padding = inner_width.saturating_sub(shown_width.saturating_add(1));
+            let mut face = String::from("| ");
+            face.push_str(&value);
+            face.push('_');
+            face.push_str(&" ".repeat(padding));
+            face.push_str(" |");
+            let mut input_line = line_from_text(&face, style);
+            input_line.focusable_control = true;
+            output.push(input_line);
+            output.push(line_from_text(&border, style));
+            let _ = value_width;
         }
         FormControlKind::Select => {
-            text.push_str(&control.label);
-            text.push_str(": [");
+            push_label(if control.label.is_empty() { "Select" } else { &control.label });
+            let box_width = width.min(36).max(8);
+            let border = format!("+{}+", "-".repeat(box_width.saturating_sub(2)));
+            output.push(line_from_text(&border, style));
             let selected = control
                 .options
                 .iter()
                 .find(|option| option.value == control.value)
                 .map(|option| option.label.as_str())
                 .unwrap_or("select");
-            text.push_str(selected);
-            text.push_str(" v]");
+            let visible: String = selected.chars().take(box_width.saturating_sub(8)).collect();
+            let padding = box_width.saturating_sub(visible.chars().count().saturating_add(8));
+            let face = format!("| < {visible} >{} |", " ".repeat(padding));
+            let mut input_line = line_from_text(&face, style);
+            input_line.focusable_control = true;
+            output.push(input_line);
+            output.push(line_from_text(&border, style));
         }
-        FormControlKind::Submit => {
-            text.push_str("[ ");
-            text.push_str(if control.label.is_empty() {
-                "Submit"
+        FormControlKind::Checkbox => {
+            let checked = if control.checked { "[X] " } else { "[ ] " };
+            let mut line = line_from_text(&format!("{checked}{}", control.label), style);
+            line.focusable_control = true;
+            output.extend(wrap_render_line(line, width));
+        }
+        FormControlKind::Radio => {
+            let checked = if control.checked { "(*) " } else { "( ) " };
+            let mut line = line_from_text(&format!("{checked}{}", control.label), style);
+            line.focusable_control = true;
+            output.extend(wrap_render_line(line, width));
+        }
+        FormControlKind::Submit | FormControlKind::Reset | FormControlKind::Button => {
+            let label = if control.label.is_empty() {
+                match control.kind {
+                    FormControlKind::Submit => "Submit",
+                    FormControlKind::Reset => "Reset",
+                    _ => "Button",
+                }
             } else {
                 &control.label
-            });
-            text.push_str(" ]");
-        }
-        FormControlKind::Reset => {
-            text.push_str("[ ");
-            text.push_str(if control.label.is_empty() {
-                "Reset"
-            } else {
-                &control.label
-            });
-            text.push_str(" ]");
-        }
-        FormControlKind::Button => {
-            text.push_str("[ ");
-            text.push_str(if control.label.is_empty() {
-                "Button"
-            } else {
-                &control.label
-            });
-            text.push_str(" ]");
+            };
+            let face = format!("[ {label} ]");
+            let mut line = line_from_text(&face, style);
+            line.focusable_control = true;
+            output.extend(wrap_render_line(line, width));
         }
         FormControlKind::File => {
-            text.push_str(&control.label);
-            text.push_str(": [file input unsupported]");
+            let mut line = line_from_text(
+                &format!("{}: [file input unsupported]", control.label),
+                style,
+            );
+            line.focusable_control = true;
+            output.extend(wrap_render_line(line, width));
         }
-        FormControlKind::Hidden => return Vec::new(),
+        FormControlKind::Hidden => {}
     }
-    let run = InlineRun {
-        text,
-        style,
-        link: None,
-    };
-    wrap_runs(&[run], width, false)
+    output
+}
+
+fn wrap_render_line(line: RenderLine, width: usize) -> Vec<RenderLine> {
+    if line.width <= width {
+        return alloc::vec![line];
+    }
+    let mut wrapped = wrap_runs(
+        &[InlineRun {
+            text: line.plain_text(),
+            style: line.spans.first().map_or(InlineStyle::default(), |span| span.style),
+            link: None,
+        }],
+        width,
+        false,
+    );
+    if let Some(first) = wrapped.first_mut() {
+        first.focusable_control = true;
+    }
+    wrapped
 }
 
 fn layout_block(block: &Block, width: usize) -> Vec<RenderLine> {
@@ -667,6 +702,12 @@ pub fn line_for_link(lines: &[RenderLine], link_index: usize) -> Option<usize> {
     })
 }
 
+pub fn line_for_control(lines: &[RenderLine], block_index: usize) -> Option<usize> {
+    lines.iter().enumerate().find_map(|(index, line)| {
+        (line.block_index == Some(block_index) && line.focusable_control).then_some(index)
+    })
+}
+
 pub fn line_for_anchor(document: &Document, lines: &[RenderLine], name: &str) -> Option<usize> {
     let block = document.anchor_block(name)?;
     lines
@@ -778,9 +819,13 @@ mod tests {
             .map(RenderLine::plain_text)
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(rendered.contains("Username: [alice]"));
-        assert!(rendered.contains("Password: [******]"));
+        assert!(rendered.contains("Username"));
+        assert!(rendered.contains("+"));
+        assert!(rendered.contains("| alice_"));
+        assert!(rendered.contains("| ******_"));
         assert!(!rendered.contains("secret"));
+        assert_eq!(lines.iter().filter(|line| line.focusable_control).count(), 2);
+        assert!(lines.iter().all(|line| line.width <= 60));
     }
 
     #[test]
