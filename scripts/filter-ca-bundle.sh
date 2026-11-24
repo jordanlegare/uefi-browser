@@ -18,9 +18,11 @@ OUTPUT_DIR="$(dirname "$OUTPUT")"
 mkdir -p "$OUTPUT_DIR"
 TMP_DIR="$(mktemp -d)"
 TMP_OUTPUT="$(mktemp "$OUTPUT_DIR/.cacert-uefi.XXXXXX")"
+MANIFEST="${OUTPUT%.pem}.manifest"
+TMP_MANIFEST="$(mktemp "$OUTPUT_DIR/.cacert-uefi-manifest.XXXXXX")"
 cleanup() {
   rm -rf "$TMP_DIR"
-  rm -f "$TMP_OUTPUT"
+  rm -f "$TMP_OUTPUT" "$TMP_MANIFEST"
 }
 trap cleanup EXIT
 
@@ -72,8 +74,12 @@ for CERT in "$TMP_DIR"/cert-*.pem; do
     continue
   fi
 
-  cat "$CERT" >> "$TMP_OUTPUT"
+  SUBJECT="$(openssl x509 -in "$CERT" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
+  ISSUER="$(openssl x509 -in "$CERT" -noout -issuer -nameopt RFC2253 | sed 's/^issuer=//')"
+  NOT_AFTER="$(openssl x509 -in "$CERT" -noout -enddate | sed 's/^notAfter=//')"
   KEPT=$((KEPT + 1))
+  printf '%s\t%s\t%s\t%s\n' "$KEPT" "$SUBJECT" "$ISSUER" "$NOT_AFTER" >> "$TMP_MANIFEST"
+  cat "$CERT" >> "$TMP_OUTPUT"
 done
 
 if (( KEPT == 0 )); then
@@ -84,4 +90,6 @@ fi
 # Ensure the output is a valid non-empty PEM bundle before replacing it.
 [[ "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$TMP_OUTPUT")" -eq "$KEPT" ]]
 mv "$TMP_OUTPUT" "$OUTPUT"
+mv "$TMP_MANIFEST" "$MANIFEST"
 echo "UEFI CA bundle: kept=$KEPT expired_removed=$EXPIRED not_yet_valid_removed=$NOT_YET_VALID"
+echo "UEFI CA certificate index manifest: $MANIFEST"
