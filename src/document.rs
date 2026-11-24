@@ -4,6 +4,10 @@ use alloc::vec::Vec;
 
 use crate::url::Url;
 
+mod elinks_entities {
+    include!(concat!(env!("OUT_DIR"), "/elinks_entities.rs"));
+}
+
 const MAX_LINKS: usize = 128;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -338,7 +342,7 @@ fn decode_entity(entity: &str) -> Option<char> {
                 .and_then(char::from_u32)
         }
         _ if entity.starts_with('#') => entity[1..].parse::<u32>().ok().and_then(char::from_u32),
-        _ => None,
+        _ => elinks_entities::decode_named_entity(entity),
     }
 }
 
@@ -357,6 +361,16 @@ mod tests {
         assert_eq!(page.links[0].target, "https://example.org/guide");
     }
 
+    #[test]
+    fn decodes_public_domain_elinks_named_entities() {
+        assert_eq!(
+            decode_entities("&AElig; &alpha; &euro; &trade; &rarr;"),
+            "Æ α € ™ →"
+        );
+        // Entity names remain case-sensitive, as they are in HTML.
+        assert_eq!(decode_entities("&Alpha; &alpha;"), "Α α");
+        assert_eq!(decode_entities("&NotAnEntity;"), "&NotAnEntity;");
+    }
     #[test]
     fn removes_script_style_and_comments() {
         let base = Url::parse("https://example.org/").unwrap();
