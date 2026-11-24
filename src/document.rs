@@ -364,7 +364,10 @@ impl DocumentBuilder<'_> {
             return;
         }
 
-        let style = self.computed(node, parent_style);
+        let mut style = self.computed(node, parent_style);
+        // The source node is hidden by CSS, but this fallback deliberately
+        // materializes its static content, so its emitted block must be visible.
+        style.display = DisplayMode::Block;
         let mut runs = Vec::new();
         self.collect_static_fallback_inline(node, style.clone(), None, &mut runs);
         if !runs.is_empty() {
