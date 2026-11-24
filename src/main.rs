@@ -995,6 +995,8 @@ enum BrowserAction {
     Bottom,
     NextLink,
     PreviousLink,
+    TabNext,
+    TabPrevious,
     MoveFocusUp,
     MoveFocusDown,
     ActivateLink,
@@ -1599,6 +1601,38 @@ fn run_browser_ui(
                 status = String::from("End of document");
                 continue;
             }
+            BrowserAction::TabNext => {
+                if move_focus(
+                    page,
+                    &lines,
+                    1,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                ) {
+                    status = String::from("Moved focus forward");
+                } else {
+                    status = String::from("No links or form controls on this page");
+                }
+                continue;
+            }
+            BrowserAction::TabPrevious => {
+                if move_focus(
+                    page,
+                    &lines,
+                    -1,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                ) {
+                    status = String::from("Moved focus backward");
+                } else {
+                    status = String::from("No links or form controls on this page");
+                }
+                continue;
+            }
             BrowserAction::NextLink => {
                 if cycle_select_option(page, selected_control, 1) {
                     status = String::from("Selection changed");
@@ -2137,8 +2171,8 @@ fn read_browser_action(
                     'j' => return Some(BrowserAction::ScrollDown),
                     'k' => return Some(BrowserAction::ScrollUp),
                     ' ' => return Some(BrowserAction::PageDown),
-                    '\t' => return Some(BrowserAction::NextLink),
-                    '[' => return Some(BrowserAction::PreviousLink),
+                    '\t' => return Some(BrowserAction::TabNext),
+                    '[' => return Some(BrowserAction::TabPrevious),
                     _ => {}
                 }
             }
