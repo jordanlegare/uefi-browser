@@ -453,12 +453,9 @@ fn should_foster_parent(stack: &[NodeId], dom: &Dom) -> bool {
     let Some(table_position) = stack.iter().rposition(|id| dom.tag(*id) == Some("table")) else {
         return false;
     };
-    stack[table_position + 1..].iter().all(|id| {
-        matches!(
-            dom.tag(*id),
-            Some("tbody" | "thead" | "tfoot" | "tr")
-        )
-    })
+    stack[table_position + 1..]
+        .iter()
+        .all(|id| matches!(dom.tag(*id), Some("tbody" | "thead" | "tfoot" | "tr")))
 }
 
 fn table_foster_location(stack: &[NodeId], dom: &Dom) -> Option<(NodeId, NodeId)> {
