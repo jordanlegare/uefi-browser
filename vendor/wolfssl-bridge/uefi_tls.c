@@ -17,9 +17,27 @@ extern time_t uefi_wolfssl_time(time_t *timer);
 
 static int uefi_last_ca_cert_index;
 static int64_t uefi_last_time_unix;
+static int uefi_last_verify_error;
+static int uefi_last_verify_depth;
+static int uefi_last_peer_cert_count;
 
 int uefi_wolfssl_last_ca_cert_index(void) { return uefi_last_ca_cert_index; }
 int64_t uefi_wolfssl_last_time_unix(void) { return uefi_last_time_unix; }
+int uefi_wolfssl_last_verify_error(void) { return uefi_last_verify_error; }
+int uefi_wolfssl_last_verify_depth(void) { return uefi_last_verify_depth; }
+int uefi_wolfssl_last_peer_cert_count(void) { return uefi_last_peer_cert_count; }
+
+static int uefi_verify_diagnostic_callback(int preverify_ok,
+                                           WOLFSSL_X509_STORE_CTX *store)
+{
+    if (!preverify_ok && store != NULL) {
+        /* Observe the verifier's failure; never convert failure to success. */
+        uefi_last_verify_error = store->error;
+        uefi_last_verify_depth = store->error_depth;
+        uefi_last_peer_cert_count = store->totalCerts;
+    }
+    return preverify_ok;
+}
 
 typedef struct {
     WOLFSSL_CTX *context;
@@ -105,6 +123,9 @@ int uefi_wolfssl_client_new(
     *output = NULL;
     uefi_last_ca_cert_index = 0;
     uefi_last_time_unix = (int64_t)uefi_wolfssl_time(NULL);
+    uefi_last_verify_error = 0;
+    uefi_last_verify_depth = -1;
+    uefi_last_peer_cert_count = 0;
 
     if (!wolfssl_initialized) {
         ret = wolfSSL_Init();
@@ -128,7 +149,7 @@ int uefi_wolfssl_client_new(
     }
 
     /* Peer verification is mandatory. No VERIFY_NONE mode is exposed. */
-    wolfSSL_CTX_set_verify(session->context, WOLFSSL_VERIFY_PEER, NULL);
+    wolfSSL_CTX_set_verify(session->context, WOLFSSL_VERIFY_PEER, uefi_verify_diagnostic_callback);
     /*
      * Load roots individually so ASN_AFTER_DATE_E can be tied to the exact
      * certificate position in the filtered bundle. Each successful call adds
