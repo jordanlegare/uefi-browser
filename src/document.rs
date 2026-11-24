@@ -321,10 +321,12 @@ impl DocumentBuilder<'_> {
                         .is_some_and(|value| value.eq_ignore_ascii_case("true"))
                     || self.dom.attr(id, "style").is_some_and(|style| {
                         style.split(';').any(|declaration| {
-                            declaration.split_once(':').is_some_and(|(property, value)| {
-                                property.trim().eq_ignore_ascii_case("display")
-                                    && value.trim().eq_ignore_ascii_case("none")
-                            })
+                            declaration
+                                .split_once(':')
+                                .is_some_and(|(property, value)| {
+                                    property.trim().eq_ignore_ascii_case("display")
+                                        && value.trim().eq_ignore_ascii_case("none")
+                                })
                         })
                     })
             })
@@ -819,8 +821,9 @@ impl DocumentBuilder<'_> {
                         {
                             let mut visible_style = child_style;
                             if visible_style.display == DisplayMode::None {
-                                visible_style.display =
-                                    default_style_for_form_control(self.dom.tag(child).unwrap_or(""));
+                                visible_style.display = default_style_for_form_control(
+                                    self.dom.tag(child).unwrap_or(""),
+                                );
                             }
                             self.document.blocks.push(Block {
                                 kind: BlockKind::FormControl {
