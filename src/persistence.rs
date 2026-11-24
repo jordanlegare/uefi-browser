@@ -191,7 +191,11 @@ impl<B: StorageBackend> PersistentStore<B> {
                 continue;
             };
             if !url.is_empty() && url.len() <= 4096 && title.len() <= 512 && visited_at > 0 {
-                result.push(HistoryEntry { url, title, visited_at });
+                result.push(HistoryEntry {
+                    url,
+                    title,
+                    visited_at,
+                });
             }
         }
         result
@@ -309,7 +313,11 @@ fn encode_cache(page: &CachedPage) -> Vec<u8> {
     header.push_str(&page.etag.as_deref().map(percent_encode).unwrap_or_default());
     header.push('\n');
     header.push_str(
-        &page.last_modified.as_deref().map(percent_encode).unwrap_or_default(),
+        &page
+            .last_modified
+            .as_deref()
+            .map(percent_encode)
+            .unwrap_or_default(),
     );
     header.push('\n');
     let mut result = header.into_bytes();
@@ -332,7 +340,11 @@ fn decode_cache(bytes: &[u8]) -> Option<CachedPage> {
         let modified = percent_decode(take_line(bytes, &mut cursor)?)?;
         (
             if etag.is_empty() { None } else { Some(etag) },
-            if modified.is_empty() { None } else { Some(modified) },
+            if modified.is_empty() {
+                None
+            } else {
+                Some(modified)
+            },
         )
     } else {
         (None, None)
@@ -493,9 +505,15 @@ mod tests {
     #[test]
     fn history_is_persistent_bounded_and_deduplicated() {
         let mut store = PersistentStore::new(MemoryStorage::default());
-        store.record_visit("https://example.org/", "Example", 1000).unwrap();
-        store.record_visit("https://example.net/", "Other", 1001).unwrap();
-        store.record_visit("https://example.org/", "Example updated", 1002).unwrap();
+        store
+            .record_visit("https://example.org/", "Example", 1000)
+            .unwrap();
+        store
+            .record_visit("https://example.net/", "Other", 1001)
+            .unwrap();
+        store
+            .record_visit("https://example.org/", "Example updated", 1002)
+            .unwrap();
         let history = store.history();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].url, "https://example.net/");
