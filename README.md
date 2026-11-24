@@ -91,7 +91,7 @@ The style engine applies rules from embedded style elements, up to four linked e
 
 Supported selector forms include type, universal, class, ID, descendant, attribute-presence/equality, and basic structural pseudo-classes (`:first-child`, `:last-child`, `:only-child`, `:empty`, and numeric `:nth-child(n)`). Normal and `!important` declarations participate in the implemented author-style cascade, including inline declarations. Supported terminal-relevant properties include display, font weight/style, text decoration, foreground/background colors, whitespace handling, margins, indentation, text alignment and percentage width. Colors are mapped to the UEFI 16-color console palette.
 
-The renderer reflows text to the active console width and measures table columns from cell contents. Long cells wrap, colspan contributes to column sizing, and bounded rowspan placement reserves columns across subsequent rows so the spanning cell remains vertically continuous. This is a text-console table model, not the full HTML table layout algorithm.
+The renderer reflows text to the active console width and measures table columns from cell contents. Long cells wrap, colspan contributes to column sizing, and bounded rowspan placement reserves columns across subsequent rows. Row-group IDs keep row spans inside their thead/tbody/tfoot group; rowspan=0 extends to the end of that group. This is a text-console table model, not the full HTML table layout algorithm.
 
 Not implemented: the complete CSS cascade and selector grammar, pseudo-elements, most pseudo-classes/combinators, media queries, @import, floats, positioned layout, flexbox, grid, browser font metrics, and complete HTML table algorithms. The new selectors and cascade rules are deliberate bounded subsets, not browser-grade CSS conformance.
 
@@ -256,7 +256,7 @@ Current limitations include:
 - Basic rowspan-aware table cell placement is implemented; the full HTML table layout algorithm, flexbox, grid, floats and positioned elements remain unsupported.
 - DNS supports A and AAAA query construction/answer parsing with bounded CNAME traversal, and retries truncated UDP answers over DNS/TCP. DNS transport to the configured resolver and browser TCP sockets are still IPv4-only; IPv6-only destinations are not yet reachable. DNSSEC and DNS-over-TLS/HTTPS are not implemented.
 - Conditional HTTP cache revalidation supports ETag and Last-Modified with 304 reuse; full RFC 9111 freshness, Vary, heuristic caching and cache-control semantics are not implemented.
-- Table layout supports measured columns, colspan and bounded rowspan placement; row-group-aware rowspan=0 and the full HTML table layout algorithm remain incomplete.
+- Table layout supports measured columns, colspan, row-group-aware bounded rowspan and rowspan=0; the full HTML table layout algorithm remains incomplete.
 - Firmware boot/runtime interoperability has not yet been demonstrated across OVMF and physical machines. See [Firmware Runtime Test Plan](docs/FIRMWARE-TESTING.md).
 
 The SNTP bootstrap is not authenticated time. Packet validation helps reject unrelated or malformed replies but does not prevent an on-path attacker from forging a response. TLS validation remains mandatory; the browser does not disable certificate date checks when time is unavailable.
@@ -279,7 +279,8 @@ The project is a clean-room Rust implementation inspired by ELinks' text-browser
 - [x] Normal/important cascade ordering for the supported CSS declarations.
 - [ ] Complete CSS grammar, pseudo-elements, flexbox, grid, floats, positioned layout and media queries.
 - [x] Width-aware text reflow, measured table columns, colspan and bounded rowspan placement.
-- [ ] Complete table row-group semantics, rowspan=0 and full HTML table layout algorithms.
+- [x] Respect thead/tbody/tfoot row-group boundaries and rowspan=0 when laying out table cells.
+- [ ] Complete the remaining HTML table layout algorithms and intrinsic width calculations.
 - [x] Fragment navigation and URL-encoded GET/POST forms.
 - [x] Visible ASCII form controls, direct editing, focus movement and Enter submission.
 - [x] Persistent bookmarks, bounded page cache, ETag/Last-Modified revalidation and 304 body reuse.
