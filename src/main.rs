@@ -242,7 +242,9 @@ fn build_browser_page(
         let body_state = if body.is_empty() {
             String::from("The response body was empty.")
         } else {
-            String::from("The response body was received, but no static text or form controls were extracted.")
+            String::from(
+                "The response body was received, but no static text or form controls were extracted.",
+            )
         };
         document = Document::from_plain(
             &url.host,
