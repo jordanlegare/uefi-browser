@@ -121,7 +121,14 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
             };
             text.push_str(label);
             text.push_str(": [");
-            let available = width.saturating_sub(character_width('[') + character_width(']') + label.chars().map(character_width).sum::<usize>() + 2).max(1);
+            let available = width
+                .saturating_sub(
+                    character_width('[')
+                        + character_width(']')
+                        + label.chars().map(character_width).sum::<usize>()
+                        + 2,
+                )
+                .max(1);
             let shown = if control.kind == FormControlKind::Password {
                 "*".repeat(control.value.chars().count())
             } else {
@@ -168,17 +175,29 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
         }
         FormControlKind::Submit => {
             text.push_str("[ ");
-            text.push_str(if control.label.is_empty() { "Submit" } else { &control.label });
+            text.push_str(if control.label.is_empty() {
+                "Submit"
+            } else {
+                &control.label
+            });
             text.push_str(" ]");
         }
         FormControlKind::Reset => {
             text.push_str("[ ");
-            text.push_str(if control.label.is_empty() { "Reset" } else { &control.label });
+            text.push_str(if control.label.is_empty() {
+                "Reset"
+            } else {
+                &control.label
+            });
             text.push_str(" ]");
         }
         FormControlKind::Button => {
             text.push_str("[ ");
-            text.push_str(if control.label.is_empty() { "Button" } else { &control.label });
+            text.push_str(if control.label.is_empty() {
+                "Button"
+            } else {
+                &control.label
+            });
             text.push_str(" ]");
         }
         FormControlKind::File => {
@@ -733,12 +752,18 @@ mod tests {
             }],
             blocks: alloc::vec![
                 Block {
-                    kind: BlockKind::FormControl { form_index: 0, control_index: 0 },
+                    kind: BlockKind::FormControl {
+                        form_index: 0,
+                        control_index: 0
+                    },
                     runs: Vec::new(),
                     style: ComputedStyle::default(),
                 },
                 Block {
-                    kind: BlockKind::FormControl { form_index: 0, control_index: 1 },
+                    kind: BlockKind::FormControl {
+                        form_index: 0,
+                        control_index: 1
+                    },
                     runs: Vec::new(),
                     style: ComputedStyle::default(),
                 },
@@ -746,7 +771,11 @@ mod tests {
             ..Document::default()
         };
         let lines = layout_document(&document, 60);
-        let rendered = lines.iter().map(RenderLine::plain_text).collect::<Vec<_>>().join("\n");
+        let rendered = lines
+            .iter()
+            .map(RenderLine::plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(rendered.contains("Username: [alice]"));
         assert!(rendered.contains("Password: [******]"));
         assert!(!rendered.contains("secret"));
