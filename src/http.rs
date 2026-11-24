@@ -601,7 +601,8 @@ mod tests {
             &url,
             Some("bad\\r\\nInjected: yes"),
             None,
-        )).unwrap();
+        ))
+        .unwrap();
         assert!(!unsafe_request.contains("Injected: yes"));
     }
 
