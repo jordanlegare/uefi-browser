@@ -202,10 +202,10 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
 
                 if is_block_tag(&name) && !matches!(name.as_str(), "tr") {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     current_kind = BlockKind::Paragraph;
                     append_newline(&mut document.text);
                 }
@@ -233,10 +233,10 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 }
                 "hr" => {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     if document.blocks.len() < MAX_BLOCKS {
                         document.blocks.push(Block {
                             kind: BlockKind::Paragraph,
@@ -253,10 +253,10 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 "ol" => list_stack.push((true, 0)),
                 "li" => {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     let depth = list_stack.len().min(u8::MAX as usize) as u8;
                     let (ordered, ordinal) = if let Some((ordered, count)) = list_stack.last_mut() {
                         *count = count.saturating_add(1);
@@ -272,51 +272,51 @@ pub fn parse_html(source: &str, base: &Url) -> Document {
                 }
                 "blockquote" => {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     current_kind = BlockKind::Quote;
                 }
                 "pre" => {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     current_kind = BlockKind::Preformatted;
                     in_pre = true;
                 }
                 "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     current_kind = BlockKind::Heading(name.as_bytes()[1] - b'0');
                 }
                 "dt" => {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     current_kind = BlockKind::DefinitionTerm;
                 }
                 "dd" => {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     current_kind = BlockKind::DefinitionDescription;
                 }
                 "tr" => {
                     flush_block(
-                            &mut document.blocks,
-                            &mut current_runs,
-                            current_kind.clone(),
-                        );
+                        &mut document.blocks,
+                        &mut current_runs,
+                        current_kind.clone(),
+                    );
                     current_kind = BlockKind::TableRow { header: false };
                     in_table_row = true;
                     table_cells = 0;
