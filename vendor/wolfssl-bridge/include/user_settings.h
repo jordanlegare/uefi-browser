@@ -10,6 +10,24 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <time.h>
+#include <errno.h>
+#include <ctype.h>
+#include <string.h>
+#endif
+
+/*
+ * MinGW's CRT headers mark these routines dllimport even for our freestanding
+ * UEFI image. Include their headers first, then redirect wolfSSL call sites to
+ * local freestanding implementations in uefi_crt.c.
+ */
+#define _errno uefi_wolfssl_errno
+#define tolower uefi_wolfssl_tolower
+#define _stricmp uefi_wolfssl_stricmp
+
+#ifndef __ASSEMBLER__
+extern int *uefi_wolfssl_errno(void);
+extern int uefi_wolfssl_tolower(int character);
+extern int uefi_wolfssl_stricmp(const char *left, const char *right);
 #endif
 
 /* Keep the x86-64 PE/COFF ABI, but do not use Windows OS APIs. */
