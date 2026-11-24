@@ -99,7 +99,7 @@ Not implemented: full CSS cascade semantics (including complete !important handl
 
 Element IDs and legacy named anchors are retained as fragment targets. Navigating to a fragment in the current document moves the viewport locally without another HTTP request. Fragments remain part of the browser's visible/history URL but are omitted from the HTTP request target.
 
-Forms support common text, password, email, search, number, checkbox, radio, select, textarea, hidden and submit controls. GET and POST submissions use application/x-www-form-urlencoded. Password input is masked, POST requires explicit confirmation, and request bodies are capped at 8 KiB.
+Forms render their visible controls as part of the page. Use **Tab** or the arrow keys to focus links and fields, type directly into a text field, and use **Backspace** to edit. **Enter** submits the focused form; it does not open a second series of prompts. Space toggles checkboxes and radio options, while Left/Right changes the selected option in a select control. Labels associated with inputs are retained, and password values are masked in the rendered field. GET and POST submissions use application/x-www-form-urlencoded; POST still requires explicit confirmation, and request bodies are capped at 8 KiB.
 
 File upload, multipart form encoding, JavaScript-driven forms, cookies/session state, and full HTML constraint validation are not implemented.
 
@@ -119,11 +119,15 @@ Pages served from disk cache are visibly marked in the browser status/header. If
 
 | Key | Action |
 |---|---|
-| Up / Down, j / k | Scroll one line |
-| Page Up / Page Down, Space | Scroll one page |
+| Up / Down | Move to the nearest link or form control above/below; scroll if none |
+| Left / Right | Move focus between links/controls; change a focused select value |
+| j / k | Scroll one line |
+| Page Up / Page Down | Scroll one page |
 | Home / End | Move to document boundaries |
-| Tab / [ | Move link focus |
-| Enter | Follow focused link |
+| Tab / [ | Move to the next/previous focusable link or form control |
+| Printable keys / Backspace | Edit the focused text field |
+| Space | Toggle a focused checkbox or radio option |
+| Enter | Submit the focused form or follow the focused link |
 | l | List links |
 | g / o | Enter or open a URL |
 | b / f | Back / forward |
@@ -133,7 +137,7 @@ Pages served from disk cache are visibly marked in the browser status/header. If
 | : | Open the command prompt |
 | q | Quit to firmware |
 
-The command prompt supports URL opening, opening a numbered link or bookmark, bookmark management, form selection, cache inspection and cache clearing. Commands include:
+The command prompt supports URL opening, opening a numbered link or bookmark, bookmark management, focusing a form, cache inspection and cache clearing. The `form N` command moves focus to the first visible control in form N; edit the visible fields and press Enter to submit. Commands include:
 
     open URL
     open N
@@ -146,7 +150,7 @@ The command prompt supports URL opening, opening a numbered link or bookmark, bo
     clear-cache
     search WORD
 
-Use `form N` to interact with a numbered form. The browser asks for confirmation before sending a POST request.
+Use `form N` to focus the first visible control in a numbered form. You can also focus links and controls with Tab or the arrow keys. Enter submits the form using the values currently shown in the fields. The browser asks for confirmation before sending a POST request.
 
 ## Build and test
 
@@ -264,6 +268,8 @@ The project is a clean-room Rust implementation inspired by ELinks' text-browser
 - [x] Bounded HTML5-style tree construction and terminal-oriented CSS subset.
 - [x] Width-aware reflow, measured table columns and colspan sizing.
 - [x] Fragment navigation and URL-encoded GET/POST forms.
+- [x] Inline visible form controls, direct keyboard editing, checkbox/radio/select interaction, and Enter submission.
+- [x] Arrow-key focus movement across links and form controls.
 - [x] Persistent bookmarks and bounded disk page cache.
 - [ ] Expand HTML parsing toward complete WHATWG insertion-mode and error-recovery behaviour.
 - [ ] Add rowspan table layout and more complete table algorithms.

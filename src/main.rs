@@ -12,8 +12,8 @@ use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::{Status, helpers, system};
 
 use uefi_browser::document::{
-    Document, Form, FormControlKind, FormMethod, Link, TermColor, external_stylesheet_urls,
-    parse_html, parse_html_with_styles,
+    BlockKind, Document, Form, FormControlKind, FormMethod, Link, TermColor,
+    external_stylesheet_urls, parse_html, parse_html_with_styles,
 };
 use uefi_browser::http::{self, HttpResponse};
 use uefi_browser::network::connect_firmware_url;
@@ -995,10 +995,16 @@ enum BrowserAction {
     Bottom,
     NextLink,
     PreviousLink,
+    MoveFocusUp,
+    MoveFocusDown,
     ActivateLink,
     FindNext,
     Bookmark,
     Bookmarks,
+    Text(char),
+    Backspace,
+    ToggleControl,
+    ClearFocus,
 }
 
 fn same_resource(left: &Url, right: &Url) -> bool {
@@ -1041,171 +1047,98 @@ fn form_query_string(fields: &[(String, String)]) -> Result<String, String> {
 
 fn submit_form(
     form: &Form,
+    submitter_control: Option<usize>,
     network: &mut uefi_browser::snp_network::SnpNetwork,
 ) -> Result<(Url, &'static str, Vec<u8>), String> {
+    let effective_submitter = submitter_control.or_else(|| {
+        form.controls
+            .iter()
+            .position(|control| !control.disabled && control.kind == FormControlKind::Submit)
+    });
     let mut fields: Vec<(String, String)> = Vec::new();
     let mut selected_radio_names: Vec<String> = Vec::new();
-    let mut submit_button_used = false;
 
-    for control in &form.controls {
-        if control.disabled {
+    for (index, control) in form.controls.iter().enumerate() {
+        if control.disabled || control.name.is_empty() {
             continue;
         }
-        if control.name.is_empty() && control.kind != FormControlKind::Submit {
-            continue;
-        }
+
         let value = match control.kind {
-            FormControlKind::Hidden => Some(control.value.clone()),
-            FormControlKind::Submit => {
-                if submit_button_used {
-                    None
-                } else {
-                    submit_button_used = true;
-                    Some(control.value.clone())
-                }
-            }
-            FormControlKind::Reset | FormControlKind::Button => None,
-            FormControlKind::File => {
-                return Err(String::from(
-                    "file uploads are not supported by this firmware browser",
-                ));
-            }
+            FormControlKind::Hidden
+            | FormControlKind::Text
+            | FormControlKind::Password
+            | FormControlKind::Email
+            | FormControlKind::Search
+            | FormControlKind::Number
+            | FormControlKind::TextArea => Some(control.value.clone()),
             FormControlKind::Checkbox => {
-                let prompt = format!(
-                    "{} [{}] (y/n, ENTER keeps default): ",
-                    control.label,
-                    if control.checked { "Y" } else { "n" }
-                );
-                let Some(answer) = read_line(&prompt, network) else {
-                    return Err(String::from("form cancelled"));
-                };
-                let checked = match answer.trim().to_ascii_lowercase().as_str() {
-                    "" => control.checked,
-                    "y" | "yes" | "1" | "on" => true,
-                    "n" | "no" | "0" | "off" => false,
-                    _ => return Err(format!("invalid checkbox answer for {}", control.label)),
-                };
-                if checked {
+                if control.checked {
                     Some(if control.value.is_empty() {
                         String::from("on")
                     } else {
                         control.value.clone()
                     })
                 } else {
+                    if control.required {
+                        return Err(format!("{} must be checked", control.label));
+                    }
                     None
                 }
             }
             FormControlKind::Radio => {
-                if selected_radio_names
-                    .iter()
-                    .any(|name| name == &control.name)
-                {
-                    None
-                } else {
-                    let prompt = format!(
-                        "{} — choose this option? [{}] (y/n): ",
-                        control.label,
-                        if control.checked { "Y" } else { "n" }
-                    );
-                    let Some(answer) = read_line(&prompt, network) else {
-                        return Err(String::from("form cancelled"));
-                    };
-                    let selected = match answer.trim().to_ascii_lowercase().as_str() {
-                        "" => control.checked,
-                        "y" | "yes" | "1" => true,
-                        "n" | "no" | "0" => false,
-                        _ => return Err(format!("invalid radio answer for {}", control.label)),
-                    };
-                    if selected {
+                if control.checked {
+                    if selected_radio_names
+                        .iter()
+                        .any(|name| name == &control.name)
+                    {
+                        None
+                    } else {
                         selected_radio_names.push(control.name.clone());
                         Some(control.value.clone())
-                    } else {
-                        None
                     }
+                } else {
+                    None
                 }
             }
-            FormControlKind::Select => {
-                if control.options.is_empty() {
+            FormControlKind::Select => Some(control.value.clone()),
+            FormControlKind::Submit => {
+                if effective_submitter == Some(index) {
                     Some(control.value.clone())
                 } else {
-                    uefi::println!("{}:", control.label);
-                    for (index, option) in control.options.iter().enumerate() {
-                        uefi::println!(
-                            "  {}. {}{}",
-                            index + 1,
-                            option.label,
-                            if option.value == control.value {
-                                " [selected]"
-                            } else {
-                                ""
-                            }
-                        );
-                    }
-                    let default = control
-                        .options
-                        .iter()
-                        .position(|option| option.value == control.value)
-                        .map(|index| index + 1)
-                        .unwrap_or(1);
-                    let prompt = format!("Selection [{}]: ", default);
-                    let Some(answer) = read_line(&prompt, network) else {
-                        return Err(String::from("form cancelled"));
-                    };
-                    let selected = if answer.trim().is_empty() {
-                        default
-                    } else {
-                        answer.trim().parse::<usize>().unwrap_or(0)
-                    };
-                    let Some(option) = selected
-                        .checked_sub(1)
-                        .and_then(|index| control.options.get(index))
-                    else {
-                        return Err(format!("invalid selection for {}", control.label));
-                    };
-                    Some(option.value.clone())
+                    None
                 }
             }
-            FormControlKind::Password => {
-                let prompt = format!("{} (password): ", control.label);
-                let Some(answer) = read_line_masked(&prompt, network) else {
-                    return Err(String::from("form cancelled"));
-                };
-                Some(if answer.is_empty() {
-                    control.value.clone()
-                } else {
-                    answer
-                })
+            FormControlKind::File => {
+                if !control.value.is_empty() {
+                    return Err(String::from(
+                        "file uploads are not supported by this firmware browser",
+                    ));
+                }
+                None
             }
-            FormControlKind::Text
-            | FormControlKind::Email
-            | FormControlKind::Search
-            | FormControlKind::Number
-            | FormControlKind::TextArea => {
-                let prompt = if control.value.is_empty() {
-                    format!("{}: ", control.label)
-                } else {
-                    format!("{} [{}]: ", control.label, control.value)
-                };
-                let Some(answer) = read_line(&prompt, network) else {
-                    return Err(String::from("form cancelled"));
-                };
-                Some(if answer.is_empty() {
-                    control.value.clone()
-                } else {
-                    answer
-                })
-            }
+            FormControlKind::Reset | FormControlKind::Button => None,
         };
 
-        if let Some(value) = value {
-            if control.required && value.trim().is_empty() {
-                return Err(format!("{} is required", control.label));
-            }
-            if !control.name.is_empty() {
-                fields.push((control.name.clone(), value));
-            }
-        } else if control.required && control.kind == FormControlKind::Checkbox {
+        if control.required && value.as_ref().is_some_and(|value| value.trim().is_empty()) {
             return Err(format!("{} is required", control.label));
+        }
+        if control.required && value.is_none() && control.kind != FormControlKind::Radio {
+            return Err(format!("{} is required", control.label));
+        }
+        if let Some(value) = value {
+            if control.kind == FormControlKind::Email
+                && !value.is_empty()
+                && (!value.contains('@') || value.ends_with('@'))
+            {
+                return Err(format!("{} is not a valid email address", control.label));
+            }
+            if control.kind == FormControlKind::Number
+                && !value.is_empty()
+                && value.parse::<f64>().is_err()
+            {
+                return Err(format!("{} must be a number", control.label));
+            }
+            fields.push((control.name.clone(), value));
         }
     }
 
@@ -1214,12 +1147,26 @@ fn submit_form(
         .iter()
         .filter(|control| control.required && control.kind == FormControlKind::Radio)
     {
-        if !fields.iter().any(|(name, _)| name == &control.name) {
+        if !form.controls.iter().any(|candidate| {
+            candidate.name == control.name && candidate.checked && !candidate.disabled
+        }) {
             return Err(format!("{} requires one selected option", control.label));
         }
     }
 
-    let query = form_query_string(&fields)?;
+    let mut query = String::new();
+    for (name, value) in &fields {
+        if !query.is_empty() {
+            query.push('&');
+        }
+        query.push_str(&url_encode_component(name));
+        query.push('=');
+        query.push_str(&url_encode_component(value));
+        if query.len() > MAX_FORM_BODY_BYTES {
+            return Err(String::from("form data exceeds the 8 KiB submission limit"));
+        }
+    }
+
     let action =
         Url::parse(&form.action).map_err(|error| format!("invalid form action: {error}"))?;
     match form.method {
@@ -1263,6 +1210,260 @@ fn display_bookmarks(store: &mut BrowserStore) {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FocusTarget {
+    Link(usize),
+    Control(usize, usize),
+}
+
+fn control_accepts_text(kind: FormControlKind) -> bool {
+    matches!(
+        kind,
+        FormControlKind::Text
+            | FormControlKind::Password
+            | FormControlKind::Email
+            | FormControlKind::Search
+            | FormControlKind::Number
+            | FormControlKind::TextArea
+    )
+}
+
+fn focus_targets(page: &BrowserPage, lines: &[RenderLine]) -> Vec<(usize, FocusTarget)> {
+    let mut targets = Vec::new();
+    for (index, _) in page.document.links.iter().enumerate() {
+        if let Some(line) = renderer::line_for_link(lines, index) {
+            targets.push((line, FocusTarget::Link(index)));
+        }
+    }
+    for (block_index, block) in page.document.blocks.iter().enumerate() {
+        let BlockKind::FormControl {
+            form_index,
+            control_index,
+        } = &block.kind
+        else {
+            continue;
+        };
+        let form_index = *form_index;
+        let control_index = *control_index;
+        let Some(control) = page
+            .document
+            .forms
+            .get(form_index)
+            .and_then(|form| form.controls.get(control_index))
+        else {
+            continue;
+        };
+        if control.disabled || control.kind == FormControlKind::Hidden {
+            continue;
+        }
+        if let Some(line) = lines
+            .iter()
+            .position(|line| line.block_index == Some(block_index))
+        {
+            targets.push((line, FocusTarget::Control(form_index, control_index)));
+        }
+    }
+    targets.sort_by_key(|(line, target)| {
+        let order = match target {
+            FocusTarget::Link(index) => *index,
+            FocusTarget::Control(form, control) => {
+                usize::MAX / 2 + form.saturating_mul(128) + control
+            }
+        };
+        (*line, order)
+    });
+    targets
+}
+
+fn apply_focus_target(
+    target: FocusTarget,
+    line: usize,
+    selected_link: &mut Option<usize>,
+    selected_control: &mut Option<(usize, usize)>,
+    first_line: &mut usize,
+    content_height: usize,
+) {
+    match target {
+        FocusTarget::Link(index) => {
+            *selected_link = Some(index);
+            *selected_control = None;
+        }
+        FocusTarget::Control(form, control) => {
+            *selected_link = None;
+            *selected_control = Some((form, control));
+        }
+    }
+    reveal_focus_line(line, first_line, content_height);
+}
+
+fn reveal_focus_line(line: usize, first_line: &mut usize, content_height: usize) {
+    if line < *first_line {
+        *first_line = line;
+    } else if line >= first_line.saturating_add(content_height) {
+        *first_line = line.saturating_sub(content_height.saturating_sub(1));
+    }
+}
+
+fn move_focus(
+    page: &BrowserPage,
+    lines: &[RenderLine],
+    direction: i8,
+    selected_link: &mut Option<usize>,
+    selected_control: &mut Option<(usize, usize)>,
+    first_line: &mut usize,
+    content_height: usize,
+) -> bool {
+    let targets = focus_targets(page, lines);
+    if targets.is_empty() {
+        return false;
+    }
+    let current = selected_control
+        .map(|(form, control)| FocusTarget::Control(form, control))
+        .or_else(|| selected_link.map(FocusTarget::Link));
+    let current_index = current.and_then(|target| {
+        targets
+            .iter()
+            .position(|(_, candidate)| *candidate == target)
+    });
+    let next = if direction >= 0 {
+        current_index.map_or(0, |index| (index + 1) % targets.len())
+    } else {
+        current_index.map_or(targets.len() - 1, |index| {
+            if index == 0 {
+                targets.len() - 1
+            } else {
+                index - 1
+            }
+        })
+    };
+    let (line, target) = targets[next];
+    apply_focus_target(
+        target,
+        line,
+        selected_link,
+        selected_control,
+        first_line,
+        content_height,
+    );
+    true
+}
+
+fn move_focus_vertical(
+    page: &BrowserPage,
+    lines: &[RenderLine],
+    direction: i8,
+    selected_link: &mut Option<usize>,
+    selected_control: &mut Option<(usize, usize)>,
+    first_line: &mut usize,
+    content_height: usize,
+) -> bool {
+    let targets = focus_targets(page, lines);
+    if targets.is_empty() {
+        return false;
+    }
+    let current_line = if let Some((form, control)) = *selected_control {
+        targets
+            .iter()
+            .find(|(_, target)| *target == FocusTarget::Control(form, control))
+            .map(|(line, _)| *line)
+    } else if let Some(link) = *selected_link {
+        targets
+            .iter()
+            .find(|(_, target)| *target == FocusTarget::Link(link))
+            .map(|(line, _)| *line)
+    } else {
+        None
+    };
+    let reference = current_line.unwrap_or(*first_line);
+    let candidate = if direction >= 0 {
+        targets
+            .iter()
+            .filter(|(line, _)| *line > reference || (current_line.is_none() && *line >= reference))
+            .min_by_key(|(line, _)| *line)
+    } else {
+        targets
+            .iter()
+            .filter(|(line, _)| *line < reference)
+            .max_by_key(|(line, _)| *line)
+    };
+    if let Some((line, target)) = candidate {
+        apply_focus_target(
+            *target,
+            *line,
+            selected_link,
+            selected_control,
+            first_line,
+            content_height,
+        );
+        true
+    } else {
+        false
+    }
+}
+
+fn cycle_select_option(
+    page: &mut BrowserPage,
+    selected_control: Option<(usize, usize)>,
+    direction: i8,
+) -> bool {
+    let Some((form_index, control_index)) = selected_control else {
+        return false;
+    };
+    let Some(control) = page
+        .document
+        .forms
+        .get_mut(form_index)
+        .and_then(|form| form.controls.get_mut(control_index))
+    else {
+        return false;
+    };
+    if control.kind != FormControlKind::Select || control.options.is_empty() {
+        return false;
+    }
+    let current = control
+        .options
+        .iter()
+        .position(|option| option.value == control.value)
+        .unwrap_or(0);
+    let next = if direction >= 0 {
+        (current + 1) % control.options.len()
+    } else if current == 0 {
+        control.options.len() - 1
+    } else {
+        current - 1
+    };
+    control.value = control.options[next].value.clone();
+    true
+}
+
+fn toggle_form_control(page: &mut BrowserPage, selected_control: Option<(usize, usize)>) -> bool {
+    let Some((form_index, control_index)) = selected_control else {
+        return false;
+    };
+    let Some(form) = page.document.forms.get_mut(form_index) else {
+        return false;
+    };
+    let Some(control) = form.controls.get_mut(control_index) else {
+        return false;
+    };
+    match control.kind {
+        FormControlKind::Checkbox => {
+            control.checked = !control.checked;
+            true
+        }
+        FormControlKind::Radio => {
+            let name = control.name.clone();
+            for (index, sibling) in form.controls.iter_mut().enumerate() {
+                if sibling.kind == FormControlKind::Radio && sibling.name == name {
+                    sibling.checked = index == control_index;
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 fn run_browser_ui(
     page: &mut BrowserPage,
     history: &mut Vec<Url>,
@@ -1272,6 +1473,7 @@ fn run_browser_ui(
 ) {
     let mut first_line = 0usize;
     let mut selected_link: Option<usize> = None;
+    let mut selected_control: Option<(usize, usize)> = None;
     let mut navigation_error: Option<String> = None;
     let mut status = String::from("Ready");
     let mut last_search = String::new();
@@ -1302,11 +1504,16 @@ fn run_browser_ui(
             first_line,
             content_height,
             selected_link,
+            selected_control,
             navigation_error.as_deref(),
             &status,
         );
 
-        let Some(action) = read_browser_action(network) else {
+        let text_entry = selected_control
+            .and_then(|(form, control)| page.document.forms.get(form)?.controls.get(control))
+            .is_some_and(|control| control_accepts_text(control.kind));
+        let Some(action) = read_browser_action(network, selected_control.is_some(), text_entry)
+        else {
             break;
         };
 
@@ -1320,6 +1527,57 @@ fn run_browser_ui(
             BrowserAction::ScrollDown => {
                 first_line = first_line.saturating_add(1).min(max_first);
                 status = String::from("Scrolled down");
+                continue;
+            }
+            BrowserAction::Text(character) => {
+                if let Some((form, control)) = selected_control {
+                    if let Some(field) = page
+                        .document
+                        .forms
+                        .get_mut(form)
+                        .and_then(|form| form.controls.get_mut(control))
+                    {
+                        if control_accepts_text(field.kind)
+                            && !field.read_only
+                            && !character.is_control()
+                            && field.value.len().saturating_add(character.len_utf8())
+                                <= MAX_INPUT_BYTES
+                        {
+                            field.value.push(character);
+                            status = format!("Editing {}", field.label);
+                        } else if control_accepts_text(field.kind) {
+                            status = String::from("Input field reached its 2 KiB limit");
+                        }
+                    }
+                }
+                continue;
+            }
+            BrowserAction::Backspace => {
+                if let Some((form, control)) = selected_control {
+                    if let Some(field) = page
+                        .document
+                        .forms
+                        .get_mut(form)
+                        .and_then(|form| form.controls.get_mut(control))
+                    {
+                        if control_accepts_text(field.kind) && !field.read_only {
+                            field.value.pop();
+                            status = format!("Editing {}", field.label);
+                        }
+                    }
+                }
+                continue;
+            }
+            BrowserAction::ToggleControl => {
+                if toggle_form_control(page, selected_control) {
+                    status = String::from("Form control changed");
+                }
+                continue;
+            }
+            BrowserAction::ClearFocus => {
+                selected_link = None;
+                selected_control = None;
+                status = String::from("Focus cleared");
                 continue;
             }
             BrowserAction::PageUp => {
@@ -1345,39 +1603,105 @@ fn run_browser_ui(
                 continue;
             }
             BrowserAction::NextLink => {
-                if page.document.links.is_empty() {
-                    status = String::from("No links on this page");
+                if cycle_select_option(page, selected_control, 1) {
+                    status = String::from("Selection changed");
+                } else if move_focus(
+                    page,
+                    &lines,
+                    1,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                ) {
+                    status = String::from("Moved focus forward");
                 } else {
-                    let next =
-                        selected_link.map_or(0, |index| (index + 1) % page.document.links.len());
-                    selected_link = Some(next);
-                    reveal_link(&lines, next, &mut first_line, content_height);
-                    status = format!("Link {}/{}", next + 1, page.document.links.len());
+                    status = String::from("No links or form controls on this page");
                 }
                 continue;
             }
             BrowserAction::PreviousLink => {
-                if page.document.links.is_empty() {
-                    status = String::from("No links on this page");
+                if cycle_select_option(page, selected_control, -1) {
+                    status = String::from("Selection changed");
+                } else if move_focus(
+                    page,
+                    &lines,
+                    -1,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                ) {
+                    status = String::from("Moved focus backward");
                 } else {
-                    let previous = selected_link.map_or(page.document.links.len() - 1, |index| {
-                        if index == 0 {
-                            page.document.links.len() - 1
-                        } else {
-                            index - 1
-                        }
-                    });
-                    selected_link = Some(previous);
-                    reveal_link(&lines, previous, &mut first_line, content_height);
-                    status = format!("Link {}/{}", previous + 1, page.document.links.len());
+                    status = String::from("No links or form controls on this page");
+                }
+                continue;
+            }
+            BrowserAction::MoveFocusDown => {
+                if move_focus_vertical(
+                    page,
+                    &lines,
+                    1,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                ) {
+                    status = String::from("Moved to next link or control");
+                } else {
+                    first_line = first_line.saturating_add(1).min(max_first);
+                    status = String::from("Scrolled down");
+                }
+                continue;
+            }
+            BrowserAction::MoveFocusUp => {
+                if move_focus_vertical(
+                    page,
+                    &lines,
+                    -1,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                ) {
+                    status = String::from("Moved to previous link or control");
+                } else {
+                    first_line = first_line.saturating_sub(1);
+                    status = String::from("Scrolled up");
                 }
                 continue;
             }
             BrowserAction::ActivateLink => {
-                if let Some(index) = selected_link {
+                if let Some((form, control)) = selected_control {
+                    let kind = page
+                        .document
+                        .forms
+                        .get(form)
+                        .and_then(|form| form.controls.get(control))
+                        .map(|control| control.kind);
+                    match kind {
+                        Some(FormControlKind::Reset) => {
+                            status = String::from("Reset buttons are not supported yet");
+                            continue;
+                        }
+                        Some(FormControlKind::Button) => {
+                            status = String::from(
+                                "This button requires JavaScript, which is disabled in firmware",
+                            );
+                            continue;
+                        }
+                        Some(FormControlKind::File) => {
+                            status = String::from("File uploads are not supported");
+                            continue;
+                        }
+                        _ => format!("form-submit {} {}", form + 1, control + 1),
+                    }
+                } else if let Some(index) = selected_link {
                     format!("open {}", index + 1)
                 } else {
-                    status = String::from("Press TAB to focus a link, then ENTER to open it");
+                    status =
+                        String::from("Press TAB or an arrow key to focus a link or form field");
                     continue;
                 }
             }
@@ -1540,18 +1864,30 @@ fn run_browser_ui(
             }
             continue;
         }
-        if let Some(number) = command.strip_prefix("form ") {
-            let index = number
-                .trim()
-                .parse::<usize>()
-                .ok()
+        if let Some(arguments) = command.strip_prefix("form-submit ") {
+            let mut parts = arguments.split_whitespace();
+            let form_index = parts
+                .next()
+                .and_then(|part| part.parse::<usize>().ok())
                 .and_then(|value| value.checked_sub(1));
-            let form = index.and_then(|index| page.document.forms.get(index).cloned());
-            let Some(form) = form else {
+            let control_index = parts
+                .next()
+                .and_then(|part| part.parse::<usize>().ok())
+                .and_then(|value| value.checked_sub(1));
+            let Some(form_index) = form_index else {
+                status = String::from("Usage: form-submit FORM [SUBMIT_CONTROL]");
+                continue;
+            };
+            let Some(form) = page.document.forms.get(form_index).cloned() else {
                 status = String::from("Form not found on this page");
                 continue;
             };
-            match submit_form(&form, network) {
+            let submitter = control_index.filter(|index| {
+                form.controls.get(*index).is_some_and(|control| {
+                    control.kind == FormControlKind::Submit && !control.disabled
+                })
+            });
+            match submit_form(&form, submitter, network) {
                 Ok((target, method, body)) => {
                     status = format!("Submitting {} form to {}", method, target.as_string());
                     match fetch_form_document(&target, method, &body, network) {
@@ -1563,6 +1899,7 @@ fn run_browser_ui(
                             first_line = 0;
                             anchor_pending = true;
                             selected_link = None;
+                            selected_control = None;
                             navigation_error = None;
                             last_search.clear();
                             status = format!("Form response: HTTP {}", page.status);
@@ -1574,6 +1911,46 @@ fn run_browser_ui(
                     }
                 }
                 Err(error) => status = error,
+            }
+            continue;
+        }
+
+        if let Some(number) = command.strip_prefix("form ") {
+            let index = number
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|value| value.checked_sub(1));
+            let Some(form_index) = index.filter(|index| *index < page.document.forms.len()) else {
+                status = String::from("Form not found on this page");
+                continue;
+            };
+            let Some((control_index, _)) = page.document.forms[form_index]
+                .controls
+                .iter()
+                .enumerate()
+                .find(|(_, control)| !control.disabled && control.kind != FormControlKind::Hidden)
+            else {
+                status = String::from("This form has no visible editable controls");
+                continue;
+            };
+            let target = FocusTarget::Control(form_index, control_index);
+            let targets = focus_targets(page, &lines);
+            if let Some((line, _)) = targets.iter().find(|(_, candidate)| *candidate == target) {
+                apply_focus_target(
+                    target,
+                    *line,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                );
+                status = format!(
+                    "Focused form {}. Type into the field; ENTER submits.",
+                    form_index + 1
+                );
+            } else {
+                status = String::from("Form control is not visible in the rendered page");
             }
             continue;
         }
@@ -1678,6 +2055,7 @@ fn run_browser_ui(
             first_line,
             content_height,
             selected_link,
+            selected_control,
             None,
             &status,
         );
@@ -1695,6 +2073,7 @@ fn run_browser_ui(
                 first_line = 0;
                 anchor_pending = true;
                 selected_link = None;
+                selected_control = None;
                 last_search.clear();
                 status = format!("Loaded HTTP {}", page.status);
             }
@@ -1718,6 +2097,8 @@ fn reveal_link(lines: &[RenderLine], link: usize, first_line: &mut usize, height
 
 fn read_browser_action(
     network: &mut uefi_browser::snp_network::SnpNetwork,
+    focused_control: bool,
+    text_entry: bool,
 ) -> Option<BrowserAction> {
     loop {
         network.poll();
@@ -1725,6 +2106,24 @@ fn read_browser_action(
         match key {
             Some(Key::Printable(unit)) => {
                 let character: char = unit.into();
+                if character == '\r' || character == '\n' {
+                    return Some(BrowserAction::ActivateLink);
+                }
+                if character == '\u{8}' {
+                    return Some(BrowserAction::Backspace);
+                }
+                if character == '\t' {
+                    return Some(BrowserAction::NextLink);
+                }
+                if focused_control {
+                    if text_entry && !character.is_control() {
+                        return Some(BrowserAction::Text(character));
+                    }
+                    if character == ' ' {
+                        return Some(BrowserAction::ToggleControl);
+                    }
+                    continue;
+                }
                 match character {
                     'q' | '\u{3}' => return Some(BrowserAction::Quit),
                     'g' | 'o' => return Some(BrowserAction::Goto),
@@ -1742,19 +2141,20 @@ fn read_browser_action(
                     'k' => return Some(BrowserAction::ScrollUp),
                     ' ' => return Some(BrowserAction::PageDown),
                     '\t' => return Some(BrowserAction::NextLink),
-                    '\r' | '\n' => return Some(BrowserAction::ActivateLink),
                     '[' => return Some(BrowserAction::PreviousLink),
                     _ => {}
                 }
             }
             Some(Key::Special(code)) => match code {
-                ScanCode::UP => return Some(BrowserAction::ScrollUp),
-                ScanCode::DOWN => return Some(BrowserAction::ScrollDown),
+                ScanCode::UP => return Some(BrowserAction::MoveFocusUp),
+                ScanCode::DOWN => return Some(BrowserAction::MoveFocusDown),
+                ScanCode::LEFT => return Some(BrowserAction::PreviousLink),
+                ScanCode::RIGHT => return Some(BrowserAction::NextLink),
                 ScanCode::PAGE_UP => return Some(BrowserAction::PageUp),
                 ScanCode::PAGE_DOWN => return Some(BrowserAction::PageDown),
                 ScanCode::HOME => return Some(BrowserAction::Top),
                 ScanCode::END => return Some(BrowserAction::Bottom),
-                ScanCode::ESCAPE => return Some(BrowserAction::PreviousLink),
+                ScanCode::ESCAPE => return Some(BrowserAction::ClearFocus),
                 _ => {}
             },
             None => {
@@ -1780,6 +2180,7 @@ fn render_terminal_page(
     first_line: usize,
     content_height: usize,
     selected_link: Option<usize>,
+    selected_control: Option<(usize, usize)>,
     navigation_error: Option<&str>,
     status: &str,
 ) {
@@ -1795,8 +2196,7 @@ fn render_terminal_page(
     );
     let address = format!(" URL  {}", page.url.as_string());
     let status_line = navigation_error.unwrap_or(status);
-    let footer =
-        " TAB link  ENTER open  arrows scroll  PGUP/PGDN page  g go  / find  : command  q quit";
+    let footer = " TAB focus  arrows move  TYPE edit  ENTER submit/open  PGUP/PGDN scroll  q quit";
 
     let _ = system::with_stdout(|output| {
         let _ = output.clear();
@@ -1817,7 +2217,17 @@ fn render_terminal_page(
             let _ = output.set_cursor_position(0, screen_row);
             let _ = output.set_color(Color::LightGray, Color::Black);
             if let Some(line) = lines.get(line_index) {
-                write_render_line(output, line, width, selected_link);
+                let focused_control = line
+                    .block_index
+                    .and_then(|index| page.document.blocks.get(index))
+                    .is_some_and(|block| match &block.kind {
+                        BlockKind::FormControl {
+                            form_index,
+                            control_index,
+                        } => selected_control == Some((*form_index, *control_index)),
+                        _ => false,
+                    });
+                write_render_line(output, line, width, selected_link, focused_control);
             } else {
                 write_console_text(output, " ");
             }
@@ -1923,13 +2333,14 @@ fn write_render_line(
     line: &RenderLine,
     width: usize,
     selected_link: Option<usize>,
+    focused_control: bool,
 ) {
     let mut used = 0usize;
     for span in &line.spans {
         if used >= width {
             break;
         }
-        let selected = span.link.is_some() && span.link == selected_link;
+        let selected = focused_control || (span.link.is_some() && span.link == selected_link);
         let default_foreground = if span.link.is_some() {
             Color::LightCyan
         } else if span.style.code {
@@ -2011,11 +2422,14 @@ fn render_links(links: &[Link]) {
 fn print_help() {
     uefi::println!("");
     uefi::println!("UEFI Browser keyboard and command reference");
-    uefi::println!("  UP / DOWN       Scroll one line");
+    uefi::println!("  UP / DOWN       Move to nearby link or form control; otherwise scroll");
+    uefi::println!("  LEFT / RIGHT    Move focus between links and controls");
     uefi::println!("  PAGE UP/DOWN    Scroll one screen");
     uefi::println!("  HOME / END      Jump to top or bottom");
-    uefi::println!("  TAB / [         Focus next / previous link");
-    uefi::println!("  ENTER           Open the focused link");
+    uefi::println!("  TAB / [         Focus next / previous link or form control");
+    uefi::println!("  TYPE / BACKSPACE Edit a focused text field");
+    uefi::println!("  SPACE           Toggle a checkbox or radio option");
+    uefi::println!("  ENTER           Submit the focused form or open a focused link");
     uefi::println!("  g or o          Enter a URL");
     uefi::println!("  /               Search the rendered document; n finds next");
     uefi::println!("  :               Open the command prompt");
@@ -2026,7 +2440,7 @@ fn print_help() {
         "  Commands: open URL, open N, open-bookmark N, bookmark, bookmarks, delete-bookmark N"
     );
     uefi::println!(
-        "            form N, cache-stats, clear-cache, search WORD, back, forward, reload, quit"
+        "            form N (focus its controls), cache-stats, clear-cache, search WORD, back, forward, reload, quit"
     );
     uefi::println!("");
 }

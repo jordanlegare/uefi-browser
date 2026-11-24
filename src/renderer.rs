@@ -3,7 +3,8 @@ use alloc::vec::Vec;
 
 use crate::css::{ComputedStyle, DisplayMode, TextAlign};
 use crate::document::{
-    Block, BlockKind, Document, InlineRun, InlineStyle, Table, TableCell, TermColor,
+    Block, BlockKind, Document, FormControl, FormControlKind, InlineRun, InlineStyle, Table,
+    TableCell, TermColor,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -62,6 +63,15 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
                 .get(*table_index)
                 .map(|table| layout_table(table, local_width))
                 .unwrap_or_default(),
+            BlockKind::FormControl {
+                form_index,
+                control_index,
+            } => document
+                .forms
+                .get(*form_index)
+                .and_then(|form| form.controls.get(*control_index))
+                .map(|control| layout_form_control(control, local_width))
+                .unwrap_or_default(),
             _ => layout_block(block, local_width),
         };
         if block_lines.is_empty() {
@@ -92,6 +102,116 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
         output.pop();
     }
     output
+}
+
+fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
+    let style = InlineStyle::default();
+    let mut text = String::new();
+    match control.kind {
+        FormControlKind::Text
+        | FormControlKind::Password
+        | FormControlKind::Email
+        | FormControlKind::Search
+        | FormControlKind::Number
+        | FormControlKind::TextArea => {
+            let label = if control.label.is_empty() {
+                "Input"
+            } else {
+                control.label.as_str()
+            };
+            text.push_str(label);
+            text.push_str(": [");
+            let available = width
+                .saturating_sub(
+                    character_width('[')
+                        + character_width(']')
+                        + label.chars().map(character_width).sum::<usize>()
+                        + 2,
+                )
+                .max(1);
+            let shown = if control.kind == FormControlKind::Password {
+                "*".repeat(control.value.chars().count())
+            } else {
+                control.value.replace('\n', " ")
+            };
+            let shown_width = shown.chars().map(character_width).sum::<usize>();
+            if shown_width > available {
+                let mut suffix = String::new();
+                let mut used = 0usize;
+                for ch in shown.chars().rev() {
+                    let cw = character_width(ch);
+                    if used + cw > available.saturating_sub(1) {
+                        break;
+                    }
+                    suffix.insert(0, ch);
+                    used += cw;
+                }
+                text.push('…');
+                text.push_str(&suffix);
+            } else {
+                text.push_str(&shown);
+            }
+            text.push(']');
+        }
+        FormControlKind::Checkbox => {
+            text.push_str(if control.checked { "[x] " } else { "[ ] " });
+            text.push_str(&control.label);
+        }
+        FormControlKind::Radio => {
+            text.push_str(if control.checked { "(*) " } else { "( ) " });
+            text.push_str(&control.label);
+        }
+        FormControlKind::Select => {
+            text.push_str(&control.label);
+            text.push_str(": [");
+            let selected = control
+                .options
+                .iter()
+                .find(|option| option.value == control.value)
+                .map(|option| option.label.as_str())
+                .unwrap_or("select");
+            text.push_str(selected);
+            text.push_str(" v]");
+        }
+        FormControlKind::Submit => {
+            text.push_str("[ ");
+            text.push_str(if control.label.is_empty() {
+                "Submit"
+            } else {
+                &control.label
+            });
+            text.push_str(" ]");
+        }
+        FormControlKind::Reset => {
+            text.push_str("[ ");
+            text.push_str(if control.label.is_empty() {
+                "Reset"
+            } else {
+                &control.label
+            });
+            text.push_str(" ]");
+        }
+        FormControlKind::Button => {
+            text.push_str("[ ");
+            text.push_str(if control.label.is_empty() {
+                "Button"
+            } else {
+                &control.label
+            });
+            text.push_str(" ]");
+        }
+        FormControlKind::File => {
+            text.push_str(&control.label);
+            text.push_str(": [file input unsupported]");
+        }
+        FormControlKind::Hidden => return Vec::new(),
+    }
+    let run = InlineRun {
+        text,
+        style,
+        link: None,
+    };
+    wrap_runs(&[run], width, false)
 }
 
 fn layout_block(block: &Block, width: usize) -> Vec<RenderLine> {
@@ -137,6 +257,7 @@ fn layout_block(block: &Block, width: usize) -> Vec<RenderLine> {
             style.strong |= *header;
         }
         BlockKind::Table { .. } => {}
+        BlockKind::FormControl { .. } => {}
         BlockKind::DefinitionTerm => style.strong = true,
         BlockKind::DefinitionDescription => prefix.push_str("    "),
         BlockKind::HorizontalRule => {
@@ -596,6 +717,70 @@ mod tests {
                 .any(|line| line.spans.iter().any(|span| span.link == Some(0)))
         );
         assert_eq!(line_for_link(&lines, 0), Some(2));
+    }
+
+    #[test]
+    fn renders_current_form_values_and_masks_passwords() {
+        use crate::document::{Form, FormControl};
+
+        let document = Document {
+            forms: alloc::vec![Form {
+                action: "https://example.org/login".to_string(),
+                method: crate::document::FormMethod::Post,
+                controls: alloc::vec![
+                    FormControl {
+                        name: "user".to_string(),
+                        label: "Username".to_string(),
+                        value: "alice".to_string(),
+                        kind: FormControlKind::Text,
+                        required: true,
+                        disabled: false,
+                        read_only: false,
+                        checked: false,
+                        options: Vec::new(),
+                    },
+                    FormControl {
+                        name: "password".to_string(),
+                        label: "Password".to_string(),
+                        value: "secret".to_string(),
+                        kind: FormControlKind::Password,
+                        required: true,
+                        disabled: false,
+                        read_only: false,
+                        checked: false,
+                        options: Vec::new(),
+                    },
+                ],
+            }],
+            blocks: alloc::vec![
+                Block {
+                    kind: BlockKind::FormControl {
+                        form_index: 0,
+                        control_index: 0
+                    },
+                    runs: Vec::new(),
+                    style: ComputedStyle::default(),
+                },
+                Block {
+                    kind: BlockKind::FormControl {
+                        form_index: 0,
+                        control_index: 1
+                    },
+                    runs: Vec::new(),
+                    style: ComputedStyle::default(),
+                },
+            ],
+            ..Document::default()
+        };
+        let lines = layout_document(&document, 60);
+        let rendered = lines
+            .iter()
+            .map(RenderLine::plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("Username: [alice]"));
+        assert!(rendered.contains("Password: [******]"));
+        assert!(!rendered.contains("secret"));
     }
 
     #[test]
