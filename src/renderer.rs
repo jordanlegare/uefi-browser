@@ -319,45 +319,76 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
         return Vec::new();
     }
 
-    let column_count = table
-        .rows
-        .iter()
-        .map(|row| {
-            row.cells
-                .iter()
-                .map(|cell| cell.colspan.max(1) as usize)
-                .sum::<usize>()
-        })
-        .max()
-        .unwrap_or(0)
-        .min(16)
+    struct CellPlacement<'a> {
+        row: usize,
+        column: usize,
+        colspan: usize,
+        rowspan: usize,
+        cell: &'a TableCell,
+        lines: Vec<RenderLine>,
+        inner_width: usize,
+    }
+
+    let max_columns = 16usize
         .min(width.saturating_sub(1).div_euclid(4).max(1));
+    let row_count = table.rows.len();
+    let mut remaining = alloc::vec![0usize; max_columns];
+    let mut placements = Vec::new();
+    let mut column_count = 0usize;
+
+    // Place each cell into the first unoccupied columns. Rowspan reservations
+    // are carried forward, so later rows cannot overwrite a cell above them.
+    for (row_index, row) in table.rows.iter().enumerate() {
+        let mut column = 0usize;
+        for cell in &row.cells {
+            while column < max_columns && remaining[column] > 0 {
+                column += 1;
+            }
+            if column >= max_columns {
+                break;
+            }
+            let colspan = (cell.colspan.max(1) as usize)
+                .min(max_columns.saturating_sub(column));
+            let rowspan = (cell.rowspan.max(1) as usize)
+                .min(row_count.saturating_sub(row_index).max(1));
+            for occupied in &mut remaining[column..column + colspan] {
+                *occupied = rowspan;
+            }
+            column_count = column_count.max(column + colspan);
+            placements.push(CellPlacement {
+                row: row_index,
+                column,
+                colspan,
+                rowspan,
+                cell,
+                lines: Vec::new(),
+                inner_width: 1,
+            });
+            column += colspan;
+        }
+        for occupied in &mut remaining {
+            *occupied = occupied.saturating_sub(1);
+        }
+    }
     if column_count == 0 {
         return Vec::new();
     }
 
     let mut widths = alloc::vec![3usize; column_count];
-    for row in &table.rows {
-        let mut column = 0usize;
-        for cell in &row.cells {
-            let span = (cell.colspan.max(1) as usize).min(column_count.saturating_sub(column));
-            if span == 0 {
-                continue;
+    for placement in &placements {
+        let span = placement.colspan;
+        let measured = max_run_width(&placement.cell.runs).min(width);
+        let available = span
+            .saturating_mul(3)
+            .saturating_add(span.saturating_sub(1) * 2);
+        if span == 1 {
+            widths[placement.column] = widths[placement.column].max(measured);
+        } else if measured > available {
+            let extra = measured - available;
+            let each = extra.div_ceil(span);
+            for index in placement.column..placement.column + span {
+                widths[index] = widths[index].saturating_add(each).min(width);
             }
-            let measured = max_run_width(&cell.runs).min(width);
-            let available = span
-                .saturating_mul(3)
-                .saturating_add(span.saturating_sub(1) * 2);
-            if span == 1 {
-                widths[column] = widths[column].max(measured.min(width));
-            } else if measured > available {
-                let extra = measured - available;
-                let each = extra.div_ceil(span);
-                for index in column..column + span {
-                    widths[index] = widths[index].saturating_add(each).min(width);
-                }
-            }
-            column += span;
         }
     }
 
@@ -375,73 +406,111 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
         widths[index] -= 1;
     }
 
-    let mut output = Vec::new();
-    output.push(table_border(&widths));
-    for row in &table.rows {
-        let mut cell_lines: Vec<Vec<RenderLine>> = Vec::new();
-        let mut cell_widths = Vec::new();
-        let mut column = 0usize;
-        for cell in &row.cells {
-            if column >= column_count {
-                break;
+    for placement in &mut placements {
+        placement.inner_width = widths[placement.column..placement.column + placement.colspan]
+            .iter()
+            .sum::<usize>()
+            .saturating_add(placement.colspan.saturating_sub(1) * 2)
+            .max(1);
+        placement.lines = wrap_runs(&placement.cell.runs, placement.inner_width, false);
+        if placement.lines.is_empty() {
+            placement.lines.push(RenderLine::default());
+        }
+        if table.rows[placement.row].header {
+            for line in &mut placement.lines {
+                for span in &mut line.spans {
+                    span.style.strong = true;
+                }
             }
-            let span = (cell.colspan.max(1) as usize)
-                .min(column_count.saturating_sub(column))
-                .max(1);
-            let inner = widths[column..column + span]
-                .iter()
-                .sum::<usize>()
-                .saturating_add(span.saturating_sub(1) * 2)
-                .max(1);
-            let mut lines = wrap_runs(&cell.runs, inner, false);
-            let cell_style = InlineStyle {
-                strong: row.header || cell.style.bold,
-                emphasis: cell.style.italic,
-                underline: cell.style.underline,
-                foreground: cell.style.foreground,
-                background: cell.style.background,
+        } else if placement.cell.style.bold
+            || placement.cell.style.italic
+            || placement.cell.style.underline
+            || placement.cell.style.foreground.is_some()
+            || placement.cell.style.background.is_some()
+        {
+            let style = InlineStyle {
+                strong: placement.cell.style.bold,
+                emphasis: placement.cell.style.italic,
+                underline: placement.cell.style.underline,
+                foreground: placement.cell.style.foreground,
+                background: placement.cell.style.background,
                 ..InlineStyle::default()
             };
-            for line in &mut lines {
-                if row.header {
-                    for span in &mut line.spans {
-                        span.style.strong = true;
-                    }
-                } else if line.spans.is_empty() && !cell.runs.is_empty() {
-                    line.spans.push(RenderSpan {
-                        text: String::new(),
-                        style: cell_style,
-                        link: None,
-                    });
+            for line in &mut placement.lines {
+                for span in &mut line.spans {
+                    span.style = style;
                 }
             }
-            cell_widths.push(inner);
-            cell_lines.push(lines);
-            column += span;
         }
-        let height = cell_lines.iter().map(Vec::len).max().unwrap_or(1).max(1);
-        for line_index in 0..height {
+    }
+
+    // A spanning cell may need more vertical space than its starting row.
+    // Distribute that extra height across the rows it occupies.
+    let mut row_heights = alloc::vec![1usize; row_count];
+    for placement in &placements {
+        let required = placement.lines.len();
+        let current = row_heights[placement.row..placement.row + placement.rowspan]
+            .iter()
+            .sum::<usize>();
+        if required > current {
+            let extra = required - current;
+            for offset in 0..extra {
+                let row = placement.row + (offset % placement.rowspan);
+                row_heights[row] = row_heights[row].saturating_add(1).min(128);
+            }
+        }
+    }
+
+    let mut output = Vec::new();
+    output.push(table_border(&widths));
+    let mut row_offsets = alloc::vec![0usize; row_count];
+    for row in 1..row_count {
+        row_offsets[row] = row_offsets[row - 1].saturating_add(row_heights[row - 1]);
+    }
+
+    for row in 0..row_count {
+        for line_index in 0..row_heights[row] {
             let mut line = RenderLine::default();
             append_text(&mut line, "| ", InlineStyle::default(), None);
-            for cell_index in 0..cell_lines.len() {
-                let inner = cell_widths[cell_index];
-                let source = cell_lines[cell_index].get(line_index);
-                let used = source.map_or(0, |item| item.width).min(inner);
-                if let Some(source) = source {
-                    for span in &source.spans {
-                        append_text(&mut line, &span.text, span.style, span.link);
+            let mut column = 0usize;
+            while column < column_count {
+                let active = placements.iter().find(|placement| {
+                    placement.column == column
+                        && placement.row <= row
+                        && row < placement.row + placement.rowspan
+                });
+                if let Some(placement) = active {
+                    let offset = row_offsets[row]
+                        .saturating_sub(row_offsets[placement.row])
+                        .saturating_add(line_index);
+                    let source = placement.lines.get(offset);
+                    let used = source.map_or(0, |item| item.width).min(placement.inner_width);
+                    if let Some(source) = source {
+                        for span in &source.spans {
+                            append_text(&mut line, &span.text, span.style, span.link);
+                        }
                     }
-                }
-                let padding = inner.saturating_sub(used);
-                if padding > 0 {
+                    let padding = placement.inner_width.saturating_sub(used);
+                    if padding > 0 {
+                        append_text(
+                            &mut line,
+                            &" ".repeat(padding),
+                            InlineStyle::default(),
+                            None,
+                        );
+                    }
+                    column += placement.colspan;
+                } else {
+                    let cell_width = widths[column];
                     append_text(
                         &mut line,
-                        &" ".repeat(padding),
+                        &" ".repeat(cell_width),
                         InlineStyle::default(),
                         None,
                     );
+                    column += 1;
                 }
-                if cell_index + 1 == cell_lines.len() {
+                if column >= column_count {
                     append_text(&mut line, " |", InlineStyle::default(), None);
                 } else {
                     append_text(&mut line, " | ", InlineStyle::default(), None);
@@ -449,9 +518,33 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
             }
             output.push(line);
         }
-        output.push(table_border(&widths));
+
+        let mut continued_columns = alloc::vec![false; column_count];
+        for placement in &placements {
+            if placement.row <= row && placement.row + placement.rowspan > row + 1 {
+                for column in placement.column..placement.column + placement.colspan {
+                    continued_columns[column] = true;
+                }
+            }
+        }
+        output.push(table_border_with_rowspan(&widths, &continued_columns));
     }
     output
+}
+
+fn table_border_with_rowspan(widths: &[usize], continued: &[bool]) -> RenderLine {
+    let mut line = RenderLine::default();
+    append_text(&mut line, "+", InlineStyle::default(), None);
+    for (index, width) in widths.iter().enumerate() {
+        let segment = if continued.get(index).copied().unwrap_or(false) {
+            " ".repeat(width.saturating_add(2))
+        } else {
+            "-".repeat(width.saturating_add(2))
+        };
+        append_text(&mut line, &segment, InlineStyle::default(), None);
+        append_text(&mut line, "+", InlineStyle::default(), None);
+    }
+    line
 }
 
 fn table_border(widths: &[usize]) -> RenderLine {
