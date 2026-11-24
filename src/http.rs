@@ -596,10 +596,10 @@ mod tests {
         .unwrap();
         assert!(request.contains("If-None-Match: \"v1\"\r\n"));
         assert!(request.contains("If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT\r\n"));
-        assert!(!request.contains("If-None-Match: bad\\r\\nInjected"));
+        assert!(!request.contains("If-None-Match: bad\r\nInjected"));
         let unsafe_request = String::from_utf8(build_conditional_get_request(
             &url,
-            Some("bad\\r\\nInjected: yes"),
+            Some("bad\r\nInjected: yes"),
             None,
         ))
         .unwrap();
