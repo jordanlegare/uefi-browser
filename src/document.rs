@@ -156,6 +156,7 @@ pub struct FormControl {
     pub kind: FormControlKind,
     pub required: bool,
     pub disabled: bool,
+    pub read_only: bool,
     pub checked: bool,
     pub options: Vec<FormOption>,
 }
@@ -760,8 +761,8 @@ impl DocumentBuilder<'_> {
                     value: self.dom.attr(child, "value").unwrap_or("").to_string(),
                     kind,
                     required: self.dom.attr(child, "required").is_some(),
-                    disabled: self.dom.attr(child, "disabled").is_some()
-                        || self.dom.attr(child, "readonly").is_some(),
+                    disabled: self.dom.attr(child, "disabled").is_some(),
+                    read_only: self.dom.attr(child, "readonly").is_some(),
                     checked: self.dom.attr(child, "checked").is_some(),
                     options: Vec::new(),
                 });
@@ -773,6 +774,7 @@ impl DocumentBuilder<'_> {
                     kind: FormControlKind::TextArea,
                     required: self.dom.attr(child, "required").is_some(),
                     disabled: self.dom.attr(child, "disabled").is_some(),
+                    read_only: self.dom.attr(child, "readonly").is_some(),
                     checked: false,
                     options: Vec::new(),
                 });
@@ -792,6 +794,7 @@ impl DocumentBuilder<'_> {
                     kind: FormControlKind::Select,
                     required: self.dom.attr(child, "required").is_some(),
                     disabled: self.dom.attr(child, "disabled").is_some(),
+                    read_only: false,
                     checked: false,
                     options,
                 });
@@ -808,6 +811,7 @@ impl DocumentBuilder<'_> {
                     kind,
                     required: false,
                     disabled: self.dom.attr(child, "disabled").is_some(),
+                    read_only: false,
                     checked: false,
                     options: Vec::new(),
                 });
