@@ -735,6 +735,7 @@ mod tests {
                         kind: FormControlKind::Text,
                         required: true,
                         disabled: false,
+                        read_only: false,
                         checked: false,
                         options: Vec::new(),
                     },
