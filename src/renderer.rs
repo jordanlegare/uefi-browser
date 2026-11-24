@@ -746,6 +746,7 @@ mod tests {
                         kind: FormControlKind::Password,
                         required: true,
                         disabled: false,
+                        read_only: false,
                         checked: false,
                         options: Vec::new(),
                     },
