@@ -674,7 +674,9 @@ fn fetch_grc_reference_chain(
     let mut tls = connection
         .start_tls(ca_bundle)
         .map_err(|error| format!("GRC TLS initialization failed: {error:?}"))?;
-    uefi::println!("[GRC 3b/4] TLS context ready. Sending ClientHello and waiting for the verified server handshake.");
+    uefi::println!(
+        "[GRC 3b/4] TLS context ready. Sending ClientHello and waiting for the verified server handshake."
+    );
     tls.handshake()
         .map_err(|error| format!("GRC TLS certificate verification failed: {error:?}"))?;
     uefi::println!(
