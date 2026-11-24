@@ -38,7 +38,7 @@ impl UefiFileStore {
     }
 
     fn maximum_file_size(name: &str) -> Option<u64> {
-        if name == "BOOKMARKS.DAT" {
+        if name == "BOOKMARKS.DAT" || name == "HISTORY.DAT" {
             Some(64 * 1024)
         } else if name.starts_with("CACHE") && name.ends_with(".DAT") {
             Some(256 * 1024 + 16 * 1024)

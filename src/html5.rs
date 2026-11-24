@@ -64,6 +64,29 @@ impl Dom {
         Some(id)
     }
 
+    fn insert_before(
+        &mut self,
+        parent: NodeId,
+        reference: NodeId,
+        kind: NodeKind,
+    ) -> Option<NodeId> {
+        if self.nodes.len() >= MAX_NODES || parent >= self.nodes.len() {
+            return None;
+        }
+        let position = self.nodes[parent]
+            .children
+            .iter()
+            .position(|child| *child == reference)?;
+        let id = self.nodes.len();
+        self.nodes.push(Node {
+            kind,
+            parent: Some(parent),
+            children: Vec::new(),
+        });
+        self.nodes[parent].children.insert(position, id);
+        Some(id)
+    }
+
     fn element(&self, id: NodeId) -> Option<(&str, &[Attribute])> {
         match &self.nodes.get(id)?.kind {
             NodeKind::Element { tag, attributes } => Some((tag, attributes)),
@@ -426,6 +449,48 @@ fn current_tag<'a>(stack: &[NodeId], dom: &'a Dom) -> Option<&'a str> {
     stack.last().and_then(|id| dom.tag(*id))
 }
 
+fn should_foster_parent(stack: &[NodeId], dom: &Dom) -> bool {
+    let Some(table_position) = stack.iter().rposition(|id| dom.tag(*id) == Some("table")) else {
+        return false;
+    };
+    stack[table_position + 1..]
+        .iter()
+        .all(|id| matches!(dom.tag(*id), Some("tbody" | "thead" | "tfoot" | "tr")))
+}
+
+fn table_foster_location(stack: &[NodeId], dom: &Dom) -> Option<(NodeId, NodeId)> {
+    let table_position = stack.iter().rposition(|id| dom.tag(*id) == Some("table"))?;
+    if stack[table_position + 1..]
+        .iter()
+        .any(|id| matches!(dom.tag(*id), Some("td" | "th")))
+    {
+        return None;
+    }
+    let table = stack[table_position];
+    let parent = dom.nodes.get(table)?.parent?;
+    Some((parent, table))
+}
+
+fn is_allowed_in_table(name: &str) -> bool {
+    matches!(
+        name,
+        "caption"
+            | "col"
+            | "colgroup"
+            | "tbody"
+            | "tfoot"
+            | "thead"
+            | "tr"
+            | "td"
+            | "th"
+            | "style"
+            | "script"
+            | "template"
+            | "input"
+            | "form"
+    )
+}
+
 fn ensure_table_section(stack: &mut Vec<NodeId>, dom: &mut Dom) {
     let table_position = stack.iter().rposition(|id| dom.tag(*id) == Some("table"));
     if let Some(position) = table_position {
@@ -501,6 +566,14 @@ pub fn build_tree(source: &str) -> Dom {
                     stack.push(html);
                     stack.push(body);
                 }
+                // In the HTML "in table" insertion mode, non-whitespace text
+                // is foster-parented before the nearest open table, not inside it.
+                if !text.trim().is_empty() && should_foster_parent(&stack, &dom) {
+                    if let Some((parent, table)) = table_foster_location(&stack, &dom) {
+                        let _ = dom.insert_before(parent, table, NodeKind::Text(text));
+                        continue;
+                    }
+                }
                 if let Some(parent) = stack.last().copied() {
                     if let Some(Node {
                         kind: NodeKind::Text(previous),
@@ -554,6 +627,9 @@ pub fn build_tree(source: &str) -> Dom {
                     stack.push(body);
                 }
 
+                if name == "table" && stack.iter().any(|id| dom.tag(*id) == Some("table")) {
+                    close_open(&mut stack, &dom, "table");
+                }
                 if name == "p" && stack.iter().any(|id| dom.tag(*id) == Some("p")) {
                     close_open(&mut stack, &dom, "p");
                 }
@@ -605,14 +681,21 @@ pub fn build_tree(source: &str) -> Dom {
                     }
                 }
 
-                let parent = stack.last().copied().unwrap_or(body);
-                let Some(id) = dom.append(
-                    parent,
-                    NodeKind::Element {
-                        tag: name.clone(),
-                        attributes,
-                    },
-                ) else {
+                let foster = !is_allowed_in_table(&name)
+                    && should_foster_parent(&stack, &dom)
+                    && table_foster_location(&stack, &dom).is_some();
+                let node_kind = NodeKind::Element {
+                    tag: name.clone(),
+                    attributes,
+                };
+                let id = if foster {
+                    let (parent, table) = table_foster_location(&stack, &dom).unwrap();
+                    dom.insert_before(parent, table, node_kind)
+                } else {
+                    let parent = stack.last().copied().unwrap_or(body);
+                    dom.append(parent, node_kind)
+                };
+                let Some(id) = id else {
                     break;
                 };
 
@@ -672,6 +755,22 @@ mod tests {
             dom.attr(dom.find_by_tag(dom.root, "h1")[0], "id"),
             Some("top")
         );
+    }
+
+    #[test]
+    fn foster_parents_misplaced_table_text_and_elements_before_the_table() {
+        let dom = build_tree("<table>before<div id=outside>inside</div>after<tr><td>cell</table>");
+        let body = dom.find_by_tag(dom.root, "body")[0];
+        let div = dom.find_by_tag(dom.root, "div")[0];
+        let table = dom.find_by_tag(dom.root, "table")[0];
+        assert_eq!(dom.nodes[div].parent, Some(body));
+        let body_children = dom.children(body);
+        let div_position = body_children.iter().position(|id| *id == div).unwrap();
+        let table_position = body_children.iter().position(|id| *id == table).unwrap();
+        assert!(div_position < table_position);
+        assert!(dom.text_content(body).contains("before"));
+        assert!(dom.text_content(body).contains("after"));
+        assert_eq!(dom.text_content(div), "inside");
     }
 
     #[test]

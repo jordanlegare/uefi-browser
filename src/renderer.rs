@@ -361,8 +361,17 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
                 break;
             }
             let colspan = (cell.colspan.max(1) as usize).min(max_columns.saturating_sub(column));
-            let rowspan =
-                (cell.rowspan.max(1) as usize).min(row_count.saturating_sub(row_index).max(1));
+            let group_end = table.rows[row_index..]
+                .iter()
+                .position(|candidate| candidate.group != row.group)
+                .map_or(row_count, |offset| row_index + offset);
+            let rows_remaining_in_group = group_end.saturating_sub(row_index).max(1);
+            let requested_rowspan = cell.rowspan as usize;
+            let rowspan = if requested_rowspan == 0 {
+                rows_remaining_in_group
+            } else {
+                requested_rowspan.min(rows_remaining_in_group).max(1)
+            };
             for occupied in &mut remaining[column..column + colspan] {
                 *occupied = rowspan;
             }
@@ -955,6 +964,7 @@ mod tests {
             rows: alloc::vec![
                 TableRow {
                     header: true,
+                    group: 0,
                     cells: alloc::vec![
                         TableCell {
                             runs: alloc::vec![InlineRun {
@@ -980,6 +990,7 @@ mod tests {
                 },
                 TableRow {
                     header: false,
+                    group: 0,
                     cells: alloc::vec![
                         TableCell {
                             runs: alloc::vec![InlineRun {
@@ -1019,6 +1030,7 @@ mod tests {
             rows: alloc::vec![
                 TableRow {
                     header: false,
+                    group: 0,
                     cells: alloc::vec![
                         TableCell {
                             runs: alloc::vec![InlineRun {
@@ -1044,6 +1056,7 @@ mod tests {
                 },
                 TableRow {
                     header: false,
+                    group: 0,
                     cells: alloc::vec![TableCell {
                         runs: alloc::vec![InlineRun {
                             text: "Lower".to_string(),
@@ -1075,6 +1088,77 @@ mod tests {
             lower.plain_text().find("Lower").unwrap()
                 > lower.plain_text().find("Shared").unwrap_or(0)
         );
+    }
+
+    #[test]
+    fn rowspan_zero_stops_at_row_group_boundary() {
+        let table = Table {
+            rows: alloc::vec![
+                TableRow {
+                    header: false,
+                    group: 1,
+                    cells: alloc::vec![
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "Group A".to_string(),
+                                style: InlineStyle::default(),
+                                link: None,
+                            }],
+                            colspan: 1,
+                            rowspan: 0,
+                            style: ComputedStyle::default(),
+                        },
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "A1".to_string(),
+                                style: InlineStyle::default(),
+                                link: None,
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            style: ComputedStyle::default(),
+                        },
+                    ],
+                },
+                TableRow {
+                    header: false,
+                    group: 1,
+                    cells: alloc::vec![TableCell {
+                        runs: alloc::vec![InlineRun {
+                            text: "A2".to_string(),
+                            style: InlineStyle::default(),
+                            link: None,
+                        }],
+                        colspan: 1,
+                        rowspan: 1,
+                        style: ComputedStyle::default(),
+                    }],
+                },
+                TableRow {
+                    header: false,
+                    group: 2,
+                    cells: alloc::vec![TableCell {
+                        runs: alloc::vec![InlineRun {
+                            text: "B1".to_string(),
+                            style: InlineStyle::default(),
+                            link: None,
+                        }],
+                        colspan: 1,
+                        rowspan: 1,
+                        style: ComputedStyle::default(),
+                    }],
+                },
+            ],
+        };
+        let lines = layout_table(&table, 40);
+        let rendered = lines
+            .iter()
+            .map(RenderLine::plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let group_b = rendered.lines().find(|line| line.contains("B1")).unwrap();
+        assert!(group_b.contains("B1"));
+        assert!(!group_b.contains("Group A"));
     }
 
     #[test]

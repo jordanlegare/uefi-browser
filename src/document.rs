@@ -109,6 +109,8 @@ pub struct TableCell {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableRow {
     pub header: bool,
+    /// Consecutive rows with the same group belong to one thead/tbody/tfoot.
+    pub group: usize,
     pub cells: Vec<TableCell>,
 }
 
@@ -551,7 +553,8 @@ impl DocumentBuilder<'_> {
             return;
         }
         let mut rows = Vec::new();
-        self.collect_table_rows(node, style, &mut rows);
+        let mut next_group = 1usize;
+        self.collect_table_rows(node, style, 0, &mut next_group, &mut rows);
         if rows.is_empty() {
             return;
         }
@@ -565,7 +568,14 @@ impl DocumentBuilder<'_> {
         self.document.text.push('\n');
     }
 
-    fn collect_table_rows(&mut self, node: NodeId, style: ComputedStyle, rows: &mut Vec<TableRow>) {
+    fn collect_table_rows(
+        &mut self,
+        node: NodeId,
+        style: ComputedStyle,
+        group: usize,
+        next_group: &mut usize,
+        rows: &mut Vec<TableRow>,
+    ) {
         for child in self.dom.children(node).iter().copied() {
             let tag = self.dom.tag(child).unwrap_or("");
             if tag == "tr" {
@@ -585,13 +595,14 @@ impl DocumentBuilder<'_> {
                         .filter(|v| *v > 0)
                         .unwrap_or(1)
                         .min(8);
+                    // HTML rowspan="0" means extend to the end of this row group.
+                    // Keep zero as a sentinel for the renderer to resolve.
                     let rowspan = self
                         .dom
                         .attr(cell, "rowspan")
                         .and_then(|v| v.parse::<u8>().ok())
-                        .filter(|v| *v > 0)
-                        .unwrap_or(1)
-                        .min(8);
+                        .map(|value| if value == 0 { 0 } else { value.min(8) })
+                        .unwrap_or(1);
                     for run in &runs {
                         self.document.text.push_str(&run.text);
                     }
@@ -609,12 +620,15 @@ impl DocumentBuilder<'_> {
                             .children(child)
                             .iter()
                             .any(|id| self.dom.tag(*id) == Some("th")),
+                        group,
                         cells,
                     });
                     self.document.text.push('\n');
                 }
             } else if matches!(tag, "thead" | "tbody" | "tfoot") {
-                self.collect_table_rows(child, style, rows);
+                let section_group = *next_group;
+                *next_group = next_group.saturating_add(1);
+                self.collect_table_rows(child, style, section_group, next_group, rows);
             }
         }
     }
@@ -1292,6 +1306,20 @@ mod tests {
         assert!(after_text < more_text);
         assert!(more_text < submit);
         assert_eq!(page.forms[0].controls[0].value, "uefi");
+    }
+
+    #[test]
+    fn table_rowspan_zero_is_preserved_and_rows_receive_section_groups() {
+        let base = Url::parse("https://example.org/").unwrap();
+        let page = parse_html(
+            "<table><tbody><tr><td rowspan=0>A</td><td>A1</td></tr><tr><td>A2</td></tr></tbody><tbody><tr><td>B1</td></tr></tbody></table>",
+            &base,
+        );
+        let table = &page.tables[0];
+        assert_eq!(table.rows.len(), 3);
+        assert_eq!(table.rows[0].group, table.rows[1].group);
+        assert_ne!(table.rows[1].group, table.rows[2].group);
+        assert_eq!(table.rows[0].cells[0].rowspan, 0);
     }
 
     #[test]
