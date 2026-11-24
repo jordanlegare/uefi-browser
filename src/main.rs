@@ -1256,10 +1256,7 @@ fn focus_targets(page: &BrowserPage, lines: &[RenderLine]) -> Vec<(usize, FocusT
         if control.disabled || control.kind == FormControlKind::Hidden {
             continue;
         }
-        if let Some(line) = lines
-            .iter()
-            .position(|line| line.block_index == Some(block_index))
-        {
+        if let Some(line) = renderer::line_for_control(lines, block_index) {
             targets.push((line, FocusTarget::Control(form_index, control_index)));
         }
     }
@@ -2220,12 +2217,15 @@ fn render_terminal_page(
                 let focused_control = line
                     .block_index
                     .and_then(|index| page.document.blocks.get(index))
-                    .is_some_and(|block| match &block.kind {
-                        BlockKind::FormControl {
-                            form_index,
-                            control_index,
-                        } => selected_control == Some((*form_index, *control_index)),
-                        _ => false,
+                    .is_some_and(|block| {
+                        line.focusable_control
+                            && match &block.kind {
+                                BlockKind::FormControl {
+                                    form_index,
+                                    control_index,
+                                } => selected_control == Some((*form_index, *control_index)),
+                                _ => false,
+                            }
                     });
                 write_render_line(output, line, width, selected_link, focused_control);
             } else {
