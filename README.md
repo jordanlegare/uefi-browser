@@ -91,7 +91,7 @@ The style engine applies rules from embedded style elements, up to four linked e
 
 Supported selector forms include type, class, ID and descendant combinations. Supported terminal-relevant properties include display, font weight/style, text decoration, foreground/background colors, whitespace handling, margins, indentation, text alignment and percentage width. Colors are mapped to the UEFI 16-color console palette.
 
-The renderer reflows text to the active console width and measures table columns from cell contents. Long cells wrap and colspan contributes to column sizing. Rowspan is parsed and retained as metadata but does not yet merge cells in the rendered layout.
+The renderer reflows text to the active console width and measures table columns from cell contents. Long cells wrap, colspan contributes to column sizing, and bounded rowspan placement reserves columns across subsequent rows so the spanning cell remains vertically continuous. This is a text-console table model, not the full HTML table layout algorithm.
 
 Not implemented: full CSS cascade semantics (including complete !important handling), pseudo-classes/elements, media queries, @import, floats, positioned layout, flexbox, grid, browser font metrics, and complete table algorithms.
 
@@ -99,7 +99,7 @@ Not implemented: full CSS cascade semantics (including complete !important handl
 
 Element IDs and legacy named anchors are retained as fragment targets. Navigating to a fragment in the current document moves the viewport locally without another HTTP request. Fragments remain part of the browser's visible/history URL but are omitted from the HTTP request target.
 
-Forms render their visible controls as part of the page. Use **Tab** or the arrow keys to focus links and fields, type directly into a text field, and use **Backspace** to edit. **Enter** submits the focused form; it does not open a second series of prompts. Space toggles checkboxes and radio options, while Left/Right changes the selected option in a select control. Labels associated with inputs are retained, and password values are masked in the rendered field. GET and POST submissions use application/x-www-form-urlencoded; POST still requires explicit confirmation, and request bodies are capped at 8 KiB.
+Forms render as visible ASCII objects in the document flow: text fields have a bordered `+-----+` frame, an editable interior row, and a trailing `_` insertion marker. The focus highlight lands on that interior row, not on the border or a detached prompt. Use **Tab** or the arrow keys to move between links and fields, type directly into the focused box, and use **Backspace** to edit. Controls are emitted at their original HTML positions so surrounding labels and text stay in order. **Enter** submits the focused form; it does not open a second series of prompts. Space toggles checkboxes and radio options, while Left/Right changes the selected option in a select control. Labels associated with inputs are retained, and password values are masked in the rendered field. GET and POST submissions use application/x-www-form-urlencoded; POST still requires explicit confirmation, and request bodies are capped at 8 KiB.
 
 File upload, multipart form encoding, JavaScript-driven forms, cookies/session state, and full HTML constraint validation are not implemented.
 
@@ -248,8 +248,8 @@ Current limitations include:
 - No JavaScript execution, DOM scripting, cookies, session management or service workers.
 - No file uploads, multipart forms, downloads or full HTML form validation.
 - No complete HTML Living Standard parser or complete CSS layout engine.
-- No rowspan table layout, flexbox, grid, floats or positioned elements.
-- DNS currently uses IPv4 A queries; CNAME chasing, AAAA, DNSSEC and DNS-over-TCP fallback are not implemented.
+- Basic rowspan-aware table cell placement is implemented; the full HTML table layout algorithm, flexbox, grid, floats and positioned elements remain unsupported.
+- DNS uses IPv4 A queries and follows bounded CNAME chains in the answer section; AAAA, DNSSEC and DNS-over-TCP fallback are not implemented.
 - The page cache does not perform conditional revalidation.
 - Firmware boot/runtime interoperability has not yet been demonstrated across OVMF and physical machines.
 
@@ -266,15 +266,18 @@ The project is a clean-room Rust implementation inspired by ELinks' text-browser
 - [x] Hickory DNS and SNTP bootstrap.
 - [x] wolfSSL TLS with mandatory certificate and hostname validation.
 - [x] Bounded HTML5-style tree construction and terminal-oriented CSS subset.
-- [x] Width-aware reflow, measured table columns and colspan sizing.
+- [x] Width-aware reflow, measured table columns, colspan sizing and bounded rowspan layout.
 - [x] Fragment navigation and URL-encoded GET/POST forms.
 - [x] Inline visible form controls, direct keyboard editing, checkbox/radio/select interaction, and Enter submission.
 - [x] Arrow-key focus movement across links and form controls.
+- [x] Visible ASCII input widgets with a focusable interior and insertion marker, rendered in source HTML order.
 - [x] Persistent bookmarks and bounded disk page cache.
 - [ ] Expand HTML parsing toward complete WHATWG insertion-mode and error-recovery behaviour.
-- [ ] Add rowspan table layout and more complete table algorithms.
+- [x] Add basic rowspan-aware cell placement and vertical cell layout.
+- [ ] Complete remaining HTML table algorithms and complex width/row-group handling.
 - [ ] Extend CSS support where useful for a text-console browser.
-- [ ] Add DNS CNAME/AAAA handling and DNS-over-TCP fallback.
+- [x] Follow bounded CNAME chains in DNS A responses.
+- [ ] Add DNS AAAA handling and DNS-over-TCP fallback.
 - [ ] Add cache revalidation and persistent browsing history.
 - [ ] Add OVMF and physical-firmware runtime test coverage.
 

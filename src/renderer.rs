@@ -1,10 +1,11 @@
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::css::{ComputedStyle, DisplayMode, TextAlign};
 use crate::document::{
     Block, BlockKind, Document, FormControl, FormControlKind, InlineRun, InlineStyle, Table,
-    TableCell, TermColor,
+    TableCell,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -12,6 +13,8 @@ pub struct RenderLine {
     pub spans: Vec<RenderSpan>,
     pub width: usize,
     pub block_index: Option<usize>,
+    /// True on the visual row that represents the interactive face of a control.
+    pub focusable_control: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,8 +108,10 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
 }
 
 fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
+    let width = width.max(8);
     let style = InlineStyle::default();
-    let mut text = String::new();
+    let mut output = Vec::new();
+
     match control.kind {
         FormControlKind::Text
         | FormControlKind::Password
@@ -117,101 +122,145 @@ fn layout_form_control(control: &FormControl, width: usize) -> Vec<RenderLine> {
             let label = if control.label.is_empty() {
                 "Input"
             } else {
-                control.label.as_str()
+                &control.label
             };
-            text.push_str(label);
-            text.push_str(": [");
-            let available = width
-                .saturating_sub(
-                    character_width('[')
-                        + character_width(']')
-                        + label.chars().map(character_width).sum::<usize>()
-                        + 2,
-                )
-                .max(1);
-            let shown = if control.kind == FormControlKind::Password {
+            push_label_lines(&mut output, label, width);
+
+            let box_width = width.min(36).max(8);
+            let inner_width = box_width.saturating_sub(4).max(1);
+            let border = format!("+{}+", "-".repeat(box_width.saturating_sub(2)));
+            output.push(line_from_text(&border, style));
+
+            let mut value = if control.kind == FormControlKind::Password {
                 "*".repeat(control.value.chars().count())
             } else {
-                control.value.replace('\n', " ")
+                control.value.replace(['\r', '\n'], " ")
             };
-            let shown_width = shown.chars().map(character_width).sum::<usize>();
-            if shown_width > available {
+            let field_chars = inner_width.saturating_sub(1).max(1);
+            let field_width = value.chars().map(character_width).sum::<usize>();
+            if field_width > field_chars {
                 let mut suffix = String::new();
                 let mut used = 0usize;
-                for ch in shown.chars().rev() {
-                    let cw = character_width(ch);
-                    if used + cw > available.saturating_sub(1) {
+                for ch in value.chars().rev() {
+                    let char_width = character_width(ch);
+                    if used.saturating_add(char_width) > field_chars.saturating_sub(1) {
                         break;
                     }
                     suffix.insert(0, ch);
-                    used += cw;
+                    used += char_width;
                 }
-                text.push('…');
-                text.push_str(&suffix);
-            } else {
-                text.push_str(&shown);
+                value = format!("<{suffix}");
             }
-            text.push(']');
-        }
-        FormControlKind::Checkbox => {
-            text.push_str(if control.checked { "[x] " } else { "[ ] " });
-            text.push_str(&control.label);
-        }
-        FormControlKind::Radio => {
-            text.push_str(if control.checked { "(*) " } else { "( ) " });
-            text.push_str(&control.label);
+            let shown_width = value.chars().map(character_width).sum::<usize>();
+            let padding = inner_width.saturating_sub(shown_width.saturating_add(1));
+            let mut face = String::from("| ");
+            face.push_str(&value);
+            face.push('_');
+            face.push_str(&" ".repeat(padding));
+            face.push_str(" |");
+            let mut input_line = line_from_text(&face, style);
+            input_line.focusable_control = true;
+            output.push(input_line);
+            output.push(line_from_text(&border, style));
         }
         FormControlKind::Select => {
-            text.push_str(&control.label);
-            text.push_str(": [");
+            push_label_lines(
+                &mut output,
+                if control.label.is_empty() {
+                    "Select"
+                } else {
+                    &control.label
+                },
+                width,
+            );
+            let box_width = width.min(36).max(8);
+            let border = format!("+{}+", "-".repeat(box_width.saturating_sub(2)));
+            output.push(line_from_text(&border, style));
             let selected = control
                 .options
                 .iter()
                 .find(|option| option.value == control.value)
                 .map(|option| option.label.as_str())
                 .unwrap_or("select");
-            text.push_str(selected);
-            text.push_str(" v]");
+            let visible: String = selected.chars().take(box_width.saturating_sub(8)).collect();
+            let padding = box_width.saturating_sub(visible.chars().count().saturating_add(8));
+            let face = format!("| < {visible} >{} |", " ".repeat(padding));
+            let mut input_line = line_from_text(&face, style);
+            input_line.focusable_control = true;
+            output.push(input_line);
+            output.push(line_from_text(&border, style));
         }
-        FormControlKind::Submit => {
-            text.push_str("[ ");
-            text.push_str(if control.label.is_empty() {
-                "Submit"
+        FormControlKind::Checkbox => {
+            let checked = if control.checked { "[X] " } else { "[ ] " };
+            let mut line = line_from_text(&format!("{checked}{}", control.label), style);
+            line.focusable_control = true;
+            output.extend(wrap_render_line(line, width));
+        }
+        FormControlKind::Radio => {
+            let checked = if control.checked { "(*) " } else { "( ) " };
+            let mut line = line_from_text(&format!("{checked}{}", control.label), style);
+            line.focusable_control = true;
+            output.extend(wrap_render_line(line, width));
+        }
+        FormControlKind::Submit | FormControlKind::Reset | FormControlKind::Button => {
+            let label = if control.label.is_empty() {
+                match control.kind {
+                    FormControlKind::Submit => "Submit",
+                    FormControlKind::Reset => "Reset",
+                    _ => "Button",
+                }
             } else {
                 &control.label
-            });
-            text.push_str(" ]");
-        }
-        FormControlKind::Reset => {
-            text.push_str("[ ");
-            text.push_str(if control.label.is_empty() {
-                "Reset"
-            } else {
-                &control.label
-            });
-            text.push_str(" ]");
-        }
-        FormControlKind::Button => {
-            text.push_str("[ ");
-            text.push_str(if control.label.is_empty() {
-                "Button"
-            } else {
-                &control.label
-            });
-            text.push_str(" ]");
+            };
+            let face = format!("[ {label} ]");
+            let mut line = line_from_text(&face, style);
+            line.focusable_control = true;
+            output.extend(wrap_render_line(line, width));
         }
         FormControlKind::File => {
-            text.push_str(&control.label);
-            text.push_str(": [file input unsupported]");
+            let mut line = line_from_text(
+                &format!("{}: [file input unsupported]", control.label),
+                style,
+            );
+            line.focusable_control = true;
+            output.extend(wrap_render_line(line, width));
         }
-        FormControlKind::Hidden => return Vec::new(),
+        FormControlKind::Hidden => {}
     }
-    let run = InlineRun {
-        text,
-        style,
-        link: None,
-    };
-    wrap_runs(&[run], width, false)
+    output
+}
+
+fn push_label_lines(output: &mut Vec<RenderLine>, label: &str, width: usize) {
+    if !label.is_empty() {
+        let run = InlineRun {
+            text: label.to_string(),
+            style: InlineStyle::default(),
+            link: None,
+        };
+        output.extend(wrap_runs(&[run], width, false));
+    }
+}
+
+fn wrap_render_line(line: RenderLine, width: usize) -> Vec<RenderLine> {
+    if line.width <= width {
+        return alloc::vec![line];
+    }
+    let mut wrapped = wrap_runs(
+        &[InlineRun {
+            text: line.plain_text(),
+            style: line
+                .spans
+                .first()
+                .map_or(InlineStyle::default(), |span| span.style),
+            link: None,
+        }],
+        width,
+        false,
+    );
+    if let Some(first) = wrapped.first_mut() {
+        first.focusable_control = true;
+    }
+    wrapped
 }
 
 fn layout_block(block: &Block, width: usize) -> Vec<RenderLine> {
@@ -284,45 +333,74 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
         return Vec::new();
     }
 
-    let column_count = table
-        .rows
-        .iter()
-        .map(|row| {
-            row.cells
-                .iter()
-                .map(|cell| cell.colspan.max(1) as usize)
-                .sum::<usize>()
-        })
-        .max()
-        .unwrap_or(0)
-        .min(16)
-        .min(width.saturating_sub(1).div_euclid(4).max(1));
+    struct CellPlacement<'a> {
+        row: usize,
+        column: usize,
+        colspan: usize,
+        rowspan: usize,
+        cell: &'a TableCell,
+        lines: Vec<RenderLine>,
+        inner_width: usize,
+    }
+
+    let max_columns = 16usize.min(width.saturating_sub(1).div_euclid(4).max(1));
+    let row_count = table.rows.len();
+    let mut remaining = alloc::vec![0usize; max_columns];
+    let mut placements = Vec::new();
+    let mut column_count = 0usize;
+
+    // Place each cell into the first unoccupied columns. Rowspan reservations
+    // are carried forward, so later rows cannot overwrite a cell above them.
+    for (row_index, row) in table.rows.iter().enumerate() {
+        let mut column = 0usize;
+        for cell in &row.cells {
+            while column < max_columns && remaining[column] > 0 {
+                column += 1;
+            }
+            if column >= max_columns {
+                break;
+            }
+            let colspan = (cell.colspan.max(1) as usize).min(max_columns.saturating_sub(column));
+            let rowspan =
+                (cell.rowspan.max(1) as usize).min(row_count.saturating_sub(row_index).max(1));
+            for occupied in &mut remaining[column..column + colspan] {
+                *occupied = rowspan;
+            }
+            column_count = column_count.max(column + colspan);
+            placements.push(CellPlacement {
+                row: row_index,
+                column,
+                colspan,
+                rowspan,
+                cell,
+                lines: Vec::new(),
+                inner_width: 1,
+            });
+            column += colspan;
+        }
+        for occupied in &mut remaining {
+            *occupied = occupied.saturating_sub(1);
+        }
+    }
     if column_count == 0 {
         return Vec::new();
     }
 
     let mut widths = alloc::vec![3usize; column_count];
-    for row in &table.rows {
-        let mut column = 0usize;
-        for cell in &row.cells {
-            let span = (cell.colspan.max(1) as usize).min(column_count.saturating_sub(column));
-            if span == 0 {
-                continue;
+    for placement in &placements {
+        let span = placement.colspan;
+        let measured = max_run_width(&placement.cell.runs).min(width);
+        let available = span
+            .saturating_mul(3)
+            .saturating_add(span.saturating_sub(1) * 2);
+        if span == 1 {
+            widths[placement.column] = widths[placement.column].max(measured);
+        } else if measured > available {
+            let extra = measured - available;
+            let each = extra.div_ceil(span);
+            for index in placement.column..placement.column + span {
+                widths[index] = widths[index].saturating_add(each).min(width);
             }
-            let measured = max_run_width(&cell.runs).min(width);
-            let available = span
-                .saturating_mul(3)
-                .saturating_add(span.saturating_sub(1) * 2);
-            if span == 1 {
-                widths[column] = widths[column].max(measured.min(width));
-            } else if measured > available {
-                let extra = measured - available;
-                let each = extra.div_ceil(span);
-                for index in column..column + span {
-                    widths[index] = widths[index].saturating_add(each).min(width);
-                }
-            }
-            column += span;
         }
     }
 
@@ -340,73 +418,113 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
         widths[index] -= 1;
     }
 
-    let mut output = Vec::new();
-    output.push(table_border(&widths));
-    for row in &table.rows {
-        let mut cell_lines: Vec<Vec<RenderLine>> = Vec::new();
-        let mut cell_widths = Vec::new();
-        let mut column = 0usize;
-        for cell in &row.cells {
-            if column >= column_count {
-                break;
+    for placement in &mut placements {
+        placement.inner_width = widths[placement.column..placement.column + placement.colspan]
+            .iter()
+            .sum::<usize>()
+            .saturating_add(placement.colspan.saturating_sub(1) * 2)
+            .max(1);
+        placement.lines = wrap_runs(&placement.cell.runs, placement.inner_width, false);
+        if placement.lines.is_empty() {
+            placement.lines.push(RenderLine::default());
+        }
+        if table.rows[placement.row].header {
+            for line in &mut placement.lines {
+                for span in &mut line.spans {
+                    span.style.strong = true;
+                }
             }
-            let span = (cell.colspan.max(1) as usize)
-                .min(column_count.saturating_sub(column))
-                .max(1);
-            let inner = widths[column..column + span]
-                .iter()
-                .sum::<usize>()
-                .saturating_add(span.saturating_sub(1) * 2)
-                .max(1);
-            let mut lines = wrap_runs(&cell.runs, inner, false);
-            let cell_style = InlineStyle {
-                strong: row.header || cell.style.bold,
-                emphasis: cell.style.italic,
-                underline: cell.style.underline,
-                foreground: cell.style.foreground,
-                background: cell.style.background,
+        } else if placement.cell.style.bold
+            || placement.cell.style.italic
+            || placement.cell.style.underline
+            || placement.cell.style.foreground.is_some()
+            || placement.cell.style.background.is_some()
+        {
+            let style = InlineStyle {
+                strong: placement.cell.style.bold,
+                emphasis: placement.cell.style.italic,
+                underline: placement.cell.style.underline,
+                foreground: placement.cell.style.foreground,
+                background: placement.cell.style.background,
                 ..InlineStyle::default()
             };
-            for line in &mut lines {
-                if row.header {
-                    for span in &mut line.spans {
-                        span.style.strong = true;
-                    }
-                } else if line.spans.is_empty() && !cell.runs.is_empty() {
-                    line.spans.push(RenderSpan {
-                        text: String::new(),
-                        style: cell_style,
-                        link: None,
-                    });
+            for line in &mut placement.lines {
+                for span in &mut line.spans {
+                    span.style = style;
                 }
             }
-            cell_widths.push(inner);
-            cell_lines.push(lines);
-            column += span;
         }
-        let height = cell_lines.iter().map(Vec::len).max().unwrap_or(1).max(1);
-        for line_index in 0..height {
+    }
+
+    // A spanning cell may need more vertical space than its starting row.
+    // Distribute that extra height across the rows it occupies.
+    let mut row_heights = alloc::vec![1usize; row_count];
+    for placement in &placements {
+        let required = placement.lines.len();
+        let current = row_heights[placement.row..placement.row + placement.rowspan]
+            .iter()
+            .sum::<usize>();
+        if required > current {
+            let extra = required - current;
+            for offset in 0..extra {
+                let row = placement.row + (offset % placement.rowspan);
+                row_heights[row] = row_heights[row].saturating_add(1).min(128);
+            }
+        }
+    }
+
+    let mut output = Vec::new();
+    output.push(table_border(&widths));
+    let mut row_offsets = alloc::vec![0usize; row_count];
+    for row in 1..row_count {
+        row_offsets[row] = row_offsets[row - 1].saturating_add(row_heights[row - 1]);
+    }
+
+    for row in 0..row_count {
+        for line_index in 0..row_heights[row] {
             let mut line = RenderLine::default();
             append_text(&mut line, "| ", InlineStyle::default(), None);
-            for cell_index in 0..cell_lines.len() {
-                let inner = cell_widths[cell_index];
-                let source = cell_lines[cell_index].get(line_index);
-                let used = source.map_or(0, |item| item.width).min(inner);
-                if let Some(source) = source {
-                    for span in &source.spans {
-                        append_text(&mut line, &span.text, span.style, span.link);
+            let mut column = 0usize;
+            while column < column_count {
+                let active = placements.iter().find(|placement| {
+                    placement.column == column
+                        && placement.row <= row
+                        && row < placement.row + placement.rowspan
+                });
+                if let Some(placement) = active {
+                    let offset = row_offsets[row]
+                        .saturating_sub(row_offsets[placement.row])
+                        .saturating_add(line_index);
+                    let source = placement.lines.get(offset);
+                    let used = source
+                        .map_or(0, |item| item.width)
+                        .min(placement.inner_width);
+                    if let Some(source) = source {
+                        for span in &source.spans {
+                            append_text(&mut line, &span.text, span.style, span.link);
+                        }
                     }
-                }
-                let padding = inner.saturating_sub(used);
-                if padding > 0 {
+                    let padding = placement.inner_width.saturating_sub(used);
+                    if padding > 0 {
+                        append_text(
+                            &mut line,
+                            &" ".repeat(padding),
+                            InlineStyle::default(),
+                            None,
+                        );
+                    }
+                    column += placement.colspan;
+                } else {
+                    let cell_width = widths[column];
                     append_text(
                         &mut line,
-                        &" ".repeat(padding),
+                        &" ".repeat(cell_width),
                         InlineStyle::default(),
                         None,
                     );
+                    column += 1;
                 }
-                if cell_index + 1 == cell_lines.len() {
+                if column >= column_count {
                     append_text(&mut line, " |", InlineStyle::default(), None);
                 } else {
                     append_text(&mut line, " | ", InlineStyle::default(), None);
@@ -414,9 +532,33 @@ fn layout_table(table: &Table, width: usize) -> Vec<RenderLine> {
             }
             output.push(line);
         }
-        output.push(table_border(&widths));
+
+        let mut continued_columns = alloc::vec![false; column_count];
+        for placement in &placements {
+            if placement.row <= row && placement.row + placement.rowspan > row + 1 {
+                for column in placement.column..placement.column + placement.colspan {
+                    continued_columns[column] = true;
+                }
+            }
+        }
+        output.push(table_border_with_rowspan(&widths, &continued_columns));
     }
     output
+}
+
+fn table_border_with_rowspan(widths: &[usize], continued: &[bool]) -> RenderLine {
+    let mut line = RenderLine::default();
+    append_text(&mut line, "+", InlineStyle::default(), None);
+    for (index, width) in widths.iter().enumerate() {
+        let segment = if continued.get(index).copied().unwrap_or(false) {
+            " ".repeat(width.saturating_add(2))
+        } else {
+            "-".repeat(width.saturating_add(2))
+        };
+        append_text(&mut line, &segment, InlineStyle::default(), None);
+        append_text(&mut line, "+", InlineStyle::default(), None);
+    }
+    line
 }
 
 fn table_border(widths: &[usize]) -> RenderLine {
@@ -667,6 +809,12 @@ pub fn line_for_link(lines: &[RenderLine], link_index: usize) -> Option<usize> {
     })
 }
 
+pub fn line_for_control(lines: &[RenderLine], block_index: usize) -> Option<usize> {
+    lines.iter().enumerate().find_map(|(index, line)| {
+        (line.block_index == Some(block_index) && line.focusable_control).then_some(index)
+    })
+}
+
 pub fn line_for_anchor(document: &Document, lines: &[RenderLine], name: &str) -> Option<usize> {
     let block = document.anchor_block(name)?;
     lines
@@ -778,9 +926,20 @@ mod tests {
             .map(RenderLine::plain_text)
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(rendered.contains("Username: [alice]"));
-        assert!(rendered.contains("Password: [******]"));
+        assert!(rendered.contains("Username"));
+        assert!(rendered.contains("+"));
+        assert!(rendered.contains("| alice_"));
+        assert!(rendered.contains("| ******_"));
         assert!(!rendered.contains("secret"));
+        assert_eq!(
+            lines.iter().filter(|line| line.focusable_control).count(),
+            2
+        );
+        let username_focus = line_for_control(&lines, 0).unwrap();
+        let password_focus = line_for_control(&lines, 1).unwrap();
+        assert!(lines[username_focus].plain_text().contains("alice_"));
+        assert!(lines[password_focus].plain_text().contains("******_"));
+        assert!(lines.iter().all(|line| line.width <= 60));
     }
 
     #[test]
@@ -852,6 +1011,70 @@ mod tests {
         assert!(lines.iter().all(|line| line.width <= 32));
         let narrow = layout_table(&table, 8);
         assert!(narrow.iter().all(|line| line.width <= 8));
+    }
+
+    #[test]
+    fn table_rowspan_reserves_columns_and_draws_merged_cell() {
+        let table = Table {
+            rows: alloc::vec![
+                TableRow {
+                    header: false,
+                    cells: alloc::vec![
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "Shared".to_string(),
+                                style: InlineStyle::default(),
+                                link: None,
+                            }],
+                            colspan: 1,
+                            rowspan: 2,
+                            style: ComputedStyle::default(),
+                        },
+                        TableCell {
+                            runs: alloc::vec![InlineRun {
+                                text: "Top".to_string(),
+                                style: InlineStyle::default(),
+                                link: None,
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            style: ComputedStyle::default(),
+                        },
+                    ],
+                },
+                TableRow {
+                    header: false,
+                    cells: alloc::vec![TableCell {
+                        runs: alloc::vec![InlineRun {
+                            text: "Lower".to_string(),
+                            style: InlineStyle::default(),
+                            link: None,
+                        }],
+                        colspan: 1,
+                        rowspan: 1,
+                        style: ComputedStyle::default(),
+                    }],
+                },
+            ],
+        };
+        let lines = layout_table(&table, 40);
+        let rendered = lines
+            .iter()
+            .map(RenderLine::plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("Shared"));
+        assert!(rendered.contains("Top"));
+        assert!(rendered.contains("Lower"));
+        assert!(lines.iter().all(|line| line.width <= 40));
+        let lower = lines
+            .iter()
+            .find(|line| line.plain_text().contains("Lower"))
+            .unwrap();
+        assert!(
+            lower.plain_text().find("Lower").unwrap()
+                > lower.plain_text().find("Shared").unwrap_or(0)
+        );
     }
 
     #[test]

@@ -995,6 +995,8 @@ enum BrowserAction {
     Bottom,
     NextLink,
     PreviousLink,
+    TabNext,
+    TabPrevious,
     MoveFocusUp,
     MoveFocusDown,
     ActivateLink,
@@ -1256,10 +1258,7 @@ fn focus_targets(page: &BrowserPage, lines: &[RenderLine]) -> Vec<(usize, FocusT
         if control.disabled || control.kind == FormControlKind::Hidden {
             continue;
         }
-        if let Some(line) = lines
-            .iter()
-            .position(|line| line.block_index == Some(block_index))
-        {
+        if let Some(line) = renderer::line_for_control(lines, block_index) {
             targets.push((line, FocusTarget::Control(form_index, control_index)));
         }
     }
@@ -1600,6 +1599,38 @@ fn run_browser_ui(
             BrowserAction::Bottom => {
                 first_line = max_first;
                 status = String::from("End of document");
+                continue;
+            }
+            BrowserAction::TabNext => {
+                if move_focus(
+                    page,
+                    &lines,
+                    1,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                ) {
+                    status = String::from("Moved focus forward");
+                } else {
+                    status = String::from("No links or form controls on this page");
+                }
+                continue;
+            }
+            BrowserAction::TabPrevious => {
+                if move_focus(
+                    page,
+                    &lines,
+                    -1,
+                    &mut selected_link,
+                    &mut selected_control,
+                    &mut first_line,
+                    content_height,
+                ) {
+                    status = String::from("Moved focus backward");
+                } else {
+                    status = String::from("No links or form controls on this page");
+                }
                 continue;
             }
             BrowserAction::NextLink => {
@@ -2140,8 +2171,8 @@ fn read_browser_action(
                     'j' => return Some(BrowserAction::ScrollDown),
                     'k' => return Some(BrowserAction::ScrollUp),
                     ' ' => return Some(BrowserAction::PageDown),
-                    '\t' => return Some(BrowserAction::NextLink),
-                    '[' => return Some(BrowserAction::PreviousLink),
+                    '\t' => return Some(BrowserAction::TabNext),
+                    '[' => return Some(BrowserAction::TabPrevious),
                     _ => {}
                 }
             }
@@ -2220,12 +2251,15 @@ fn render_terminal_page(
                 let focused_control = line
                     .block_index
                     .and_then(|index| page.document.blocks.get(index))
-                    .is_some_and(|block| match &block.kind {
-                        BlockKind::FormControl {
-                            form_index,
-                            control_index,
-                        } => selected_control == Some((*form_index, *control_index)),
-                        _ => false,
+                    .is_some_and(|block| {
+                        line.focusable_control
+                            && match &block.kind {
+                                BlockKind::FormControl {
+                                    form_index,
+                                    control_index,
+                                } => selected_control == Some((*form_index, *control_index)),
+                                _ => false,
+                            }
                     });
                 write_render_line(output, line, width, selected_link, focused_control);
             } else {

@@ -640,7 +640,8 @@ impl DocumentBuilder<'_> {
             _ => FormMethod::Get,
         };
         let mut controls = Vec::new();
-        self.collect_form_controls(node, &mut controls);
+        let mut control_nodes = Vec::new();
+        self.collect_form_controls(node, &mut controls, &mut control_nodes);
         let index = self.document.forms.len();
         self.document.forms.push(Form {
             action,
@@ -648,27 +649,94 @@ impl DocumentBuilder<'_> {
             controls,
         });
 
-        // Keep controls in document order as real renderer blocks. The terminal
-        // frontend can focus and edit these fields in place without a second
-        // line-oriented questionnaire.
-        let control_count = self.document.forms[index].controls.len();
-        for control_index in 0..control_count {
-            if self.document.blocks.len() >= MAX_BLOCKS {
-                break;
+        // Traverse the form's actual DOM subtree so labels, explanatory text,
+        // block structure and widgets retain their source order in the page.
+        let mut next_control = 0usize;
+        self.emit_form_flow(node, style, index, &control_nodes, &mut next_control, 0);
+    }
+
+    fn emit_form_flow(
+        &mut self,
+        node: NodeId,
+        parent_style: ComputedStyle,
+        form_index: usize,
+        control_nodes: &[NodeId],
+        next_control: &mut usize,
+        list_depth: u8,
+    ) {
+        let mut inline = Vec::new();
+        for child in self.dom.children(node).iter().copied() {
+            match &self.dom.nodes[child].kind {
+                NodeKind::Text(text) => {
+                    push_run(&mut inline, text, inline_style(&parent_style), None);
+                }
+                NodeKind::Comment | NodeKind::Document => {}
+                NodeKind::Element { .. } => {
+                    let child_style = self.computed(child, &parent_style);
+                    let is_next_control = control_nodes.get(*next_control) == Some(&child);
+                    if is_next_control {
+                        self.flush_paragraph(&mut inline, parent_style);
+                        let control_index = *next_control;
+                        *next_control = next_control.saturating_add(1);
+                        let hidden = self.document.forms[form_index]
+                            .controls
+                            .get(control_index)
+                            .is_none_or(|control| control.kind == FormControlKind::Hidden);
+                        if !hidden
+                            && child_style.display != DisplayMode::None
+                            && self.document.blocks.len() < MAX_BLOCKS
+                        {
+                            self.document.blocks.push(Block {
+                                kind: BlockKind::FormControl {
+                                    form_index,
+                                    control_index,
+                                },
+                                runs: Vec::new(),
+                                style: child_style,
+                            });
+                        }
+                        continue;
+                    }
+                    if child_style.display == DisplayMode::None {
+                        continue;
+                    }
+
+                    let tag = self.dom.tag(child).unwrap_or("");
+                    if tag == "br" {
+                        push_run(&mut inline, "\n", inline_style(&child_style), None);
+                    } else if is_inline_tag(tag) || child_style.display == DisplayMode::Inline {
+                        let contains_later_control =
+                            control_nodes.iter().skip(*next_control).any(|control| {
+                                *control == child || self.dom.ancestors(*control).contains(&child)
+                            });
+                        if contains_later_control {
+                            self.emit_form_flow(
+                                child,
+                                child_style,
+                                form_index,
+                                control_nodes,
+                                next_control,
+                                list_depth,
+                            );
+                        } else {
+                            self.collect_inline(child, child_style, None, &mut inline);
+                        }
+                    } else {
+                        self.flush_paragraph(&mut inline, parent_style);
+                        self.emit_form_flow(
+                            child,
+                            child_style,
+                            form_index,
+                            control_nodes,
+                            next_control,
+                            list_depth,
+                        );
+                    }
+                }
             }
-            let control = &self.document.forms[index].controls[control_index];
-            if control.kind == FormControlKind::Hidden {
-                continue;
-            }
-            self.document.blocks.push(Block {
-                kind: BlockKind::FormControl {
-                    form_index: index,
-                    control_index,
-                },
-                runs: Vec::new(),
-                style,
-            });
         }
+        self.flush_paragraph(&mut inline, parent_style);
+        let _ = list_depth;
     }
 
     fn field_label(&self, node: NodeId) -> String {
@@ -709,7 +777,12 @@ impl DocumentBuilder<'_> {
         String::from("Input")
     }
 
-    fn collect_form_controls(&self, node: NodeId, controls: &mut Vec<FormControl>) {
+    fn collect_form_controls(
+        &self,
+        node: NodeId,
+        controls: &mut Vec<FormControl>,
+        control_nodes: &mut Vec<NodeId>,
+    ) {
         for child in self.dom.children(node).iter().copied() {
             if controls.len() >= MAX_FORM_CONTROLS {
                 return;
@@ -766,6 +839,7 @@ impl DocumentBuilder<'_> {
                     checked: self.dom.attr(child, "checked").is_some(),
                     options: Vec::new(),
                 });
+                control_nodes.push(child);
             } else if tag == "textarea" {
                 controls.push(FormControl {
                     name: self.dom.attr(child, "name").unwrap_or("").to_string(),
@@ -778,6 +852,7 @@ impl DocumentBuilder<'_> {
                     checked: false,
                     options: Vec::new(),
                 });
+                control_nodes.push(child);
             } else if tag == "select" {
                 let mut options = Vec::new();
                 self.collect_options(child, &mut options);
@@ -798,6 +873,7 @@ impl DocumentBuilder<'_> {
                     checked: false,
                     options,
                 });
+                control_nodes.push(child);
             } else if tag == "button" {
                 let kind = match self.dom.attr(child, "type").unwrap_or("submit") {
                     "reset" => FormControlKind::Reset,
@@ -815,8 +891,9 @@ impl DocumentBuilder<'_> {
                     checked: false,
                     options: Vec::new(),
                 });
+                control_nodes.push(child);
             } else {
-                self.collect_form_controls(child, controls);
+                self.collect_form_controls(child, controls, control_nodes);
             }
         }
     }
@@ -1150,6 +1227,62 @@ mod tests {
                 control_index: 1
             }
         )));
+    }
+
+    #[test]
+    fn form_controls_are_emitted_at_their_original_dom_positions() {
+        let base = Url::parse("https://example.org/search").unwrap();
+        let page = parse_html(
+            "<form action=/search><p>Before <label for=q>Query</label><input id=q name=q value=uefi> after</p><p>More text</p><button type=submit name=go value=1>Search</button></form>",
+            &base,
+        );
+        let first_text = page
+            .blocks
+            .iter()
+            .position(|block| block.runs.iter().any(|run| run.text.contains("Before")))
+            .unwrap();
+        let input = page
+            .blocks
+            .iter()
+            .position(|block| {
+                matches!(
+                    &block.kind,
+                    BlockKind::FormControl {
+                        form_index: 0,
+                        control_index: 0
+                    }
+                )
+            })
+            .unwrap();
+        let after_text = page
+            .blocks
+            .iter()
+            .position(|block| block.runs.iter().any(|run| run.text.contains("after")))
+            .unwrap();
+        let more_text = page
+            .blocks
+            .iter()
+            .position(|block| block.runs.iter().any(|run| run.text.contains("More text")))
+            .unwrap();
+        let submit = page
+            .blocks
+            .iter()
+            .position(|block| {
+                matches!(
+                    &block.kind,
+                    BlockKind::FormControl {
+                        form_index: 0,
+                        control_index: 1
+                    }
+                )
+            })
+            .unwrap();
+
+        assert!(first_text < input);
+        assert!(input < after_text);
+        assert!(after_text < more_text);
+        assert!(more_text < submit);
+        assert_eq!(page.forms[0].controls[0].value, "uefi");
     }
 
     #[test]
