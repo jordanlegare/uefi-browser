@@ -8,8 +8,32 @@
 #ifndef __ASSEMBLER__
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <time.h>
+#include <errno.h>
+#include <ctype.h>
+#include <string.h>
 #endif
+
+/*
+ * MinGW's CRT headers mark these routines dllimport even for our freestanding
+ * UEFI image. Include their headers first, then redirect wolfSSL call sites to
+ * local freestanding implementations in uefi_crt.c.
+ */
+#define _errno uefi_wolfssl_errno
+#define tolower uefi_wolfssl_tolower
+#define _stricmp uefi_wolfssl_stricmp
+#define stricmp uefi_wolfssl_stricmp
+#define XSTRCASECMP uefi_wolfssl_stricmp
+
+#ifndef __ASSEMBLER__
+extern int *uefi_wolfssl_errno(void);
+extern int uefi_wolfssl_tolower(int character);
+extern int uefi_wolfssl_stricmp(const char *left, const char *right);
+#endif
+
+/* Keep the x86-64 PE/COFF ABI, but do not use Windows OS APIs. */
+#define WOLFSSL_NOT_WINDOWS_API
 
 #define SINGLE_THREADED
 #define NO_FILESYSTEM
@@ -67,11 +91,20 @@
 #define XTIME uefi_wolfssl_time
 #define XGMTIME uefi_wolfssl_gmtime
 
+/*
+ * wolfSSL TLS 1.3 uses TimeNowInMilliseconds for protocol timers.
+ * Route it through our firmware clock hook rather than POSIX gettimeofday()
+ * or Windows performance-counter APIs.
+ */
+#define WOLFSSL_32BIT_MILLI_TIME
+#define XTIME_MS(ignored) uefi_wolfssl_time_ms()
+
 #define XSNPRINTF uefi_wolfssl_snprintf
 #define XVSNPRINTF uefi_wolfssl_vsnprintf
 #ifndef __ASSEMBLER__
 extern int uefi_wolfssl_rng(unsigned char *output, unsigned int size);
 extern time_t uefi_wolfssl_time(time_t *timer);
+extern uint32_t uefi_wolfssl_time_ms(void);
 extern struct tm *uefi_wolfssl_gmtime(const time_t *timer, struct tm *result);
 extern int uefi_wolfssl_snprintf(char *buffer, size_t size, const char *format, ...);
 extern int uefi_wolfssl_vsnprintf(char *buffer, size_t size, const char *format, va_list args);

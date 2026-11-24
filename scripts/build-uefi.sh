@@ -31,6 +31,9 @@ bash "$ROOT/scripts/fetch-wolfssl.sh"
 rm -rf "$BUILD" "$PREFIX" "$BRIDGE_BUILD"
 mkdir -p "$BRIDGE_BUILD"
 
+# Keep the MinGW x86-64 ABI macros enabled so pointer-sized wolfSSL types
+# match the target. WOLFSSL_NOT_WINDOWS_API in user_settings.h disables
+# Windows OS APIs while retaining the PE/COFF Windows calling convention.
 C_FLAGS="-DNOMINMAX -O2 -ffreestanding -fno-builtin -fshort-wchar -DWOLFSSL_USER_SETTINGS -I$PLATFORM_INCLUDE -isystem $MINGW_INCLUDE"
 
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
