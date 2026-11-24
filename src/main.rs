@@ -18,8 +18,8 @@ use uefi_browser::document::{
 use uefi_browser::http::{self, HttpResponse};
 use uefi_browser::network::connect_firmware_url;
 use uefi_browser::persistence::{CachedPage, PersistentStore};
-use uefi_browser::uefi_storage::UefiFileStore;
 use uefi_browser::renderer::{self, RenderLine};
+use uefi_browser::uefi_storage::UefiFileStore;
 use uefi_browser::url::{Scheme, Url};
 
 const MAX_BODY_BYTES: usize = 256 * 1024;
