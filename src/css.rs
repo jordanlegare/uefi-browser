@@ -229,7 +229,7 @@ fn default_style(tag: &str, parent: &ComputedStyle) -> ComputedStyle {
         "th" => {
             style.bold = true;
             style.display = DisplayMode::TableCell;
-        },
+        }
         "i" | "em" | "cite" | "dfn" | "var" => style.italic = true,
         "u" | "ins" => style.underline = true,
         "pre" | "textarea" => style.white_space_pre = true,
