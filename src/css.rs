@@ -457,7 +457,7 @@ fn find_top_level_rule_delimiter(css: &str, start: usize) -> Option<(usize, u8)>
             escaped = false;
             continue;
         }
-        if quote.is_some() && byte == b'\\\\' {
+        if quote.is_some() && byte == b'\\' {
             escaped = true;
             continue;
         }
@@ -468,7 +468,7 @@ fn find_top_level_rule_delimiter(css: &str, start: usize) -> Option<(usize, u8)>
             continue;
         }
         match byte {
-            b'\\'' | b'"' => quote = Some(byte),
+            b'\'' | b'"' => quote = Some(byte),
             b'(' => parentheses = parentheses.saturating_add(1),
             b')' => parentheses = parentheses.saturating_sub(1),
             b'[' => brackets = brackets.saturating_add(1),
@@ -496,7 +496,7 @@ fn matching_rule_brace(css: &str, open: usize) -> Option<usize> {
             escaped = false;
             continue;
         }
-        if quote.is_some() && byte == b'\\\\' {
+        if quote.is_some() && byte == b'\\' {
             escaped = true;
             continue;
         }
@@ -507,7 +507,7 @@ fn matching_rule_brace(css: &str, open: usize) -> Option<usize> {
             continue;
         }
         match byte {
-            b'\\'' | b'"' => quote = Some(byte),
+            b'\'' | b'"' => quote = Some(byte),
             b'{' => depth = depth.saturating_add(1),
             b'}' => {
                 depth = depth.saturating_sub(1);
