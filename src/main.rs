@@ -17,7 +17,7 @@ use uefi_browser::document::{
 };
 use uefi_browser::http::{self, HttpResponse};
 use uefi_browser::network::connect_firmware_url;
-use uefi_browser::persistence::{CachedPage, PersistentStore};
+use uefi_browser::persistence::{CachedPage, HistoryEntry, PersistentStore};
 use uefi_browser::renderer::{self, RenderLine};
 use uefi_browser::uefi_storage::UefiFileStore;
 use uefi_browser::url::{Scheme, Url};
@@ -150,6 +150,7 @@ fn main() -> Status {
         match fetch_document(&first_url, network, &mut storage) {
             Ok(page) => {
                 history.push(first_url.clone());
+                record_persistent_visit(&mut storage, &page);
                 break (page, 0usize);
             }
             Err(error) => {
@@ -233,15 +234,20 @@ fn fetch_document(
 ) -> Result<BrowserPage, String> {
     let key = cache_key(initial_url);
     let now = cache_clock();
-    if now > 0 {
-        if let Some(store) = storage.as_mut() {
-            if let Some(cached) = store.cached_page(&key, now) {
-                let css = fetch_stylesheets(&cached.body, initial_url, network);
+    let cached = storage.as_mut().and_then(|store| store.cache_entry(&key));
+
+    // Entries without validators retain the short local freshness window.
+    // Entries with validators are revalidated with the origin even while fresh.
+    if let Some(entry) = cached.as_ref() {
+        if entry.etag.is_none() && entry.last_modified.is_none() && now > 0 {
+            let age = now.checked_sub(entry.stored_at).unwrap_or(i64::MAX);
+            if (0..=uefi_browser::persistence::CACHE_TTL_SECONDS).contains(&age) {
+                let css = fetch_stylesheets(&entry.body, initial_url, network);
                 return Ok(build_browser_page(
                     initial_url.clone(),
                     200,
-                    &cached.content_type,
-                    &cached.body,
+                    &entry.content_type,
+                    &entry.body,
                     &css,
                     true,
                 ));
@@ -251,7 +257,44 @@ fn fetch_document(
 
     let mut current = initial_url.clone();
     for redirect_index in 0..=MAX_REDIRECTS {
-        let response = fetch_response_with_method(&current, network, "GET", &[], MAX_BODY_BYTES)?;
+        let response = if current == *initial_url {
+            fetch_response_with_validators(
+                &current,
+                network,
+                "GET",
+                &[],
+                MAX_BODY_BYTES,
+                cached.as_ref().and_then(|entry| entry.etag.as_deref()),
+                cached.as_ref().and_then(|entry| entry.last_modified.as_deref()),
+            )?
+        } else {
+            fetch_response_with_method(&current, network, "GET", &[], MAX_BODY_BYTES)?
+        };
+
+        if response.status == 304 {
+            let Some(mut entry) = cached.clone() else {
+                return Err(String::from("server returned 304 without a matching cached page"));
+            };
+            entry.stored_at = now.max(entry.stored_at);
+            if let Some(etag) = response.header("etag") {
+                entry.etag = Some(etag.to_string());
+            }
+            if let Some(modified) = response.header("last-modified") {
+                entry.last_modified = Some(modified.to_string());
+            }
+            if let Some(store) = storage.as_mut() {
+                let _ = store.cache_page(&entry);
+            }
+            let css = fetch_stylesheets(&entry.body, initial_url, network);
+            return Ok(build_browser_page(
+                initial_url.clone(),
+                200,
+                &entry.content_type,
+                &entry.body,
+                &css,
+                true,
+            ));
+        }
         if response.is_redirect() {
             if redirect_index == MAX_REDIRECTS {
                 return Err(String::from("redirect limit exceeded"));
@@ -298,6 +341,8 @@ fn fetch_document(
                     url: cache_key(&current),
                     content_type: content_type.clone(),
                     stored_at: now,
+                    etag: response.header("etag").map(ToString::to_string),
+                    last_modified: response.header("last-modified").map(ToString::to_string),
                     body: response.body.clone(),
                 };
                 let _ = store.cache_page(&cached);
@@ -439,6 +484,18 @@ fn fetch_response_with_method(
     body: &[u8],
     max_body: usize,
 ) -> Result<HttpResponse, String> {
+    fetch_response_with_validators(url, network, method, body, max_body, None, None)
+}
+
+fn fetch_response_with_validators(
+    url: &Url,
+    network: &mut uefi_browser::snp_network::SnpNetwork,
+    method: &str,
+    body: &[u8],
+    max_body: usize,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> Result<HttpResponse, String> {
     #[cfg(not(all(target_os = "uefi", uefi_wolfssl_linked, uefi_ca_bundle)))]
     if url.scheme == Scheme::Https {
         return Err(String::from(
@@ -485,8 +542,16 @@ fn fetch_response_with_method(
         Scheme::Http => {
             uefi::println!("Sending HTTP request...");
             let response =
-                http::exchange_request(&mut connection.peer.stream, url, method, body, max_body)
-                    .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
+                http::exchange_request_with_validators(
+                    &mut connection.peer.stream,
+                    url,
+                    method,
+                    body,
+                    max_body,
+                    etag,
+                    last_modified,
+                )
+                .map_err(|error| format!("HTTP transaction failed: {error:?}"))?;
             uefi::println!("HTTP response received ({} bytes).", response.body.len());
             Ok(response)
         }
@@ -556,8 +621,16 @@ fn fetch_response_with_method(
                 uefi::println!(
                     "[TLS] Certificate path, validity, and hostname checks passed. HTTPS data may now flow."
                 );
-                let response = http::exchange_request(&mut tls, url, method, body, max_body)
-                    .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
+                let response = http::exchange_request_with_validators(
+                    &mut tls,
+                    url,
+                    method,
+                    body,
+                    max_body,
+                    etag,
+                    last_modified,
+                )
+                .map_err(|error| format!("HTTPS transaction failed: {error:?}"))?;
                 uefi::println!("HTTPS response received ({} bytes).", response.body.len());
                 Ok(response)
             }
@@ -1193,6 +1266,32 @@ fn submit_form(
             }
             Ok((action, "POST", query.into_bytes()))
         }
+    }
+}
+
+fn display_history(storage: &mut BrowserStore) {
+    let Some(store) = storage.as_mut() else {
+        uefi::println!("Persistent storage is unavailable.");
+        return;
+    };
+    let entries = store.history();
+    if entries.is_empty() {
+        uefi::println!("No saved browsing history.");
+        return;
+    }
+    uefi::println!("Recent browsing history (newest last):");
+    for (index, entry) in entries.iter().enumerate() {
+        uefi::println!("  [{}] {} — {}", index + 1, entry.title, entry.url);
+    }
+}
+
+fn record_persistent_visit(storage: &mut BrowserStore, page: &BrowserPage) {
+    let now = cache_clock();
+    if now <= 0 {
+        return;
+    }
+    if let Some(store) = storage.as_mut() {
+        let _ = store.record_visit(&page.url.as_string(), &page.document.title, now);
     }
 }
 
@@ -1877,6 +1976,20 @@ fn run_browser_ui(
             };
             continue;
         }
+        if command == "history" {
+            display_history(storage);
+            let _ = read_line("Press ENTER to return: ", network);
+            continue;
+        }
+        if command == "clear-history" {
+            if let Some(store) = storage.as_mut() {
+                store.clear_history();
+                status = String::from("Persistent browsing history cleared");
+            } else {
+                status = String::from("Persistent storage is unavailable");
+            }
+            continue;
+        }
         if command == "clear-cache" {
             if let Some(store) = storage.as_mut() {
                 store.clear_cache();
@@ -1927,6 +2040,7 @@ fn run_browser_ui(
                             history.push(next_page.url.clone());
                             *history_index = history.len() - 1;
                             *page = next_page;
+                            record_persistent_visit(storage, page);
                             first_line = 0;
                             anchor_pending = true;
                             selected_link = None;
@@ -2100,6 +2214,9 @@ fn run_browser_ui(
                     *history_index = history.len() - 1;
                 }
                 *page = next_page;
+                if target_index.is_none() && add_history {
+                    record_persistent_visit(storage, page);
+                }
                 navigation_error = None;
                 first_line = 0;
                 anchor_pending = true;
@@ -2474,7 +2591,7 @@ fn print_help() {
         "  Commands: open URL, open N, open-bookmark N, bookmark, bookmarks, delete-bookmark N"
     );
     uefi::println!(
-        "            form N (focus its controls), cache-stats, clear-cache, search WORD, back, forward, reload, quit"
+        "            form N, history, clear-history, cache-stats, clear-cache, search WORD, back, forward, reload, quit"
     );
     uefi::println!("");
 }
