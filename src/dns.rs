@@ -133,7 +133,7 @@ pub fn resolve_a<T: UdpDnsTransport, R: SecureRandom>(
                         parse_a_response(&response[..tcp_length], transaction_id, hostname)
                     }
                     result => result,
-                }
+                };
             }
             Err(DnsIoError::Timeout) if attempt + 1 < DNS_ATTEMPTS => continue,
             Err(DnsIoError::Timeout) => return Err(DnsError::Timeout),
