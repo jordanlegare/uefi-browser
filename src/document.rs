@@ -670,6 +670,44 @@ impl DocumentBuilder<'_> {
         }
     }
 
+    fn field_label(&self, node: NodeId) -> String {
+        if let Some(label) = self.dom.attr(node, "aria-label") {
+            if !collapse_whitespace(label).is_empty() {
+                return collapse_whitespace(label);
+            }
+        }
+
+        if let Some(id) = self.dom.attr(node, "id") {
+            for label in self.dom.find_by_tag(self.dom.root, "label") {
+                if self.dom.attr(label, "for") == Some(id) {
+                    let text = collapse_whitespace(&self.dom.text_content(label));
+                    if !text.is_empty() {
+                        return text;
+                    }
+                }
+            }
+        }
+
+        for ancestor in self.dom.ancestors(node) {
+            if self.dom.tag(ancestor) == Some("label") {
+                let text = collapse_whitespace(&self.dom.text_content(ancestor));
+                if !text.is_empty() {
+                    return text;
+                }
+            }
+        }
+
+        for attribute in ["title", "placeholder", "name"] {
+            if let Some(value) = self.dom.attr(node, attribute) {
+                let text = collapse_whitespace(value);
+                if !text.is_empty() {
+                    return text;
+                }
+            }
+        }
+        String::from("Input")
+    }
+
     fn collect_form_controls(&self, node: NodeId, controls: &mut Vec<FormControl>) {
         for child in self.dom.children(node).iter().copied() {
             if controls.len() >= MAX_FORM_CONTROLS {
@@ -698,31 +736,30 @@ impl DocumentBuilder<'_> {
                 };
                 controls.push(FormControl {
                     name: self.dom.attr(child, "name").unwrap_or("").to_string(),
-                    label: self
-                        .dom
-                        .attr(child, "aria-label")
-                        .or_else(|| self.dom.attr(child, "placeholder"))
-                        .or_else(|| self.dom.attr(child, "title"))
-                        .or_else(|| self.dom.attr(child, "name"))
-                        .unwrap_or("field")
-                        .to_string(),
+                    label: if kind == FormControlKind::Submit {
+                        self.dom.attr(child, "value").filter(|value| !value.is_empty())
+                            .unwrap_or("Submit").to_string()
+                    } else if kind == FormControlKind::Reset {
+                        self.dom.attr(child, "value").filter(|value| !value.is_empty())
+                            .unwrap_or("Reset").to_string()
+                    } else if kind == FormControlKind::Button {
+                        self.dom.attr(child, "value").filter(|value| !value.is_empty())
+                            .unwrap_or("Button").to_string()
+                    } else {
+                        self.field_label(child)
+                    },
                     value: self.dom.attr(child, "value").unwrap_or("").to_string(),
                     kind,
                     required: self.dom.attr(child, "required").is_some(),
-                    disabled: self.dom.attr(child, "disabled").is_some(),
+                    disabled: self.dom.attr(child, "disabled").is_some()
+                        || self.dom.attr(child, "readonly").is_some(),
                     checked: self.dom.attr(child, "checked").is_some(),
                     options: Vec::new(),
                 });
             } else if tag == "textarea" {
                 controls.push(FormControl {
                     name: self.dom.attr(child, "name").unwrap_or("").to_string(),
-                    label: self
-                        .dom
-                        .attr(child, "aria-label")
-                        .or_else(|| self.dom.attr(child, "placeholder"))
-                        .or_else(|| self.dom.attr(child, "name"))
-                        .unwrap_or("text")
-                        .to_string(),
+                    label: self.field_label(child),
                     value: self.dom.text_content(child),
                     kind: FormControlKind::TextArea,
                     required: self.dom.attr(child, "required").is_some(),
@@ -741,12 +778,7 @@ impl DocumentBuilder<'_> {
                     .unwrap_or_default();
                 controls.push(FormControl {
                     name: self.dom.attr(child, "name").unwrap_or("").to_string(),
-                    label: self
-                        .dom
-                        .attr(child, "aria-label")
-                        .or_else(|| self.dom.attr(child, "name"))
-                        .unwrap_or("choice")
-                        .to_string(),
+                    label: self.field_label(child),
                     value: selected,
                     kind: FormControlKind::Select,
                     required: self.dom.attr(child, "required").is_some(),
@@ -1079,6 +1111,26 @@ mod tests {
                 .iter()
                 .any(|block| matches!(&block.kind, BlockKind::Preformatted))
         );
+    }
+
+    #[test]
+    fn form_controls_are_visible_renderer_blocks_with_associated_labels() {
+        let base = Url::parse("https://example.org/search").unwrap();
+        let page = parse_html(
+            "<form action=/find><label for=q>Search terms</label><input id=q name=q value=uefi><input type=submit value=Find></form>",
+            &base,
+        );
+        assert_eq!(page.forms.len(), 1);
+        assert_eq!(page.forms[0].controls[0].label, "Search terms");
+        assert_eq!(page.forms[0].controls[0].value, "uefi");
+        assert!(page.blocks.iter().any(|block| matches!(
+            block.kind,
+            BlockKind::FormControl { form_index: 0, control_index: 0 }
+        )));
+        assert!(page.blocks.iter().any(|block| matches!(
+            block.kind,
+            BlockKind::FormControl { form_index: 0, control_index: 1 }
+        )));
     }
 
     #[test]
