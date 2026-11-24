@@ -2196,9 +2196,10 @@ fn render_terminal_page(
                     .block_index
                     .and_then(|index| page.document.blocks.get(index))
                     .is_some_and(|block| match &block.kind {
-                        BlockKind::FormControl { form_index, control_index } => {
-                            selected_control == Some((*form_index, *control_index))
-                        }
+                        BlockKind::FormControl {
+                            form_index,
+                            control_index,
+                        } => selected_control == Some((*form_index, *control_index))
                         _ => false,
                     });
                 write_render_line(output, line, width, selected_link, focused_control);
