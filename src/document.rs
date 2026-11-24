@@ -1307,11 +1307,11 @@ mod tests {
         let visible_controls = page
             .blocks
             .iter()
-            .filter_map(|block| match block.kind {
+            .filter_map(|block| match &block.kind {
                 BlockKind::FormControl {
                     form_index: 0,
                     control_index,
-                } => Some(control_index),
+                } => Some(*control_index),
                 _ => None,
             })
             .collect::<Vec<_>>();
