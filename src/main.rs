@@ -527,7 +527,7 @@ fn describe_tls_failure_with_grc(
         if *verify_depth >= 0 {
             if let Some(fingerprint) = observed_chain.get(*verify_depth as usize) {
                 report.push_str(&format!(
-                    "\\nRejected certificate SHA-1 (GRC comparison format): {}",
+                    "\nRejected certificate SHA-1 (GRC comparison format): {}",
                     format_sha1(fingerprint)
                 ));
             }
