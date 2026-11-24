@@ -422,7 +422,7 @@ fn close_open(stack: &mut Vec<NodeId>, dom: &Dom, target: &str) {
     }
 }
 
-fn current_tag(stack: &[NodeId], dom: &Dom) -> Option<&str> {
+fn current_tag<'a>(stack: &[NodeId], dom: &'a Dom) -> Option<&'a str> {
     stack.last().and_then(|id| dom.tag(*id))
 }
 

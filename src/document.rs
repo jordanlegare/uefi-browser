@@ -788,7 +788,7 @@ impl DocumentBuilder<'_> {
                         .children(parent)
                         .iter()
                         .filter(|child| self.dom.tag(**child) == Some("li"))
-                        .position(|child| **child == node)
+                        .position(|child| *child == node)
                         .unwrap_or(0) as u16
                         + 1;
                     return (true, ordinal);
@@ -799,7 +799,7 @@ impl DocumentBuilder<'_> {
                         .children(parent)
                         .iter()
                         .filter(|child| self.dom.tag(**child) == Some("li"))
-                        .position(|child| **child == node)
+                        .position(|child| *child == node)
                         .unwrap_or(0) as u16
                         + 1;
                     return (false, ordinal);

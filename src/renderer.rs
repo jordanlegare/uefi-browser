@@ -1,10 +1,8 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::document::{
-    Block, BlockKind, ComputedStyle, Document, InlineRun, InlineStyle, Table, TableCell, TermColor,
-    TextAlign,
-};
+use crate::css::{ComputedStyle, DisplayMode, TextAlign};
+use crate::document::{Block, BlockKind, Document, InlineRun, InlineStyle, Table, TableCell, TermColor};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderLine {
@@ -39,7 +37,7 @@ pub fn layout_document(document: &Document, width: usize) -> Vec<RenderLine> {
     let mut output = Vec::new();
 
     for (block_index, block) in document.blocks.iter().enumerate() {
-        if block.style.display == crate::css::DisplayMode::None {
+        if block.style.display == DisplayMode::None {
             continue;
         }
 
