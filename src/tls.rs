@@ -38,11 +38,7 @@ unsafe extern "C" {
     fn uefi_wolfssl_last_verify_error() -> c_int;
     fn uefi_wolfssl_last_verify_depth() -> c_int;
     fn uefi_wolfssl_peer_chain_count() -> c_int;
-    fn uefi_wolfssl_copy_peer_chain_sha1(
-        depth: c_int,
-        output: *mut u8,
-        capacity: usize,
-    ) -> c_int;
+    fn uefi_wolfssl_copy_peer_chain_sha1(depth: c_int, output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_copy_bad_cert_sha256(output: *mut u8, capacity: usize) -> c_int;
     fn uefi_wolfssl_handshake(session: *mut RawTlsSession) -> c_int;
     fn uefi_wolfssl_read(session: *mut RawTlsSession, output: *mut u8, capacity: usize) -> c_int;
