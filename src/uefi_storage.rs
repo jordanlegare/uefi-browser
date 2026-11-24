@@ -33,7 +33,8 @@ impl UefiFileStore {
         {
             return Err(());
         }
-        CString16::try_from(format!("\\UEFI_BROWSER\\{name}")).map_err(|_| ())
+        let path = format!("\\UEFI_BROWSER\\{name}");
+        CString16::try_from(path.as_str()).map_err(|_| ())
     }
 
     fn maximum_file_size(name: &str) -> Option<u64> {

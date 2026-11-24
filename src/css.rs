@@ -225,13 +225,17 @@ fn default_style(tag: &str, parent: &ComputedStyle) -> ComputedStyle {
             style.bold = true;
             style.margin_top = 1;
         }
-        "b" | "strong" | "th" => style.bold = true,
+        "b" | "strong" => style.bold = true,
+        "th" => {
+            style.bold = true;
+            style.display = DisplayMode::TableCell;
+        },
         "i" | "em" | "cite" | "dfn" | "var" => style.italic = true,
         "u" | "ins" => style.underline = true,
         "pre" | "textarea" => style.white_space_pre = true,
         "table" => style.display = DisplayMode::Table,
         "tr" => style.display = DisplayMode::TableRow,
-        "td" | "th" => style.display = DisplayMode::TableCell,
+        "td" => style.display = DisplayMode::TableCell,
         "script" | "style" | "head" | "meta" | "link" | "template" => {
             style.display = DisplayMode::None
         }
