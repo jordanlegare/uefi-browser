@@ -76,6 +76,10 @@ pub enum BlockKind {
     Table {
         table_index: usize,
     },
+    FormControl {
+        form_index: usize,
+        control_index: usize,
+    },
     DefinitionTerm,
     DefinitionDescription,
     HorizontalRule,
@@ -642,18 +646,28 @@ impl DocumentBuilder<'_> {
             method,
             controls,
         });
-        let mut runs = Vec::new();
-        push_run(
-            &mut runs,
-            &format!(
-                "[Form {} — use 'form {}' to fill and submit]",
-                index + 1,
-                index + 1
-            ),
-            InlineStyle::default(),
-            None,
-        );
-        self.push_block(BlockKind::Paragraph, runs, style);
+
+        // Keep controls in document order as real renderer blocks. The terminal
+        // frontend can focus and edit these fields in place without a second
+        // line-oriented questionnaire.
+        let control_count = self.document.forms[index].controls.len();
+        for control_index in 0..control_count {
+            if self.document.blocks.len() >= MAX_BLOCKS {
+                break;
+            }
+            let control = &self.document.forms[index].controls[control_index];
+            if control.kind == FormControlKind::Hidden {
+                continue;
+            }
+            self.document.blocks.push(Block {
+                kind: BlockKind::FormControl {
+                    form_index: index,
+                    control_index,
+                },
+                runs: Vec::new(),
+                style,
+            });
+        }
     }
 
     fn collect_form_controls(&self, node: NodeId, controls: &mut Vec<FormControl>) {
