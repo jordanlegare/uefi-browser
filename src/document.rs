@@ -270,6 +270,8 @@ fn parse_dom_with_styles(dom: crate::html5::Dom, base: &Url, external_css: &[Str
         let body_style = builder.computed(body, &ComputedStyle::default());
         if body_style.display != DisplayMode::None {
             builder.walk_flow(body, body_style, 0);
+        } else {
+            builder.emit_forms_from_fallback_subtree(body, &ComputedStyle::default(), 0);
         }
     }
 
@@ -280,6 +282,13 @@ fn parse_dom_with_styles(dom: crate::html5::Dom, base: &Url, external_css: &[Str
         builder.document.text.pop();
     }
     builder.document
+}
+
+fn default_style_for_form_control(tag: &str) -> DisplayMode {
+    match tag {
+        "button" | "input" | "select" | "textarea" => DisplayMode::Inline,
+        _ => DisplayMode::Block,
+    }
 }
 
 struct DocumentBuilder<'a> {
@@ -294,6 +303,107 @@ impl DocumentBuilder<'_> {
         self.style_sheet.compute(self.dom, node, parent)
     }
 
+    /// Preserve interactive controls when a stylesheet hides a wrapper that a
+    /// script-driven page expects JavaScript to reveal. This firmware browser
+    /// does not execute JavaScript, so CSS-only hidden wrappers can otherwise
+    /// make a static search form disappear entirely.
+    ///
+    /// Explicit HTML hidden/aria-hidden and inline display:none are still
+    /// respected; only stylesheet-driven hiding is relaxed for form controls.
+    fn is_explicitly_hidden(&self, node: NodeId) -> bool {
+        core::iter::once(node)
+            .chain(self.dom.ancestors(node))
+            .any(|id| {
+                self.dom.attr(id, "hidden").is_some()
+                    || self
+                        .dom
+                        .attr(id, "aria-hidden")
+                        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+                    || self.dom.attr(id, "style").is_some_and(|style| {
+                        style.split(';').any(|declaration| {
+                            declaration
+                                .split_once(':')
+                                .is_some_and(|(property, value)| {
+                                    property.trim().eq_ignore_ascii_case("display")
+                                        && value.trim().eq_ignore_ascii_case("none")
+                                })
+                        })
+                    })
+            })
+    }
+
+    fn subtree_contains_form(&self, node: NodeId) -> bool {
+        self.dom.tag(node) == Some("form")
+            || self
+                .dom
+                .children(node)
+                .iter()
+                .any(|child| self.subtree_contains_form(*child))
+    }
+
+    fn emit_forms_from_fallback_subtree(
+        &mut self,
+        node: NodeId,
+        parent_style: &ComputedStyle,
+        list_depth: u8,
+    ) {
+        if self.is_explicitly_hidden(node) {
+            return;
+        }
+        if self.dom.tag(node) == Some("form") {
+            let mut form_style = self.computed(node, parent_style);
+            if form_style.display == DisplayMode::None {
+                form_style.display = DisplayMode::Block;
+            }
+            self.emit_form(node, form_style);
+            return;
+        }
+        let style = self.computed(node, parent_style);
+        for child in self.dom.children(node).iter().copied() {
+            if self.subtree_contains_form(child) {
+                self.emit_forms_from_fallback_subtree(child, &style, list_depth);
+            }
+        }
+        let _ = list_depth;
+    }
+
+    fn emit_fallback_controls_in_hidden_wrapper(
+        &mut self,
+        wrapper: NodeId,
+        parent_style: &ComputedStyle,
+        form_index: usize,
+        control_nodes: &[NodeId],
+        next_control: &mut usize,
+    ) {
+        while let Some(control_node) = control_nodes.get(*next_control).copied() {
+            if control_node != wrapper && !self.dom.ancestors(control_node).contains(&wrapper) {
+                break;
+            }
+            let control_index = *next_control;
+            *next_control = next_control.saturating_add(1);
+            let explicitly_hidden = self.is_explicitly_hidden(control_node);
+            let is_hidden_input = self.document.forms[form_index]
+                .controls
+                .get(control_index)
+                .is_none_or(|control| control.kind == FormControlKind::Hidden);
+            if !explicitly_hidden && !is_hidden_input && self.document.blocks.len() < MAX_BLOCKS {
+                let mut control_style = self.computed(control_node, parent_style);
+                if control_style.display == DisplayMode::None {
+                    control_style.display =
+                        default_style_for_form_control(self.dom.tag(control_node).unwrap_or(""));
+                }
+                self.document.blocks.push(Block {
+                    kind: BlockKind::FormControl {
+                        form_index,
+                        control_index,
+                    },
+                    runs: Vec::new(),
+                    style: control_style,
+                });
+            }
+        }
+    }
+
     fn walk_flow(&mut self, parent: NodeId, parent_style: ComputedStyle, list_depth: u8) {
         let mut inline = Vec::new();
         for child in self.dom.children(parent).iter().copied() {
@@ -304,14 +414,23 @@ impl DocumentBuilder<'_> {
                 NodeKind::Comment | NodeKind::Document => {}
                 NodeKind::Element { .. } => {
                     let style = self.computed(child, &parent_style);
-                    if style.display == DisplayMode::None {
+                    let tag = self.dom.tag(child).unwrap_or("");
+                    if self.is_explicitly_hidden(child) {
                         continue;
                     }
-                    let tag = self.dom.tag(child).unwrap_or("");
+                    if style.display == DisplayMode::None {
+                        self.emit_forms_from_fallback_subtree(child, &parent_style, list_depth);
+                        continue;
+                    }
                     if (style.display == DisplayMode::Inline || is_inline_tag(tag))
                         && style.display != DisplayMode::Block
                     {
-                        self.collect_inline(child, style, None, &mut inline);
+                        if self.subtree_contains_form(child) {
+                            self.flush_paragraph(&mut inline, parent_style);
+                            self.emit_forms_from_fallback_subtree(child, &parent_style, list_depth);
+                        } else {
+                            self.collect_inline(child, style, None, &mut inline);
+                        }
                     } else {
                         self.flush_paragraph(&mut inline, parent_style);
                         self.emit_block(child, style, list_depth);
@@ -692,34 +811,46 @@ impl DocumentBuilder<'_> {
                         self.flush_paragraph(&mut inline, parent_style);
                         let control_index = *next_control;
                         *next_control = next_control.saturating_add(1);
-                        let hidden = self.document.forms[form_index]
+                        let hidden_input = self.document.forms[form_index]
                             .controls
                             .get(control_index)
                             .is_none_or(|control| control.kind == FormControlKind::Hidden);
-                        if !hidden
-                            && child_style.display != DisplayMode::None
+                        if !hidden_input
+                            && !self.is_explicitly_hidden(child)
                             && self.document.blocks.len() < MAX_BLOCKS
                         {
+                            let mut visible_style = child_style;
+                            if visible_style.display == DisplayMode::None {
+                                visible_style.display = default_style_for_form_control(
+                                    self.dom.tag(child).unwrap_or(""),
+                                );
+                            }
                             self.document.blocks.push(Block {
                                 kind: BlockKind::FormControl {
                                     form_index,
                                     control_index,
                                 },
                                 runs: Vec::new(),
-                                style: child_style,
+                                style: visible_style,
                             });
                         }
                         continue;
                     }
                     if child_style.display == DisplayMode::None {
-                        // Controls inside a CSS-hidden wrapper still appear in the
-                        // form's collected control list. Consume those nodes here
-                        // so they cannot block later visible controls from matching
-                        // the source-order cursor.
-                        while control_nodes.get(*next_control).is_some_and(|control| {
-                            *control == child || self.dom.ancestors(*control).contains(&child)
-                        }) {
-                            *next_control = next_control.saturating_add(1);
+                        if self.is_explicitly_hidden(child) {
+                            while control_nodes.get(*next_control).is_some_and(|control| {
+                                *control == child || self.dom.ancestors(*control).contains(&child)
+                            }) {
+                                *next_control = next_control.saturating_add(1);
+                            }
+                        } else {
+                            self.emit_fallback_controls_in_hidden_wrapper(
+                                child,
+                                &parent_style,
+                                form_index,
+                                control_nodes,
+                                next_control,
+                            );
                         }
                         continue;
                     }
@@ -1320,6 +1451,31 @@ mod tests {
         assert_eq!(table.rows[0].group, table.rows[1].group);
         assert_ne!(table.rows[1].group, table.rows[2].group);
         assert_eq!(table.rows[0].cells[0].rowspan, 0);
+    }
+
+    #[test]
+    fn google_style_search_form_survives_script_driven_css_hiding() {
+        let base = Url::parse("https://www.google.com/").unwrap();
+        let html = "<!doctype html><html><head><style>@media screen and (min-width: 1px){.conditional{display:none}} .search-shell{display:none}</style></head><body><div class=search-shell><form action=/search method=get><textarea name=q aria-label=Search rows=1></textarea><input type=hidden name=source value=hp><input name=btnK type=submit value='Google Search'><input name=btnI type=submit value='I&#39;m Feeling Lucky'></form></div><div hidden><form action=/hidden><input name=secret value=no></form></div></body></html>";
+        let page = parse_html(html, &base);
+
+        assert_eq!(page.forms.len(), 1);
+        assert_eq!(page.forms[0].controls.len(), 4);
+        assert_eq!(page.forms[0].controls[0].kind, FormControlKind::TextArea);
+        assert_eq!(page.forms[0].controls[1].kind, FormControlKind::Hidden);
+        assert_eq!(page.forms[0].controls[2].kind, FormControlKind::Submit);
+        assert_eq!(page.forms[0].controls[3].label, "I'm Feeling Lucky");
+
+        let lines = crate::renderer::layout_document(&page, 80);
+        let rendered = lines
+            .iter()
+            .map(crate::renderer::RenderLine::plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("+"));
+        assert!(rendered.contains("[ Google Search ]"));
+        assert!(rendered.contains("[ I'm Feeling Lucky ]"));
+        assert!(!rendered.contains("secret"));
     }
 
     #[test]

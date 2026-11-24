@@ -110,29 +110,49 @@ impl StyleSheet {
     fn parse_into(&mut self, css: &str) {
         let css = strip_comments(css);
         let mut cursor = 0usize;
+
+        // Walk complete top-level rules. A plain "find next }" is not enough:
+        // modern sites wrap rules in nested @media/@supports blocks. Parsing
+        // those braces as flat rules corrupts every selector after the block.
         while cursor < css.len() {
-            let Some(open_rel) = css[cursor..].find('{') else {
+            while cursor < css.len() && css.as_bytes()[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            if cursor >= css.len() {
+                break;
+            }
+
+            let Some((boundary, delimiter)) = find_top_level_rule_delimiter(&css, cursor) else {
                 break;
             };
-            let open = cursor + open_rel;
-            let Some(close_rel) = css[open + 1..].find('}') else {
+            if delimiter == b';' {
+                cursor = boundary + 1;
+                continue;
+            }
+
+            let selector_text = css[cursor..boundary].trim();
+            let Some(close) = matching_rule_brace(&css, boundary) else {
                 break;
             };
-            let close = open + 1 + close_rel;
-            let selector_text = css[cursor..open].trim();
-            let declarations = parse_declarations(&css[open + 1..close]);
-            if !selector_text.is_empty() && !declarations.is_empty() {
-                let selectors = selector_text
-                    .split(',')
-                    .filter_map(parse_selector)
-                    .collect::<Vec<_>>();
-                if !selectors.is_empty() {
-                    let order = self.rules.len();
-                    self.rules.push(Rule {
-                        selectors,
-                        declarations,
-                        order,
-                    });
+
+            // Media/supports/layer/font-face/keyframes need dedicated semantics.
+            // The terminal subset has no media evaluator, so ignore these blocks
+            // as a unit rather than corrupting subsequent normal page rules.
+            if !selector_text.is_empty() && !selector_text.starts_with('@') {
+                let declarations = parse_declarations(&css[boundary + 1..close]);
+                if !declarations.is_empty() {
+                    let selectors = selector_text
+                        .split(',')
+                        .filter_map(parse_selector)
+                        .collect::<Vec<_>>();
+                    if !selectors.is_empty() {
+                        let order = self.rules.len();
+                        self.rules.push(Rule {
+                            selectors,
+                            declarations,
+                            order,
+                        });
+                    }
                 }
             }
             cursor = close + 1;
@@ -422,6 +442,83 @@ fn nearest_terminal_color(r: u8, g: u8, b: u8) -> TermColor {
         }
     }
     best.1
+}
+
+fn find_top_level_rule_delimiter(css: &str, start: usize) -> Option<(usize, u8)> {
+    let bytes = css.as_bytes();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut parentheses = 0usize;
+    let mut brackets = 0usize;
+
+    for index in start..bytes.len() {
+        let byte = bytes[index];
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quote.is_some() && byte == b'\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => quote = Some(byte),
+            b'(' => parentheses = parentheses.saturating_add(1),
+            b')' => parentheses = parentheses.saturating_sub(1),
+            b'[' => brackets = brackets.saturating_add(1),
+            b']' => brackets = brackets.saturating_sub(1),
+            b'{' if parentheses == 0 && brackets == 0 => return Some((index, byte)),
+            b';' if parentheses == 0 && brackets == 0 => return Some((index, byte)),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn matching_rule_brace(css: &str, open: usize) -> Option<usize> {
+    let bytes = css.as_bytes();
+    if bytes.get(open) != Some(&b'{') {
+        return None;
+    }
+    let mut depth = 1usize;
+    let mut quote = None;
+    let mut escaped = false;
+
+    for index in open + 1..bytes.len() {
+        let byte = bytes[index];
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quote.is_some() && byte == b'\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => quote = Some(byte),
+            b'{' => depth = depth.saturating_add(1),
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn parse_declarations(input: &str) -> Vec<Declaration> {
@@ -735,6 +832,16 @@ mod tests {
         assert_eq!(parse_color("#éa"), None);
         assert_eq!(parse_color("#zzzzzz"), None);
         assert_eq!(parse_color("#abc"), Some(TermColor::LightGray));
+    }
+
+    #[test]
+    fn nested_media_blocks_do_not_corrupt_following_rules() {
+        let dom = build_tree(
+            "<style>@media screen and (min-width: 1px){.conditional{display:none}} .after-media{display:block}</style><div class=after-media>visible</div>",
+        );
+        let div = dom.find_by_tag(dom.root, "div")[0];
+        let style = StyleSheet::from_dom(&dom).compute(&dom, div, &ComputedStyle::default());
+        assert_eq!(style.display, DisplayMode::Block);
     }
 
     #[test]
